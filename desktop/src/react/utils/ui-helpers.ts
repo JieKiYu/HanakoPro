@@ -6,9 +6,7 @@
 
 import { useStore } from '../stores';
 import { hanaFetch } from '../hooks/use-hana-fetch';
-// @ts-expect-error — shared JS module
 import { errorBus } from '../../../../shared/error-bus.js';
-// @ts-expect-error — shared JS module
 import { AppError } from '../../../../shared/errors.js';
 
 // ── 连接状态 ──
@@ -61,4 +59,3 @@ export async function loadModels(): Promise<void> {
     useStore.setState({ modelsLoadState: 'error' });
   }
 }
-

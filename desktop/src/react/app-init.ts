@@ -23,9 +23,7 @@ import { configureAppEventActions, handleAppEvent, readConfigCwdHistory, readCon
 import { configureWsMessageHandler } from './services/ws-message-handler';
 import { applyEditorTypography } from './editor/typography';
 import { createLocalServerConnection, hasServerConnection, mergeServerIdentity } from './services/server-connection';
-// @ts-expect-error — shared JS module
 import { errorBus as _errorBus } from '../../../shared/error-bus.js';
-// @ts-expect-error — shared JS module
 import { AppError as _AppError } from '../../../shared/errors.js';
 
 declare const i18n: {

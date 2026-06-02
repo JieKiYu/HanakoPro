@@ -15,9 +15,7 @@ import {
   createLocalServerConnection,
   resolveServerConnection,
 } from './server-connection';
-// @ts-expect-error -- shared JS module, no type declarations
 import { AppError } from '../../../../shared/errors.js';
-// @ts-expect-error -- shared JS module, no type declarations
 import { errorBus } from '../../../../shared/error-bus.js';
 
 // ── 模块级 WS 实例 ──

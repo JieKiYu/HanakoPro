@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import type { Session } from '../../types';
-import { buildSessionSections } from '../../components/session-sections';
+import { buildSessionSections, type SessionSection } from '../../components/session-sections';
+
+type ListSection = Extract<SessionSection, { kind: 'pinned' | 'date' }>;
+
+function expectListSection(section: SessionSection | undefined, kind: ListSection['kind']): ListSection {
+  expect(section?.kind).toBe(kind);
+  if (!section || (section.kind !== 'pinned' && section.kind !== 'date')) {
+    throw new Error(`Expected ${kind} session section`);
+  }
+  return section;
+}
 
 function makeSession(overrides: Partial<Session>): Session {
   return {
@@ -46,7 +56,7 @@ describe('buildSessionSections', () => {
       kind: 'pinned',
       titleKey: 'sidebar.pinned',
     });
-    expect(sections[0].items.map(item => item.path)).toEqual([
+    expect(expectListSection(sections[0], 'pinned').items.map(item => item.path)).toEqual([
       '/sessions/new-pin.jsonl',
       '/sessions/old-pin.jsonl',
     ]);
@@ -54,7 +64,7 @@ describe('buildSessionSections', () => {
       kind: 'date',
       titleKey: 'time.today',
     });
-    expect(sections[1].items.map(item => item.path)).toEqual(['/sessions/today.jsonl']);
+    expect(expectListSection(sections[1], 'date').items.map(item => item.path)).toEqual(['/sessions/today.jsonl']);
   });
 
   it('keeps the pinned section visible when no sessions are pinned and rolls yesterday into this week', () => {
@@ -104,7 +114,7 @@ describe('buildSessionSections', () => {
 
     const todaySection = sections.find(s => s.kind === 'date' && s.group === 'today');
     expect(todaySection).toBeDefined();
-    expect(todaySection!.items.map(i => i.path)).toEqual([
+    expect(expectListSection(todaySection, 'date').items.map(i => i.path)).toEqual([
       '/sessions/newer.jsonl',
       '/sessions/middle.jsonl',
       '/sessions/older.jsonl',
@@ -132,10 +142,10 @@ describe('buildSessionSections', () => {
 
     const todaySection = sections.find(s => s.kind === 'date' && s.group === 'today');
     const earlierSection = sections.find(s => s.kind === 'date' && s.group === 'earlier');
-    expect(todaySection!.items.map(i => i.path)).toEqual([
+    expect(expectListSection(todaySection, 'date').items.map(i => i.path)).toEqual([
       '/sessions/a-same-time.jsonl',
       '/sessions/z-same-time.jsonl',
     ]);
-    expect(earlierSection!.items.map(i => i.path)).toEqual(['/sessions/bad-date.jsonl']);
+    expect(expectListSection(earlierSection, 'date').items.map(i => i.path)).toEqual(['/sessions/bad-date.jsonl']);
   });
 });

@@ -206,6 +206,7 @@ function SessionListInner() {
         messageCount: r.messageCount || 0,
         agentId: r.agentId || null,
         agentName: r.agentName || null,
+        cwd: null,
         pinnedAt: r.pinnedAt || null,
         _matchType: r.matchType,
         _snippet: r.snippet,

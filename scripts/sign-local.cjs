@@ -11,14 +11,21 @@ const { execSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
-const APP = "/Applications/HanakoPro.app";
+const APP = path.resolve(process.argv[2] || process.env.HANAKOPRO_APP_PATH || "/Applications/HanakoPro.app");
 const ENT = path.join(__dirname, "..", "desktop", "entitlements.mac.plist");
+
+if (!fs.existsSync(APP)) {
+  console.error(`App bundle not found: ${APP}`);
+  process.exit(1);
+}
 
 function sign(target, opts = "") {
   execSync(`codesign --sign - --force ${opts} "${target}"`, { stdio: "inherit" });
 }
 
 // 1. 签 server 里的所有 Mach-O 文件（node binary + .node addons）
+console.log(`Signing ${APP}`);
+
 const serverDir = path.join(APP, "Contents", "Resources", "server");
 if (fs.existsSync(serverDir)) {
   // node binary
@@ -36,7 +43,8 @@ if (fs.existsSync(serverDir)) {
       }
     }
   }
-  findNodeFiles(path.join(serverDir, "node_modules"));
+  const serverNodeModules = path.join(serverDir, "node_modules");
+  if (fs.existsSync(serverNodeModules)) findNodeFiles(serverNodeModules);
 }
 
 // 2. 签 Computer Use helper

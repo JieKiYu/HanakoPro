@@ -15,7 +15,7 @@ import { spawn, spawnSync } from "child_process";
 import { createInterface } from "node:readline";
 import path from "path";
 import { existsSync, statSync, readdirSync } from "fs";
-import { getAgentDir } from "@mariozechner/pi-coding-agent";
+import { getAgentDir } from "../lib/pi-sdk/index.js";
 
 /**
  * 获取 fd 命令行路径
