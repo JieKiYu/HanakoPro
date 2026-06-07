@@ -19,12 +19,19 @@
     -webkit-app-region: no-drag;
 }
 
+.appMac .tabbar {
+    padding-left: 78px;
+    box-sizing: border-box;
+    -webkit-app-region: drag;
+}
+
 .tabs {
     display: flex;
     flex: 1;
     min-width: 0;
     overflow-x: auto;
     overflow-y: hidden;
+    -webkit-app-region: no-drag;
 }
 
 .tabs::-webkit-scrollbar { height: 2px; }
@@ -97,6 +104,12 @@
     flex-shrink: 0;
     border-left: 1px solid #1f1f1f;
     background: #2d2d2d;
+}
+
+.windowControlsMac {
+    border-left: none;
+    background: transparent;
+    padding: 0 12px 0 8px;
 }
 
 .iconBtn {

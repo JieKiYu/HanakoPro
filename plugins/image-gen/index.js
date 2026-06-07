@@ -7,6 +7,7 @@ import { Poller } from "./lib/poller.js";
 import { volcengineImageAdapter } from "./adapters/volcengine.js";
 import { openaiImageAdapter } from "./adapters/openai.js";
 import { openaiCodexImageAdapter } from "./adapters/openai-codex.js";
+import { openaiCompatibleImageAdapter } from "./adapters/openai-compatible.js";
 
 export default class ImageGenPlugin {
   async onload() {
@@ -32,6 +33,7 @@ export default class ImageGenPlugin {
     registry.register({ ...volcengineImageAdapter, id: "volcengine-coding" });
     registry.register(openaiImageAdapter);
     registry.register(openaiCodexImageAdapter);
+    registry.register(openaiCompatibleImageAdapter);
 
     // Attach to ctx for tools
     this.ctx._mediaGen = { registry, store, poller, generatedDir };

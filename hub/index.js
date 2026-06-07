@@ -26,8 +26,40 @@ import {
   loadSessionHistoryMessages,
   isValidSessionPath,
 } from "../core/message-utils.js";
+import { inferKnownModelType } from "../shared/known-models.js";
 import { submitDesktopSessionMessage } from "../core/desktop-session-submit.js";
 import { extOfName, inferFileKind } from "../lib/file-metadata.js";
+
+function modelIdOf(model) {
+  if (model && typeof model === "object") return typeof model.id === "string" ? model.id : "";
+  return typeof model === "string" ? model : "";
+}
+
+function modelLabelOf(model, id) {
+  if (model && typeof model === "object") {
+    return model.displayName || model.display_name || model.name || id;
+  }
+  return id;
+}
+
+function buildAvailableImageModels(engine, providerId, existingModelIds) {
+  const discoveredModels = engine.getCachedModelsForProvider?.(providerId) || [];
+  const availableModels = [];
+  const seen = new Set(existingModelIds);
+  for (const model of discoveredModels) {
+    const id = modelIdOf(model).trim();
+    if (!id || seen.has(id)) continue;
+    if (inferKnownModelType(providerId, model) !== "image") continue;
+    seen.add(id);
+    const label = modelLabelOf(model, id);
+    availableModels.push({
+      id,
+      name: label,
+      displayName: label,
+    });
+  }
+  return availableModels;
+}
 
 export class Hub {
   /**
@@ -357,12 +389,13 @@ export class Hub {
             messages.push({ role: "user", content: text, images: images.length ? images : undefined });
           }
         } else if (m.role === "assistant") {
-          const { text, thinking, toolUses } = extractTextContent(m.content, { stripThink: true });
+          const { text, thinking, hasThinking, toolUses } = extractTextContent(m.content, { stripThink: true });
           if (text || toolUses.length) {
             messages.push({
               role: "assistant",
               content: text,
               thinking: thinking || undefined,
+              hasThinking: hasThinking || undefined,
               toolCalls: toolUses.length ? toolUses : undefined,
             });
           }
@@ -424,8 +457,12 @@ export class Hub {
 
     this._sessionHandlerCleanups.push(bus.handle("provider:media-providers", async ({ capability = "image_generation" } = {}) => {
       const providers = {};
+      const seenProviderIds = new Set();
       for (const provider of engine.providerRegistry.getMediaProviders(capability)) {
+        seenProviderIds.add(provider.providerId);
         const credentialStatus = engine.providerRegistry.getMediaProviderCredentialStatus(provider.providerId, capability);
+        const existingModelIds = new Set(provider.models.map((model) => model.id));
+        const availableModels = buildAvailableImageModels(engine, provider.providerId, existingModelIds);
         providers[provider.providerId] = {
           ...provider,
           hasCredentials: credentialStatus.hasCredentials,
@@ -440,7 +477,30 @@ export class Hub {
             protocolId: model.protocolId,
             credentialLaneId: model.credentialLaneId,
           })),
-          availableModels: [],
+          availableModels,
+        };
+      }
+      const allProviders = typeof engine.providerRegistry.getAll === "function"
+        ? engine.providerRegistry.getAll()
+        : new Map();
+      for (const [providerId, entry] of allProviders) {
+        if (seenProviderIds.has(providerId)) continue;
+        const availableModels = buildAvailableImageModels(engine, providerId, new Set());
+        if (availableModels.length === 0) continue;
+        const credentialStatus = engine.providerRegistry.getMediaProviderCredentialStatus(providerId, capability);
+        providers[providerId] = {
+          providerId,
+          displayName: entry.displayName || providerId,
+          authType: entry.authType,
+          source: entry.source,
+          runtime: entry.runtime || null,
+          hasCredentials: credentialStatus.hasCredentials,
+          unavailableReason: credentialStatus.unavailableReason,
+          credentialLanes: credentialStatus.lanes,
+          activeCredentialLaneId: credentialStatus.activeLaneId || null,
+          activeCredentialProviderId: credentialStatus.activeProviderId || null,
+          models: [],
+          availableModels,
         };
       }
       return { providers };

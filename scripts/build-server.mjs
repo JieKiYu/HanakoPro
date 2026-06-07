@@ -50,6 +50,13 @@ import {
   verifyExternalEntrypoints,
 } from "./build-server-deps.mjs";
 import { copyServerRuntimeAssets } from "./build-server-runtime-assets.mjs";
+import { createRequire } from "module";
+
+const require = createRequire(import.meta.url);
+const {
+  ensureNodePtySpawnHelperExecutable,
+  firstExistingNodePtySpawnHelper,
+} = require("./node-pty-spawn-helper.cjs");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -319,6 +326,16 @@ try {
 } catch (err) {
   console.error(err instanceof Error ? err.message : String(err));
   process.exit(1);
+}
+
+if (platform === "darwin") {
+  const nodePtyDir = path.join(outDir, "node_modules", "node-pty");
+  const helper = ensureNodePtySpawnHelperExecutable(nodePtyDir, { platform, arch });
+  if (!helper || !firstExistingNodePtySpawnHelper(nodePtyDir, { platform, arch })) {
+    console.error(`[build-server] ❌ node-pty spawn-helper is missing for ${platform}-${arch}`);
+    process.exit(1);
+  }
+  console.log(`[build-server] node-pty spawn-helper executable: ${path.relative(outDir, helper)}`);
 }
 
 // ── 6. PI SDK verification ──

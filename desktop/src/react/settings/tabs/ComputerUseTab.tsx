@@ -30,7 +30,21 @@ interface ComputerUseStatusResponse {
   } | null;
   settings?: {
     enabled?: boolean;
+    require_app_approval?: boolean;
     app_approvals?: Array<{ providerId: string; appId: string; appName?: string }>;
+  };
+}
+
+interface ComputerUseRequestPermissionsResponse {
+  result?: {
+    permissions?: Array<{ name?: string; granted?: boolean }>;
+  };
+  nextMissingPermission?: string | null;
+  systemSettings?: {
+    opened?: boolean;
+    url?: string;
+    kind?: string;
+    reason?: string;
   };
 }
 
@@ -79,6 +93,7 @@ export function ComputerUseTab() {
   }, [data]);
 
   const enabled = data?.settings?.enabled === true;
+  const requireAppApproval = data?.settings?.require_app_approval === true;
   const available = selectedProvider?.status?.available === true;
   const availabilityIssue = selectedProvider?.status?.reason || selectedProvider?.status?.error || '';
   const permissions = selectedProvider?.status?.permissions || [];
@@ -116,14 +131,42 @@ export function ComputerUseTab() {
     }
   };
 
+  const saveRequireAppApproval = async (next: boolean) => {
+    setSaving(true);
+    try {
+      const res = await hanaFetch('/api/preferences/computer-use', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings: { require_app_approval: next } }),
+      });
+      const body = await res.json();
+      setData((prev) => ({
+        ...(prev || {}),
+        settings: {
+          ...(prev?.settings || {}),
+          ...(body.settings || {}),
+        },
+      }));
+      await load();
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const requestPermissions = async () => {
     setRequesting(true);
     try {
-      await hanaFetch('/api/preferences/computer-use/request-permissions', {
+      const res = await hanaFetch('/api/preferences/computer-use/request-permissions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ providerId: data?.selectedProviderId || undefined }),
       });
+      const body = await res.json() as ComputerUseRequestPermissionsResponse;
+      if (body.nextMissingPermission) {
+        showToast(t('settings.computerUse.requestPermissionsOpened'), 'success');
+      } else {
+        showToast(t('settings.computerUse.requestPermissionsDone'), 'success');
+      }
       await load();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -168,6 +211,11 @@ export function ComputerUseTab() {
           label={t('settings.computerUse.enabled')}
           hint={t('settings.computerUse.enabledHint')}
           control={<Toggle on={enabled} onChange={(next) => saveEnabled(next)} disabled={saving || loading} />}
+        />
+        <SettingsRow
+          label={t('settings.computerUse.requireAppApproval')}
+          hint={t('settings.computerUse.requireAppApprovalHint')}
+          control={<Toggle on={requireAppApproval} onChange={(next) => saveRequireAppApproval(next)} disabled={saving || loading} />}
         />
         <SettingsRow
           label={t('settings.computerUse.provider')}

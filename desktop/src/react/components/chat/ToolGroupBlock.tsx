@@ -236,6 +236,8 @@ export const ToolGroupBlock = memo(function ToolGroupBlock({ tools: rawTools, co
     });
   }
   const memoryMutationTools = tools.filter(isMemoryMutationTool);
+  const liveFileTools = tools.filter(shouldShowLiveFileCard);
+  const hasCodeLikeCard = diffCards.length > 0 || terminalSessions.length > 0 || liveFileTools.length > 0;
 
   // 摘要标题
   const _t = window.t ?? ((p: string) => p);
@@ -251,8 +253,15 @@ export const ToolGroupBlock = memo(function ToolGroupBlock({ tools: rawTools, co
     summaryText = _t('toolGroup.running', { n: running });
   }
 
+  const groupClassName = [
+    styles.toolGroup,
+    isSingle ? styles.toolGroupSingle : '',
+    hasCodeLikeCard ? styles.toolGroupWithCode : '',
+    diffCards.length > 0 ? styles.toolGroupWithDiff : '',
+  ].filter(Boolean).join(' ');
+
   return (
-    <div className={`${styles.toolGroup}${isSingle ? ` ${styles.toolGroupSingle}` : ''}`}>
+    <div className={groupClassName}>
       {!isSingle && (
         <div
           className={`${styles.toolGroupSummary}${allDone ? ` ${styles.toolGroupSummaryClickable}` : ''}`}
@@ -272,7 +281,7 @@ export const ToolGroupBlock = memo(function ToolGroupBlock({ tools: rawTools, co
         {memoryMutationTools.map((tool, i) => (
           <MemoryUpdateNotice key={`memory-update-${tool.name}-${i}`} tool={tool} />
         ))}
-        {tools.filter(shouldShowLiveFileCard).map((tool, i) => (
+        {liveFileTools.map((tool, i) => (
           <FileWriteLiveCard key={`live-file-${tool.name}-${i}`} tool={tool} />
         ))}
         {/* 本组里出现过的每个终端会话都挂一个实时预览卡片 ——
@@ -467,8 +476,8 @@ function MemoryUpdateNotice({ tool }: { tool: ToolCall }) {
   );
 }
 
-/** 安全地将 args/details 序列化为短预览 */
-function summarizeObj(obj: Record<string, unknown> | undefined, maxLen = 800): string {
+/** 安全地将 args/details 序列化为可滚动预览 */
+function summarizeObj(obj: Record<string, unknown> | undefined): string {
   if (!obj || Object.keys(obj).length === 0) return '';
   // 过滤掉 oldContent/newContent（太大且已有 diff 卡片展示）
   const filtered: Record<string, unknown> = {};
@@ -478,9 +487,7 @@ function summarizeObj(obj: Record<string, unknown> | undefined, maxLen = 800): s
   }
   if (Object.keys(filtered).length === 0) return '';
   try {
-    let s = JSON.stringify(filtered, null, 2);
-    if (s.length > maxLen) s = s.slice(0, maxLen) + '\n…';
-    return s;
+    return JSON.stringify(filtered, null, 2);
   } catch {
     return '';
   }

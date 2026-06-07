@@ -4,7 +4,7 @@
 
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -56,6 +56,7 @@ describe('ProviderModelList', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     cleanup();
     document.body.innerHTML = '';
   });
@@ -150,5 +151,213 @@ describe('ProviderModelList', () => {
     expect(id.nextElementSibling).toHaveAttribute('title', 'settings.api.capability.image');
     expect(id.nextElementSibling?.nextElementSibling).toHaveAttribute('title', 'settings.api.capability.video');
     expect(id.nextElementSibling?.nextElementSibling?.nextElementSibling).toHaveAttribute('title', 'settings.api.capability.reasoning');
+  });
+
+  it('persists discovered relay model context when adding a model', async () => {
+    const onRefresh = vi.fn(async () => {});
+    mocks.hanaFetch.mockImplementation(async (url: unknown, opts?: unknown) => {
+      if (String(url).includes('/discovered-models')) {
+        return jsonResponse({
+          models: [
+            { id: 'gpt-5.5', name: 'GPT-5.5 Relay', context: 262144, maxOutput: 128000 },
+          ],
+        });
+      }
+      return jsonResponse({ ok: true });
+    });
+
+    render(
+      <ProviderModelList
+        providerId="k+"
+        summary={{
+          type: 'api-key',
+          auth_type: 'api-key',
+          display_name: 'K+ Relay',
+          base_url: 'https://api.ticketpro.cc/v1',
+          api: 'openai-responses',
+          api_key: 'sk-test',
+          models: [],
+          custom_models: [],
+          has_credentials: true,
+          supports_oauth: false,
+          is_coding_plan: false,
+          can_delete: true,
+        }}
+        onRefresh={onRefresh}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'settings.api.addModel' }));
+    const option = await screen.findByText('gpt-5.5');
+    fireEvent.click(option.closest('button') as HTMLButtonElement);
+
+    await waitFor(() => expect(onRefresh).toHaveBeenCalled());
+    const saveCall = mocks.hanaFetch.mock.calls.find(([url]) => url === '/api/config');
+    expect(saveCall).toBeTruthy();
+    const body = JSON.parse((saveCall?.[1] as RequestInit).body as string);
+    expect(body.providers['k+'].models).toEqual([
+      {
+        id: 'gpt-5.5',
+        name: 'GPT-5.5 Relay',
+        context: 262144,
+        maxOutput: 128000,
+      },
+    ]);
+  });
+
+  it('uses credential draft when fetching models and shows provider error details', async () => {
+    mocks.hanaFetch.mockImplementation(async (url: unknown) => {
+      if (String(url).includes('/discovered-models')) return jsonResponse({ models: [] });
+      return jsonResponse({
+        error: '账户余额不足，创建属于自己的工具，更多请访问 302.AI (code: -10004)',
+        models: [],
+      });
+    });
+
+    render(
+      <ProviderModelList
+        providerId="302.ai"
+        summary={{
+          type: 'api-key',
+          auth_type: 'api-key',
+          display_name: '302.ai',
+          base_url: 'https://api.openai.com',
+          api: 'openai-completions',
+          api_key: 'saved-key',
+          models: [],
+          custom_models: [],
+          has_credentials: true,
+          supports_oauth: false,
+          is_coding_plan: false,
+          can_delete: true,
+        }}
+        credentialDraft={{
+          base_url: 'https://api.302.ai/v1',
+          api: 'openai-responses',
+          api_key: 'draft-key',
+        }}
+        onRefresh={vi.fn(async () => {})}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'settings.providers.fetchModels' }));
+
+    await waitFor(() => {
+      const call = mocks.hanaFetch.mock.calls.find(([url]) => url === '/api/providers/fetch-models');
+      expect(call).toBeTruthy();
+      const body = JSON.parse(String((call?.[1] as RequestInit).body));
+      expect(body).toMatchObject({
+        name: '302.ai',
+        base_url: 'https://api.302.ai/v1',
+        api: 'openai-responses',
+        api_key: 'draft-key',
+      });
+    });
+    expect(await screen.findByText(/账户余额不足/)).toBeInTheDocument();
+  });
+
+  it('keeps the fetch button label stable, shows progress below it and keeps provider errors visible', async () => {
+    vi.useFakeTimers();
+    let resolveFetch: (value: Response) => void = () => {};
+    const pendingFetch = new Promise<Response>((resolve) => { resolveFetch = resolve; });
+    mocks.hanaFetch.mockImplementation(async (url: unknown) => {
+      if (String(url).includes('/discovered-models')) return jsonResponse({ models: [] });
+      return pendingFetch;
+    });
+
+    render(
+      <ProviderModelList
+        providerId="302.ai"
+        summary={{
+          type: 'api-key',
+          auth_type: 'api-key',
+          display_name: '302.ai',
+          base_url: 'https://api.302.ai/v1',
+          api: 'openai-completions',
+          api_key: 'sk-test',
+          models: [],
+          custom_models: [],
+          has_credentials: true,
+          supports_oauth: false,
+          is_coding_plan: false,
+          can_delete: true,
+        }}
+        onRefresh={vi.fn(async () => {})}
+      />,
+    );
+
+    const button = screen.getByRole('button', { name: 'settings.providers.fetchModels' });
+    fireEvent.click(button);
+
+    const busyButton = screen.getByRole('button', { name: 'settings.providers.fetchModels' });
+    expect(busyButton).toBeDisabled();
+    expect(busyButton).toHaveAttribute('aria-busy', 'true');
+    expect(busyButton.className).toContain('_spinning_');
+    expect(screen.getAllByText('settings.providers.fetchingModels')).toHaveLength(1);
+    expect(screen.getByText('settings.providers.fetchingModels').className).toContain('_ok_');
+    expect(screen.queryByText(/^settings\.providers\.fetchFailed/)).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveFetch(jsonResponse({
+        error: '账户余额不足，创建属于自己的工具，更多请访问 302.AI (code: -10004)',
+        models: [],
+      }));
+      await pendingFetch;
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText(/账户余额不足/)).toBeInTheDocument();
+    expect(screen.getByText(/账户余额不足/).className).toContain('_fail_');
+    expect(getComputedStyle(screen.getByText(/账户余额不足/)).animationName).not.toContain('hana-hint-fade');
+    expect(screen.queryByText('settings.providers.fetchingModels')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'settings.providers.fetchModels' })).not.toBeDisabled();
+    act(() => vi.advanceTimersByTime(10000));
+    expect(screen.getByText(/账户余额不足/)).toBeInTheDocument();
+  });
+
+  it('keeps a successful fetch result visible until the next fetch starts', async () => {
+    vi.useFakeTimers();
+    let resolveFetch: (value: Response) => void = () => {};
+    const pendingFetch = new Promise<Response>((resolve) => { resolveFetch = resolve; });
+    mocks.hanaFetch.mockImplementation(async (url: unknown) => {
+      if (String(url).includes('/discovered-models')) return jsonResponse({ models: [] });
+      return pendingFetch;
+    });
+
+    render(
+      <ProviderModelList
+        providerId="302.ai"
+        summary={{
+          type: 'api-key',
+          auth_type: 'api-key',
+          display_name: '302.ai',
+          base_url: 'https://api.302.ai/v1',
+          api: 'openai-completions',
+          api_key: 'sk-test',
+          models: [],
+          custom_models: [],
+          has_credentials: true,
+          supports_oauth: false,
+          is_coding_plan: false,
+          can_delete: true,
+        }}
+        onRefresh={vi.fn(async () => {})}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'settings.providers.fetchModels' }));
+    expect(screen.getByText('settings.providers.fetchingModels')).toBeInTheDocument();
+
+    await act(async () => {
+      resolveFetch(jsonResponse({ models: [{ id: 'gpt-test' }, { id: 'claude-test' }] }));
+      await pendingFetch;
+      await Promise.resolve();
+    });
+
+    const success = screen.getByText('settings.providers.fetchSuccess');
+    expect(success).toBeInTheDocument();
+    expect(success.className).toContain('_ok_');
+    act(() => vi.advanceTimersByTime(10000));
+    expect(screen.getByText('settings.providers.fetchSuccess')).toBeInTheDocument();
   });
 });

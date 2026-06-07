@@ -11,7 +11,7 @@ import path from "path";
 import { createAgentSession, SessionManager, estimateTokens, findCutPoint, formatSkillsForPrompt, generateSummary, refreshSessionModelFromRegistry } from "../lib/pi-sdk/index.js";
 import { createDefaultSettings } from "./session-defaults.js";
 import { computeHardTruncation } from "./compaction-utils.js";
-import { cloneMessageForForkRetention, resolveContextConfig, shouldTriggerCompression, splitMessages, executeCompression } from "./context-compressor.js";
+import { buildExtractiveCompressionSummary, cloneMessageForForkRetention, resolveContextConfig, shouldTriggerCompression, splitMessages, executeCompression } from "./context-compressor.js";
 import { callText } from "./llm-client.js";
 import { teardownSessionResources } from "./session-teardown.js";
 import { evaluateSessionHealth } from "./session-health.js";
@@ -36,8 +36,12 @@ import { isActiveSessionPath } from "./message-utils.js";
 import { formatWorkspaceScopePrompt, normalizeWorkspaceScope } from "../shared/workspace-scope.js";
 import { getProviderPromptPatches } from "./provider-prompt-patches.js";
 import { prepareVisionInputForTextOnlyModel } from "./vision-prepare.js";
+import { computeContextUsageSnapshot } from "./context-usage-estimator.js";
 import { adaptVisualContextMessages } from "./visual-context-pipeline.js";
+import { buildMemoryRecallContext, injectMemoryRecallMessages } from "../lib/memory/recall.js";
+import { normalizeProviderContextMessages } from "./provider-compat.js";
 import { modelSupportsDirectVideoInput, modelSupportsVideoInput } from "../shared/model-capabilities.js";
+import { MANUAL_CONTEXT_COMPRESSION_THRESHOLD } from "../shared/context-compression.js";
 import {
   normalizeSessionThinkingLevel,
   normalizeThinkingLevelForModel,
@@ -52,7 +56,109 @@ const log = createModuleLogger("session");
 /** 巡检/定时任务默认工具白名单（"*" = 与 chat 一致，全部放行） */
 export const PATROL_TOOLS_DEFAULT = "*";
 
-function resolveCompressionModel(models, contextConfig, sessionModel) {
+const SESSION_GOAL_STATUSES = new Set(["active", "complete", "blocked"]);
+const SESSION_GOAL_MAX_CHARS = 2000;
+
+function isoOr(value, fallback) {
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+export function normalizeSessionGoal(value) {
+  if (!value) return null;
+  const raw = typeof value === "string" ? { objective: value } : value;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const objective = typeof raw.objective === "string"
+    ? raw.objective.trim().slice(0, SESSION_GOAL_MAX_CHARS)
+    : "";
+  if (!objective) return null;
+  const now = new Date().toISOString();
+  const status = SESSION_GOAL_STATUSES.has(raw.status) ? raw.status : "active";
+  const createdAt = isoOr(raw.createdAt, isoOr(raw.updatedAt, now));
+  const updatedAt = isoOr(raw.updatedAt, createdAt);
+  const goal = {
+    objective,
+    status,
+    createdAt,
+    updatedAt,
+  };
+  if (status === "complete") goal.completedAt = isoOr(raw.completedAt, updatedAt);
+  if (status === "blocked") goal.blockedAt = isoOr(raw.blockedAt, updatedAt);
+  if (typeof raw.note === "string" && raw.note.trim()) {
+    goal.note = raw.note.trim().slice(0, 1000);
+  }
+  return goal;
+}
+
+export function makeSessionGoal(objective, { previousGoal = null, status = "active", note = null } = {}) {
+  const text = typeof objective === "string" ? objective.trim().slice(0, SESSION_GOAL_MAX_CHARS) : "";
+  if (!text) return null;
+  const now = new Date().toISOString();
+  const normalizedPrevious = normalizeSessionGoal(previousGoal);
+  const goal = {
+    objective: text,
+    status: SESSION_GOAL_STATUSES.has(status) ? status : "active",
+    createdAt: normalizedPrevious?.createdAt || now,
+    updatedAt: now,
+  };
+  if (goal.status === "complete") goal.completedAt = now;
+  if (goal.status === "blocked") goal.blockedAt = now;
+  if (typeof note === "string" && note.trim()) goal.note = note.trim().slice(0, 1000);
+  return goal;
+}
+
+export function buildSessionGoalText(goal, { locale = getLocale() } = {}) {
+  const normalized = normalizeSessionGoal(goal);
+  if (!normalized || normalized.status !== "active") return "";
+  const isZh = String(locale || "").startsWith("zh");
+  if (isZh) {
+    return [
+      "## 当前会话目标",
+      "",
+      `目标：${normalized.objective}`,
+      "",
+      "这是当前对话的主线任务。回答和行动要持续围绕它推进；路径清楚就直接做，路径分叉就先问清楚。只有完成并验证后，才把目标视为完成。",
+    ].join("\n").trim();
+  }
+  return [
+    "## Current Session Goal",
+    "",
+    `Goal: ${normalized.objective}`,
+    "",
+    "This is the main task for the current conversation. Keep replies and actions oriented around it; act when the path is clear, ask when the path forks, and only treat the goal as complete after it has been completed and verified.",
+  ].join("\n").trim();
+}
+
+function findLastUserMessageIndex(messages) {
+  if (!Array.isArray(messages)) return -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === "user") return i;
+  }
+  return -1;
+}
+
+export function injectSessionGoalMessages(messages, goal, options = {}) {
+  const goalText = buildSessionGoalText(goal, options);
+  if (!goalText || !Array.isArray(messages)) return { messages, injected: 0 };
+  const goalMessage = {
+    role: "custom",
+    customType: "hana-session-goal-context",
+    content: goalText,
+    display: false,
+    timestamp: Date.now(),
+  };
+  const lastUserIndex = findLastUserMessageIndex(messages);
+  if (lastUserIndex < 0) return { messages: [goalMessage, ...messages], injected: 1 };
+  return {
+    messages: [
+      ...messages.slice(0, lastUserIndex),
+      goalMessage,
+      ...messages.slice(lastUserIndex),
+    ],
+    injected: 1,
+  };
+}
+
+export function resolveCompressionModel(models, contextConfig, sessionModel) {
   if (contextConfig.compressionModel === "chat") return sessionModel;
   if (contextConfig.compressionModel === "custom" && contextConfig.compressionCustomModel) {
     try {
@@ -103,20 +209,19 @@ function zeroUsage() {
   };
 }
 
-function repairAssistantMessageMetadata(message, session) {
+function repairAssistantMessageMetadata(message, model) {
   if (!message || message.role !== "assistant") return false;
-  const model = session?.model || {};
   let changed = false;
-  if (!message.api) {
-    message.api = model.api || model.apiId || model.provider || "unknown";
+  if (!message.api && (model?.api || model?.apiId || model?.provider)) {
+    message.api = model.api || model.apiId || model.provider;
     changed = true;
   }
-  if (!message.provider) {
-    message.provider = model.provider || "unknown";
+  if (!message.provider && model?.provider) {
+    message.provider = model.provider;
     changed = true;
   }
-  if (!message.model) {
-    message.model = model.id || model.modelId || model.name || "unknown";
+  if (!message.model && (model?.id || model?.modelId || model?.name)) {
+    message.model = model.id || model.modelId || model.name;
     changed = true;
   }
   const baseUsage = zeroUsage();
@@ -147,29 +252,300 @@ function repairAssistantMessageMetadata(message, session) {
   return changed || usage !== message.usage;
 }
 
-function repairAssistantMetadataForPrompt(session) {
+function repairAssistantMetadataForPrompt(session, { resolveModel } = {}) {
   const seen = new Set();
-  const repair = (message) => {
+  const repair = (message, model = null) => {
     if (!message || seen.has(message)) return;
     seen.add(message);
-    repairAssistantMessageMetadata(message, session);
+    repairAssistantMessageMetadata(message, model);
   };
-  for (const entry of Array.isArray(session?.entries) ? session.entries : []) {
-    repair(entry?.message);
-  }
-  for (const message of Array.isArray(session?.messages) ? session.messages : []) {
-    repair(message);
-  }
+
+  const resolveRef = (provider, modelId) => {
+    if (!provider || !modelId) return null;
+    try {
+      const resolved = resolveModel?.({ provider, id: modelId });
+      if (resolved) return resolved;
+    } catch {
+      // Metadata repair is best-effort; deleted legacy models must not block a prompt.
+    }
+    return { provider, id: modelId };
+  };
+
+  const repairEntriesInOrder = (entries) => {
+    let currentModel = null;
+    const orderedEntries = Array.isArray(entries) ? entries : [];
+    const hasModelTimeline = orderedEntries.some(entry => entry?.type === "model_change");
+    const fallbackModel = hasModelTimeline ? null : session?.model;
+    for (const entry of orderedEntries) {
+      if (entry?.type === "model_change") {
+        currentModel = resolveRef(entry.provider, entry.modelId);
+        continue;
+      }
+      const message = entry?.message;
+      if (message?.role !== "assistant") continue;
+      repair(message, currentModel || fallbackModel);
+      currentModel = resolveRef(message.provider, message.model) || currentModel;
+    }
+  };
+
   const branch = typeof session?.sessionManager?.getBranch === "function"
     ? session.sessionManager.getBranch()
     : [];
-  for (const entry of Array.isArray(branch) ? branch : []) {
-    repair(entry?.message);
+  repairEntriesInOrder(branch);
+  repairEntriesInOrder(session?.entries);
+  for (const message of Array.isArray(session?.messages) ? session.messages : []) {
+    const model = resolveRef(message?.provider, message?.model);
+    repair(message, model);
+  }
+  for (const message of Array.isArray(session?.agent?.state?.messages) ? session.agent.state.messages : []) {
+    const model = resolveRef(message?.provider, message?.model);
+    repair(message, model);
   }
 }
 
 const MAX_CACHED_SESSIONS = 20;
 const SESSION_PROMPT_SNAPSHOT_VERSION = 1;
+const MODEL_SWITCH_SUMMARY_MAX_MESSAGES = 36;
+const MODEL_SWITCH_SUMMARY_MAX_BLOCK_CHARS = 1200;
+const MODEL_SWITCH_SUMMARY_MAX_TOTAL_CHARS = 24000;
+const HANA_COMPRESS_FORK_MARKER = "hana-compress-fork-marker";
+
+function countUserTurns(messages) {
+  return (Array.isArray(messages) ? messages : []).reduce(
+    (sum, message) => sum + (message?.role === "user" ? 1 : 0),
+    0,
+  );
+}
+
+export function splitMessagesForCompressFork(messages, contextConfig) {
+  const requestedProtectedTurns = Math.max(0, Number(contextConfig.recentTurnsProtected) || 0);
+  let split = splitMessages(messages, requestedProtectedTurns, contextConfig.protect);
+  if (split.compressible.length > 0) {
+    return { ...split, recentTurnsProtected: requestedProtectedTurns, adapted: false };
+  }
+
+  const totalUserTurns = countUserTurns(messages);
+  if (totalUserTurns <= 1 || requestedProtectedTurns < totalUserTurns) {
+    return { ...split, recentTurnsProtected: requestedProtectedTurns, adapted: false };
+  }
+
+  for (let protectedTurns = Math.max(1, totalUserTurns - 2); protectedTurns >= 1; protectedTurns -= 1) {
+    split = splitMessages(messages, protectedTurns, contextConfig.protect);
+    if (split.compressible.length > 0) {
+      return { ...split, recentTurnsProtected: protectedTurns, adapted: true };
+    }
+  }
+  return { ...split, recentTurnsProtected: 1, adapted: true };
+}
+
+function setSessionAgentMessages(session, messages) {
+  if (!session || !Array.isArray(messages)) return false;
+  if (session.agent?.state) {
+    session.agent.state.messages = messages;
+    return true;
+  }
+  if (typeof session.agent?.replaceMessages === "function") {
+    session.agent.replaceMessages(messages);
+    return true;
+  }
+  return false;
+}
+
+function modelSwitchCrossesProtocolBoundary(oldModel, newModel) {
+  if (!oldModel || !newModel) return false;
+  return oldModel.provider !== newModel.provider || oldModel.api !== newModel.api;
+}
+
+function modelLabel(model) {
+  if (!model) return "unknown";
+  const provider = model.provider || "unknown-provider";
+  const api = model.api || "unknown-api";
+  const id = model.id || model.modelId || model.name || "unknown-model";
+  return `${provider}/${id} (${api})`;
+}
+
+function compressionModelLabel(model) {
+  if (!model) return "unknown";
+  return `${model.provider || "unknown-provider"}/${model.id || model.modelId || model.name || "unknown-model"} (${model.api || "unknown-api"})`;
+}
+
+function truncateForModelSwitchSummary(text, maxChars = MODEL_SWITCH_SUMMARY_MAX_BLOCK_CHARS) {
+  const normalized = String(text || "").replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, maxChars)}...[truncated]`;
+}
+
+function stringifyToolArguments(args) {
+  try {
+    return JSON.stringify(args);
+  } catch {
+    return String(args || "");
+  }
+}
+
+function visibleContentForModelSwitchSummary(message) {
+  const role = message?.role || "unknown";
+  const blocks = Array.isArray(message?.content)
+    ? message.content
+    : (typeof message?.content === "string" ? [{ type: "text", text: message.content }] : []);
+  const parts = [];
+  for (const block of blocks) {
+    if (!block || typeof block !== "object") continue;
+    if (block.type === "text" && block.text) {
+      parts.push(block.text);
+    } else if (block.type === "image") {
+      parts.push("[image omitted]");
+    } else if (block.type === "video") {
+      parts.push("[video omitted]");
+    } else if (block.type === "toolCall") {
+      const args = truncateForModelSwitchSummary(stringifyToolArguments(block.arguments), 300);
+      parts.push(`[tool call: ${block.name || "unknown"} ${args}]`);
+    }
+  }
+
+  if (role === "toolResult" && parts.length === 0) {
+    parts.push("[tool result with no visible text]");
+  }
+  if (role === "assistant" && message?.stopReason === "error" && message?.errorMessage) {
+    parts.push(`[assistant error: ${message.errorMessage}]`);
+  }
+  return truncateForModelSwitchSummary(parts.join("\n"));
+}
+
+function buildModelSwitchSummary(messages, oldModel, newModel) {
+  const sourceMessages = Array.isArray(messages) ? messages : [];
+  const recent = sourceMessages
+    .filter((message) => ["user", "assistant", "toolResult"].includes(message?.role))
+    .slice(-MODEL_SWITCH_SUMMARY_MAX_MESSAGES);
+
+  const lines = [
+    "以下是模型切换前的对话压缩摘要。",
+    "Hanako 已将旧模型/旧接口产生的原始 reasoning、tool call、tool result 和 provider response id 压缩为纯文本，避免把不兼容的历史对象重放给新模型。",
+    `旧模型：${modelLabel(oldModel)}`,
+    `新模型：${modelLabel(newModel)}`,
+    `压缩前消息数：${sourceMessages.length}`,
+    "",
+    "最近上下文：",
+  ];
+
+  if (recent.length === 0) {
+    lines.push("(无可见上下文)");
+  }
+
+  for (const message of recent) {
+    const text = visibleContentForModelSwitchSummary(message);
+    if (!text) continue;
+    lines.push(`- ${message.role}: ${text}`);
+  }
+
+  const summary = lines.join("\n");
+  if (summary.length <= MODEL_SWITCH_SUMMARY_MAX_TOTAL_CHARS) return summary;
+  return `${summary.slice(0, MODEL_SWITCH_SUMMARY_MAX_TOTAL_CHARS)}\n...[summary truncated]`;
+}
+
+function findLatestModelChangeEntry(sessionManager, model) {
+  const branch = typeof sessionManager?.getBranch === "function" ? sessionManager.getBranch() : [];
+  for (let i = branch.length - 1; i >= 0; i -= 1) {
+    const entry = branch[i];
+    if (
+      entry?.type === "model_change"
+      && entry.provider === model?.provider
+      && entry.modelId === model?.id
+    ) {
+      return entry;
+    }
+  }
+  return branch[branch.length - 1] || null;
+}
+
+function resolveModelRef(ref, resolveModel) {
+  if (!ref?.provider || !(ref.id || ref.modelId)) return null;
+  try {
+    const resolved = resolveModel?.({ provider: ref.provider, id: ref.id || ref.modelId });
+    if (resolved) return resolved;
+  } catch {
+    // Best-effort only; model entries may reference deleted custom models.
+  }
+  return { provider: ref.provider, id: ref.id || ref.modelId, api: ref.api || null };
+}
+
+function compactHistoryForModelSwitch(session, oldModel, newModel, { switchEntry } = {}) {
+  if (!modelSwitchCrossesProtocolBoundary(oldModel, newModel)) {
+    return false;
+  }
+  const sessionManager = session?.sessionManager;
+  if (typeof sessionManager?.appendCompaction !== "function" || typeof sessionManager?.buildSessionContext !== "function") {
+    return false;
+  }
+  const targetSwitchEntry = switchEntry || findLatestModelChangeEntry(sessionManager, newModel);
+  if (!targetSwitchEntry?.id) return false;
+
+  const messages = Array.isArray(session?.agent?.state?.messages)
+    ? session.agent.state.messages
+    : (Array.isArray(session?.messages) ? session.messages : []);
+  const summary = buildModelSwitchSummary(messages, oldModel, newModel);
+  const tokensBefore = messages.reduce((sum, message) => sum + estimateTokens(message), 0);
+  sessionManager.appendCompaction(summary, targetSwitchEntry.id, tokensBefore, {
+    reason: "model-switch-protocol-boundary",
+    oldProvider: oldModel?.provider || null,
+    oldModelId: oldModel?.id || oldModel?.modelId || null,
+    oldApi: oldModel?.api || null,
+    newProvider: newModel?.provider || null,
+    newModelId: newModel?.id || newModel?.modelId || null,
+    newApi: newModel?.api || null,
+    messageCount: messages.length,
+  });
+  const context = sessionManager.buildSessionContext();
+  setSessionAgentMessages(session, context.messages);
+  return true;
+}
+
+function findPendingProtocolBoundarySwitch(session, currentModel, { resolveModel } = {}) {
+  const branch = typeof session?.sessionManager?.getBranch === "function"
+    ? session.sessionManager.getBranch()
+    : [];
+  let previousModel = null;
+  let currentTimelineModel = null;
+  let candidate = null;
+  let candidateIndex = -1;
+
+  for (let i = 0; i < branch.length; i += 1) {
+    const entry = branch[i];
+    if (entry?.type === "model_change") {
+      previousModel = currentTimelineModel;
+      currentTimelineModel = resolveModelRef({ provider: entry.provider, id: entry.modelId }, resolveModel);
+      const isCurrentModelChange = currentTimelineModel
+        && currentTimelineModel.provider === currentModel?.provider
+        && currentTimelineModel.id === currentModel?.id;
+      if (isCurrentModelChange && modelSwitchCrossesProtocolBoundary(previousModel, currentTimelineModel)) {
+        candidate = { switchEntry: entry, oldModel: previousModel, newModel: currentModel };
+        candidateIndex = i;
+      }
+      continue;
+    }
+    if (entry?.type === "message" && entry.message?.role === "assistant") {
+      currentTimelineModel = resolveModelRef({
+        provider: entry.message.provider,
+        id: entry.message.model,
+        api: entry.message.api,
+      }, resolveModel) || currentTimelineModel;
+    }
+  }
+
+  if (!candidate) return null;
+  const alreadyCompacted = branch
+    .slice(candidateIndex + 1)
+    .some((entry) => entry?.type === "compaction" && entry.details?.reason === "model-switch-protocol-boundary");
+  return alreadyCompacted ? null : candidate;
+}
+
+function ensureProtocolSafeHistoryForPrompt(session, { resolveModel } = {}) {
+  const pendingSwitch = findPendingProtocolBoundarySwitch(session, session?.model, { resolveModel });
+  if (!pendingSwitch) return false;
+  return compactHistoryForModelSwitch(session, pendingSwitch.oldModel, pendingSwitch.newModel, {
+    switchEntry: pendingSwitch.switchEntry,
+  });
+}
 
 function jsonClone(value, fallback) {
   try {
@@ -295,6 +671,7 @@ export class SessionCoordinator {
     this._titlesCache = new Map(); // sessionDir → { titles, ts }
     this._metaCache = new Map();   // metaPath → { data, ts }
     this._pendingPermissionMode = null;
+    this._pendingGoal = null;
     this._runtimePermissionModeDefault = DEFAULT_SESSION_PERMISSION_MODE;
     this._metaWriteQueue = Promise.resolve();
     this._prePromptAbortControllers = new Map();
@@ -365,6 +742,7 @@ export class SessionCoordinator {
     }
     const sessionPathForMeta = sessionMgr.getSessionFile?.() || null;
     let restoredThinkingLevel = null;
+    let restoredGoal = null;
     if (restore && sessionPathForMeta) {
       try {
         const metaPath = path.join(agent.sessionDir, "session-meta.json");
@@ -373,6 +751,7 @@ export class SessionCoordinator {
         if (typeof metaEntry?.thinkingLevel === "string") {
           restoredThinkingLevel = metaEntry.thinkingLevel;
         }
+        restoredGoal = normalizeSessionGoal(metaEntry?.goal);
       } catch (err) {
         if (err.code !== "ENOENT") {
           log.warn(`session thinking level restore failed: ${err.message}`);
@@ -469,11 +848,13 @@ export class SessionCoordinator {
     this._pendingPermissionMode = null;
     let initialAccessMode = legacyAccessModeFromPermissionMode(initialPermissionMode);
     let initialPlanMode = isReadOnlyPermissionMode(initialPermissionMode);
+    const initialGoal = restore ? restoredGoal : normalizeSessionGoal(this._pendingGoal);
     const sessionEntry = {
       permissionMode: initialPermissionMode,
       accessMode: initialAccessMode,
       planMode: initialPlanMode,
       thinkingLevel: initialThinkingLevel,
+      goal: initialGoal,
     }; // pre-populated for resourceLoader proxy
 
     const localeSnapshot = agent.config?.locale || getLocale();
@@ -514,6 +895,71 @@ export class SessionCoordinator {
       appendSystemPrompt: appendSystemPromptSnapshot,
       skillsResult: skillsResultSnapshot,
       agentsFilesResult: agentsFilesResultSnapshot,
+    };
+
+    // Memory 召回扩展：每次模型调用前按当前请求检索少量相关记忆。
+    const memoryRecallExtension = {
+      path: "hana-memory-recall-context",
+      tools: new Map(),
+      handlers: new Map([
+        [
+          "context",
+          [
+            async (event, ctx) => {
+              try {
+                if (!frozenMemoryEnabled) return undefined;
+                const sp = ctx.sessionManager?.getSessionFile?.() || sessionPathForMeta || null;
+                const recall = buildMemoryRecallContext({
+                  agent,
+                  messages: event.messages,
+                  cwd: effectiveCwd,
+                  sessionPath: sp,
+                });
+                if (!recall.text) return undefined;
+                sessionEntry.lastMemoryRecall = recall.items;
+                const injected = injectMemoryRecallMessages(event.messages, recall.text);
+                if (!injected.injected) return undefined;
+                log.log(`[memoryRecall] injected ${recall.items.length} items for ${sp ? path.basename(sp) : "session"}`);
+                return { messages: injected.messages };
+              } catch (err) {
+                log.warn(`memory recall failed: ${err?.message || err}`);
+                return undefined;
+              }
+            },
+          ],
+        ],
+      ]),
+      flags: new Map(),
+      shortcuts: new Map(),
+      commands: new Map(),
+      messageRenderers: new Map(),
+    };
+
+    const sessionGoalExtension = {
+      path: "hana-session-goal-context",
+      tools: new Map(),
+      handlers: new Map([
+        [
+          "context",
+          [
+            async (event) => {
+              try {
+                const injected = injectSessionGoalMessages(event.messages, sessionEntry.goal, {
+                  locale: localeSnapshot,
+                });
+                return injected.injected ? { messages: injected.messages } : undefined;
+              } catch (err) {
+                log.warn(`session goal injection failed: ${err?.message || err}`);
+                return undefined;
+              }
+            },
+          ],
+        ],
+      ]),
+      flags: new Map(),
+      shortcuts: new Map(),
+      commands: new Map(),
+      messageRenderers: new Map(),
     };
 
     // Vision 辅助注入扩展：只在目标模型需要图片辅助笔记时注入视觉上下文。
@@ -583,6 +1029,30 @@ export class SessionCoordinator {
       commands: new Map(),
       messageRenderers: new Map(),
     };
+    const providerContextFinalSanitizerExtension = {
+      path: "hana-provider-context-final-sanitizer",
+      tools: new Map(),
+      handlers: new Map([
+        [
+          "context",
+          [
+            async (event, ctx) => {
+              const model = ctx?.model || resolvedModel || effectiveModel;
+              if (!model) return undefined;
+              const messages = normalizeProviderContextMessages(event.messages, model, {
+                mode: "chat",
+                reasoningLevel: resolvedThinkingLevel,
+              });
+              return messages === event.messages ? undefined : { messages };
+            },
+          ],
+        ],
+      ]),
+      flags: new Map(),
+      shortcuts: new Map(),
+      commands: new Map(),
+      messageRenderers: new Map(),
+    };
 
     // Wrap resourceLoader: per-session prompt snapshot + plan mode injection + vision auxiliary extension
     const resourceLoaderProps = {
@@ -592,10 +1062,21 @@ export class SessionCoordinator {
       getExtensions: {
         value: () => {
           const base = baseResourceLoader.getExtensions?.() ?? { extensions: [], errors: [] };
-          const hanaExtensions = [visionAuxiliaryExtension, sdkRuntimeFooterControlExtension];
+          const hanaExtensions = [
+            sessionGoalExtension,
+            memoryRecallExtension,
+            visionAuxiliaryExtension,
+            sdkRuntimeFooterControlExtension,
+          ];
           return {
             ...base,
-            extensions: [...hanaExtensions, ...(base.extensions || [])],
+            extensions: [
+              ...hanaExtensions,
+              ...(base.extensions || []),
+              // Keep this last: it protects the exact context after all recall,
+              // vision, and plugin mutations without changing persisted UI history.
+              providerContextFinalSanitizerExtension,
+            ],
           };
         },
       },
@@ -788,6 +1269,7 @@ export class SessionCoordinator {
       unsub,
     });
     this._sessions.set(mapKey, sessionEntry);
+    if (!restore) this._pendingGoal = null;
 
     // Apply tool snapshot (Case A / Case C). Permission mode is a runtime
     // policy and does not change the stable tool schema.
@@ -819,6 +1301,7 @@ export class SessionCoordinator {
         thinkingLevel: initialThinkingLevel,
         promptSnapshot: promptSnapshotToWrite,
       };
+      if (initialGoal) metaPatch.goal = initialGoal;
       if (snapshotToolNames !== null) metaPatch.toolNames = snapshotToolNames;
       await this.writeSessionMeta(sessionPath, metaPatch);
     } else if (restore && sessionPath) {
@@ -860,6 +1343,7 @@ export class SessionCoordinator {
     memoryEnabled = true,
     workspaceFolders = [],
     promptComposer = undefined,
+    includeRuntimeFoundation = true,
   } = {}) {
     const agent = (agentId ? this._d.getAgentById?.(agentId) : null) || this._d.getAgent();
     if (!agent) throw new Error("buildSystemPromptPreview: target agent unavailable");
@@ -911,6 +1395,7 @@ export class SessionCoordinator {
         forceExperienceEnabled: frozenExperienceEnabled,
         appendSystemPrompt,
         skillsPrompt,
+        includeRuntimeFoundation,
         ...(promptComposer !== undefined ? { promptComposer } : {}),
       });
     } finally {
@@ -1061,11 +1546,12 @@ export class SessionCoordinator {
       emitProgress: (event) => this._d.emitEvent?.(event, sp),
     }));
     assertVideoInputSupported(this._session.model, opts?.videos);
+    const entry = sp ? this._sessions.get(sp) : null;
+    const agent = entry ? this._d.getAgentById(entry.agentId) : this._d.getAgent();
+    await this._autoContextCompressBeforePrompt(sp, this._session, agent);
     const promptOpts = buildPromptMediaOptions(opts);
     await this._session.prompt(text, promptOpts);
     if (sp) {
-      const entry = this._sessions.get(sp);
-      const agent = entry ? this._d.getAgentById(entry.agentId) : this._d.getAgent();
       agent?._memoryTicker?.notifyTurn(sp);
     }
   }
@@ -1126,10 +1612,19 @@ export class SessionCoordinator {
       }
     }
     assertVideoInputSupported(entry.session.model, opts?.videos);
-    repairAssistantMetadataForPrompt(entry.session);
+    repairAssistantMetadataForPrompt(entry.session, {
+      resolveModel: (ref) => this._d.getModels()?.resolveExecutionModel?.(ref),
+    });
+    const compactedForProtocolSwitch = ensureProtocolSafeHistoryForPrompt(entry.session, {
+      resolveModel: (ref) => this._d.getModels()?.resolveExecutionModel?.(ref),
+    });
+    if (compactedForProtocolSwitch) {
+      log.log(`[modelSwitch] compacted incompatible history before prompt: ${path.basename(sessionPath)}`);
+    }
+    const agent = this._d.getAgentById(entry.agentId) || this._d.getAgent();
+    await this._autoContextCompressBeforePrompt(sessionPath, entry.session, agent);
     const promptOpts = buildPromptMediaOptions(opts);
     await entry.session.prompt(text, promptOpts);
-    const agent = this._d.getAgentById(entry.agentId) || this._d.getAgent();
     agent?._memoryTicker?.notifyTurn(sessionPath);
   }
 
@@ -1242,6 +1737,10 @@ export class SessionCoordinator {
 
       // 执行模型切换
       await session.setModel(newModel);
+      const compactedForProtocolSwitch = compactHistoryForModelSwitch(session, oldModel, newModel);
+      if (compactedForProtocolSwitch) {
+        adaptations.push("protocol-boundary-compaction");
+      }
       entry.modelId = newModel.id;
       entry.modelProvider = newModel.provider;
       const models = this._d.getModels();
@@ -1344,7 +1843,7 @@ export class SessionCoordinator {
 
     // 重建上下文
     const ctx = sm.buildSessionContext();
-    session.agent.replaceMessages(ctx.messages);
+    setSessionAgentMessages(session, ctx.messages);
   }
 
   /**
@@ -1366,7 +1865,7 @@ export class SessionCoordinator {
     sm.appendCompaction(result.summary, result.firstKeptEntryId, result.tokensBefore, result.details);
 
     const ctx = sm.buildSessionContext();
-    session.agent.replaceMessages(ctx.messages);
+    setSessionAgentMessages(session, ctx.messages);
   }
 
   /** Get plan mode for the current (focused) session */
@@ -1413,6 +1912,86 @@ export class SessionCoordinator {
     entry.session.setThinkingLevel?.(models.resolveThinkingLevel(nextLevel));
     this.writeSessionMeta(sessionPath, { thinkingLevel: nextLevel });
     return { ok: true, thinkingLevel: nextLevel };
+  }
+
+  getSessionGoal(sessionPath = this.currentSessionPath) {
+    if (!sessionPath) return normalizeSessionGoal(this._pendingGoal);
+    const entry = this._sessions.get(sessionPath);
+    return normalizeSessionGoal(entry?.goal);
+  }
+
+  setPendingSessionGoal(objective) {
+    const goal = makeSessionGoal(objective, { previousGoal: this._pendingGoal });
+    if (!goal) return this.clearPendingSessionGoal();
+    this._pendingGoal = goal;
+    this._emitSessionGoalChanged(goal, null);
+    return { ok: true, goal };
+  }
+
+  clearPendingSessionGoal() {
+    this._pendingGoal = null;
+    this._emitSessionGoalChanged(null, null);
+    return { ok: true, goal: null };
+  }
+
+  _applySessionGoal(sessionPath, goal) {
+    if (!sessionPath) {
+      this._pendingGoal = normalizeSessionGoal(goal);
+      this._emitSessionGoalChanged(this._pendingGoal, null);
+      return { ok: true, goal: this._pendingGoal };
+    }
+    const entry = this._sessions.get(sessionPath);
+    if (!entry) {
+      return { ok: false, error: "session not found", goal: null };
+    }
+    entry.goal = normalizeSessionGoal(goal);
+    this.writeSessionMeta(sessionPath, { goal: entry.goal });
+    this._emitSessionGoalChanged(entry.goal, sessionPath);
+    return { ok: true, goal: entry.goal };
+  }
+
+  setSessionGoal(sessionPath, objective) {
+    if (!sessionPath) return this.setPendingSessionGoal(objective);
+    const previousGoal = this.getSessionGoal(sessionPath);
+    const goal = makeSessionGoal(objective, { previousGoal });
+    if (!goal) return this.clearSessionGoal(sessionPath);
+    return this._applySessionGoal(sessionPath, goal);
+  }
+
+  clearSessionGoal(sessionPath = this.currentSessionPath) {
+    if (!sessionPath) return this.clearPendingSessionGoal();
+    return this._applySessionGoal(sessionPath, null);
+  }
+
+  markSessionGoalComplete(sessionPath = this.currentSessionPath, note = null) {
+    const current = this.getSessionGoal(sessionPath);
+    if (!current) return { ok: false, error: "session goal not found", goal: null };
+    const goal = makeSessionGoal(current.objective, {
+      previousGoal: current,
+      status: "complete",
+      note,
+    });
+    return this._applySessionGoal(sessionPath, goal);
+  }
+
+  markSessionGoalBlocked(sessionPath = this.currentSessionPath, note = null) {
+    const current = this.getSessionGoal(sessionPath);
+    if (!current) return { ok: false, error: "session goal not found", goal: null };
+    const goal = makeSessionGoal(current.objective, {
+      previousGoal: current,
+      status: "blocked",
+      note,
+    });
+    return this._applySessionGoal(sessionPath, goal);
+  }
+
+  _emitSessionGoalChanged(goal, sessionPath) {
+    this._d.emitEvent?.({ type: "session_goal", goal: normalizeSessionGoal(goal) }, sessionPath);
+    const normalized = normalizeSessionGoal(goal);
+    const label = normalized?.objective
+      ? `Goal: ${normalized.status}`
+      : "Goal: cleared";
+    this._d.emitDevLog?.(label, "info");
   }
 
   getAccessMode(sessionPath = this.currentSessionPath) {
@@ -2059,6 +2638,7 @@ export class SessionCoordinator {
       model: modelInfo,
       thinkingLevel: entry.thinkingLevel || null,
       permissionMode: entry.permissionMode || entry.accessMode || null,
+      goal: normalizeSessionGoal(entry.goal),
       memoryEnabled: entry.memoryEnabled !== false,
       experienceEnabled: entry.experienceEnabled === true,
       systemPrompt: typeof entry.promptSnapshot?.finalSystemPrompt === "string"
@@ -2545,16 +3125,21 @@ export class SessionCoordinator {
 
     log.log(`[compressFork] source=${sourceSessionPath}, mode=${contextConfig.mode}, messages=${msgs.length}`);
 
-    const { compressible, retained } = splitMessages(msgs, contextConfig.recentTurnsProtected, contextConfig.protect);
+    const { compressible, retained, recentTurnsProtected, adapted } = splitMessagesForCompressFork(msgs, contextConfig);
+    if (adapted) {
+      log.log(`[compressFork] adapted recentTurnsProtected ${contextConfig.recentTurnsProtected} -> ${recentTurnsProtected}`);
+    }
     if (compressible.length === 0) return { ok: false, error: "no compressible messages" };
 
     // 选择压缩用模型
     const models = this._d.getModels();
     const compressModel = resolveCompressionModel(models, contextConfig, sourceSession.model);
+    log.log(`[compressFork] compressionModel=${contextConfig.compressionModel || "custom"} selected=${compressionModelLabel(compressModel)}`);
 
     const auth = await models.modelRegistry.getApiKeyAndHeaders(compressModel);
     if (!auth.ok || !auth.apiKey) return { ok: false, error: "auth failed for compression model" };
 
+    let fallbackCompressionReason = "";
     const generateFn = async (prompt) => {
       try {
         return await callText({
@@ -2566,8 +3151,10 @@ export class SessionCoordinator {
           messages: [{ role: "user", content: prompt }],
           maxTokens: 4000,
           temperature: 0.2,
+          timeoutMs: 180_000,
         });
       } catch (err) {
+        fallbackCompressionReason = err.message || String(err);
         log.warn(`[compressFork] callText failed: ${err.message}`);
         return "";
       }
@@ -2585,7 +3172,16 @@ export class SessionCoordinator {
       });
     } catch (err) {
       log.error(`[compressFork] compression failed: ${err.message}`);
-      return { ok: false, error: `compression failed: ${err.message}` };
+      fallbackCompressionReason = err.message || String(err);
+    }
+
+    if (!summary) {
+      summary = buildExtractiveCompressionSummary(compressible, {
+        reason: fallbackCompressionReason || "compression returned empty",
+      });
+      if (summary) {
+        log.warn(`[compressFork] using extractive fallback summary: ${fallbackCompressionReason || "empty summary"}`);
+      }
     }
 
     if (!summary) return { ok: false, error: "compression returned empty" };
@@ -2613,19 +3209,30 @@ export class SessionCoordinator {
     const sm = newSession.sessionManager;
     const ts = Date.now();
 
-    // 1. 压缩摘要作为用户第一条消息
-    sm.appendMessage({
+    // 1. 压缩摘要作为上下文 seed，前端通过 marker 显示分割线，不直接展示 seed 文本。
+    const summaryEntryId = sm.appendMessage({
       role: "user",
       content: [{ type: "text", text: summary }],
       timestamp: ts,
     });
 
-    // 2. 固定 AI 回复
-    sm.appendMessage({
+    // 2. 固定 AI 回复作为上下文连续性 seed，同样在 UI 中隐藏。
+    const ackEntryId = sm.appendMessage({
       role: "assistant",
       content: [{ type: "text", text: "我已了解之前的对话背景，让我们继续。" }],
       timestamp: ts + 1,
     });
+
+    if (typeof sm.appendCustomEntry === "function") {
+      sm.appendCustomEntry(HANA_COMPRESS_FORK_MARKER, {
+        hiddenEntryIds: [summaryEntryId, ackEntryId].filter(Boolean),
+        label: "上下文已压缩",
+        sourceSessionPath,
+        compressedMessageCount: compressible.length,
+        retainedMessageCount: retained.length,
+        mode: contextConfig.mode,
+      });
+    }
 
     // 3. 保留的最近 N 轮消息
     for (const m of retained) {
@@ -2640,7 +3247,7 @@ export class SessionCoordinator {
     // 重建新会话的消息上下文
     try {
       const ctx = sm.buildSessionContext();
-      newSession.agent.replaceMessages(ctx.messages);
+      setSessionAgentMessages(newSession, ctx.messages);
     } catch (err) {
       log.warn(`[compressFork] replaceMessages failed: ${err.message}`);
     }
@@ -2658,12 +3265,12 @@ export class SessionCoordinator {
    * @param {number} contextWindow - 当前模型上下文窗口大小
    * @returns {Promise<boolean>} 是否执行了压缩
    */
-  async _contextCompress(session, agent, contextWindow) {
+  async _contextCompress(session, agent, contextWindow, { tokens = null } = {}) {
     const contextConfig = resolveContextConfig(agent._config);
     if (!contextConfig.enabled) return false;
 
     const msgs = session.agent?.state?.messages || [];
-    if (!shouldTriggerCompression({ messages: msgs, contextWindow, contextConfig })) {
+    if (!shouldTriggerCompression({ messages: msgs, contextWindow, contextConfig, tokens })) {
       return false;
     }
 
@@ -2678,6 +3285,7 @@ export class SessionCoordinator {
     // 选择压缩用模型
     const models = this._d.getModels();
     const compressModel = resolveCompressionModel(models, contextConfig, session.model);
+    log.log(`[contextCompress] compressionModel=${contextConfig.compressionModel || "custom"} selected=${compressionModelLabel(compressModel)}`);
 
     // 获取 API key
     const auth = await models.modelRegistry.getApiKeyAndHeaders(compressModel);
@@ -2687,6 +3295,7 @@ export class SessionCoordinator {
     }
 
     // generateFn: 使用 callText 直接发送 system + user，避免 generateSummary 的双重指令
+    let fallbackCompressionReason = "";
     const generateFn = async (prompt) => {
       try {
         return await callText({
@@ -2698,21 +3307,32 @@ export class SessionCoordinator {
           messages: [{ role: "user", content: prompt }],
           maxTokens: 4000,
           temperature: 0.2,
+          timeoutMs: 180_000,
         });
       } catch (err) {
+        fallbackCompressionReason = err.message || String(err);
         log.warn(`[contextCompress] callText failed: ${err.message}`);
         return "";
       }
     };
 
     try {
-      const summary = await executeCompression({
+      let summary = await executeCompression({
         messages: compressible,
         mode: contextConfig.mode,
         model: compressModel,
         generateFn,
         customPrompt: contextConfig.customPrompt,
       });
+
+      if (!summary) {
+        summary = buildExtractiveCompressionSummary(compressible, {
+          reason: fallbackCompressionReason || "compression returned empty",
+        });
+        if (summary) {
+          log.warn(`[contextCompress] using extractive fallback summary: ${fallbackCompressionReason || "empty summary"}`);
+        }
+      }
 
       if (!summary) {
         log.warn("[contextCompress] compression returned empty summary");
@@ -2758,7 +3378,7 @@ export class SessionCoordinator {
         });
         // 重建上下文
         const ctx = sm.buildSessionContext();
-        session.agent.replaceMessages(ctx.messages);
+        setSessionAgentMessages(session, ctx.messages);
         log.log(`[contextCompress] done: compressed ${compressible.length} msgs, ${tokensBefore} tokens`);
         return true;
       } else {
@@ -2767,6 +3387,59 @@ export class SessionCoordinator {
       }
     } catch (err) {
       log.error(`[contextCompress] failed: ${err.message}`);
+      return false;
+    }
+  }
+
+  async _autoContextCompressBeforePrompt(sessionPath, session, agent) {
+    if (!session || !agent || session.isCompacting) return false;
+
+    const contextConfig = resolveContextConfig(agent._config);
+    if (!contextConfig.enabled) return false;
+
+    const usage = computeContextUsageSnapshot(session);
+    const contextWindow = usage.contextWindow ?? session.model?.contextWindow;
+    if (!Number.isFinite(contextWindow) || contextWindow <= 0) return false;
+
+    const msgs = session.agent?.state?.messages || [];
+    if (!shouldTriggerCompression({ messages: msgs, contextWindow, contextConfig, tokens: usage.tokens })) {
+      return false;
+    }
+
+    this._d.emitEvent?.({ type: "compaction_start", reason: "auto-threshold" }, sessionPath);
+    try {
+      const compressed = await this._contextCompress(session, agent, contextWindow, { tokens: usage.tokens });
+      const after = computeContextUsageSnapshot(session);
+      const compressionAvailable = contextConfig.enabled
+        && after.percent != null
+        && (after.percent / 100) >= MANUAL_CONTEXT_COMPRESSION_THRESHOLD;
+      this._d.emitEvent?.({
+        type: "compaction_end",
+        reason: "auto-threshold",
+        aborted: false,
+        willRetry: false,
+        tokens: after.tokens,
+        contextWindow: after.contextWindow,
+        percent: after.percent,
+        compressionAvailable,
+      }, sessionPath);
+      return compressed;
+    } catch (err) {
+      log.warn(`[contextCompress] auto compression failed before prompt: ${err.message}`);
+      const after = computeContextUsageSnapshot(session);
+      const compressionAvailable = contextConfig.enabled
+        && after.percent != null
+        && (after.percent / 100) >= MANUAL_CONTEXT_COMPRESSION_THRESHOLD;
+      this._d.emitEvent?.({
+        type: "compaction_end",
+        reason: "auto-threshold",
+        aborted: true,
+        willRetry: false,
+        tokens: after.tokens,
+        contextWindow: after.contextWindow,
+        percent: after.percent,
+        compressionAvailable,
+      }, sessionPath);
       return false;
     }
   }

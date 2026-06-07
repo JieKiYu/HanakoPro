@@ -1,15 +1,29 @@
 import type { Session, SessionStream, TodoItem } from '../types';
 
+export type SessionGoalStatus = 'active' | 'paused' | 'complete' | 'blocked';
+
+export interface SessionGoal {
+  objective: string;
+  status: SessionGoalStatus;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+  blockedAt?: string | null;
+  note?: string | null;
+}
+
 export interface SessionSlice {
   sessions: Session[];
   currentSessionPath: string | null;
   pendingSessionSwitchPath: string | null;
   sessionStreams: Record<string, SessionStream>;
   pendingNewSession: boolean;
+  pendingSessionGoal: SessionGoal | null;
   memoryEnabled: boolean;
   /** @deprecated 兼容层 — 读取当前 session 的 todos，新代码用 todosBySession */
   sessionTodos: TodoItem[];
   todosBySession: Record<string, TodoItem[]>;
+  sessionGoalByPath: Record<string, SessionGoal | null>;
   /**
    * 每个 session 的 live todos 版本号。live WS 写入（tool_end）+1，
    * loadMessages hydrate 捕获版本前后对比：若 mid-flight 被 live 更新，
@@ -22,9 +36,11 @@ export interface SessionSlice {
   setSessionStream: (sessionPath: string, stream: SessionStream) => void;
   removeSessionStream: (sessionPath: string) => void;
   setPendingNewSession: (pending: boolean) => void;
+  setPendingSessionGoal: (goal: SessionGoal | null) => void;
   setMemoryEnabled: (enabled: boolean) => void;
   setSessionTodos: (todos: TodoItem[]) => void;
   setSessionTodosForPath: (sessionPath: string, todos: TodoItem[]) => void;
+  setSessionGoalForPath: (sessionPath: string, goal: SessionGoal | null) => void;
   bumpTodosLiveVersion: (sessionPath: string) => void;
 }
 
@@ -36,9 +52,11 @@ export const createSessionSlice = (
   pendingSessionSwitchPath: null,
   sessionStreams: {},
   pendingNewSession: false,
+  pendingSessionGoal: null,
   memoryEnabled: true,
   sessionTodos: [],
   todosBySession: {},
+  sessionGoalByPath: {},
   todosLiveVersionBySession: {},
   setSessions: (sessions) => set({ sessions }),
   setCurrentSessionPath: (path) => set({ currentSessionPath: path }),
@@ -53,6 +71,7 @@ export const createSessionSlice = (
       return { sessionStreams: rest };
     }),
   setPendingNewSession: (pending) => set({ pendingNewSession: pending }),
+  setPendingSessionGoal: (goal) => set({ pendingSessionGoal: goal }),
   setMemoryEnabled: (enabled) => set({ memoryEnabled: enabled }),
   // 兼容：旧调用方仍可用，写入当前 session
   setSessionTodos: (todos) =>
@@ -70,6 +89,10 @@ export const createSessionSlice = (
       todosBySession: { ...s.todosBySession, [sessionPath]: todos },
       // 如果写入的是当前 session，同步更新兼容字段
       sessionTodos: s.currentSessionPath === sessionPath ? todos : s.sessionTodos,
+    })),
+  setSessionGoalForPath: (sessionPath, goal) =>
+    set((s) => ({
+      sessionGoalByPath: { ...s.sessionGoalByPath, [sessionPath]: goal },
     })),
   bumpTodosLiveVersion: (sessionPath) =>
     set((s) => ({

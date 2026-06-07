@@ -1,17 +1,9 @@
 import { getLocale } from "../server/i18n.js";
+import { createAbortError, isAbortLikeError } from "../shared/abort-errors.js";
 import { requireVisionAuxiliaryEnabled } from "./vision-auxiliary-policy.js";
 
-export function isAbortLikeError(err) {
-  return err?.name === "AbortError"
-    || err?.message === "This operation was aborted"
-    || err?.type === "aborted";
-}
-
 function abortError() {
-  const err = new Error("This operation was aborted");
-  err.name = "AbortError";
-  err.type = "aborted";
-  return err;
+  return createAbortError();
 }
 
 function isRecoverableVisionPrepareError(err) {

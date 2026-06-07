@@ -13,6 +13,7 @@
  */
 
 import os from "node:os";
+import fs from "node:fs";
 import { EventEmitter } from "node:events";
 import { createRequire } from "node:module";
 import crypto from "node:crypto";
@@ -21,9 +22,11 @@ import crypto from "node:crypto";
 const require = createRequire(import.meta.url);
 
 let _ptyModule = null;
+let _ptyPackageDir = null;
 function loadPty() {
   if (_ptyModule) return _ptyModule;
   try {
+    _ptyPackageDir = require.resolve("node-pty/package.json").replace(/[/\\]package\.json$/, "");
     _ptyModule = require("node-pty");
   } catch (err) {
     throw new Error(`node-pty 未安装或加载失败: ${err.message}`);
@@ -39,7 +42,61 @@ function defaultShell() {
     // 优先 PowerShell 7（pwsh），回退到 Windows PowerShell，最后 cmd
     return process.env.COMSPEC || "powershell.exe";
   }
-  return process.env.SHELL || "/bin/bash";
+  const candidates = [
+    process.env.SHELL,
+    "/bin/zsh",
+    "/usr/bin/zsh",
+    "/bin/bash",
+    "/usr/bin/bash",
+    "/bin/sh",
+    "sh",
+  ];
+  return candidates.find((candidate) => {
+    if (!candidate || typeof candidate !== "string") return false;
+    if (!candidate.includes("/")) return true;
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }) || "sh";
+}
+
+function resolveCwd(cwd) {
+  if (cwd && typeof cwd === "string") {
+    try {
+      if (fs.statSync(cwd).isDirectory()) return cwd;
+    } catch {
+      // Missing or inaccessible workspace cwd falls back to the user home below.
+    }
+  }
+  return os.homedir();
+}
+
+function ensureNodePtySpawnHelperReady() {
+  if (process.platform !== "darwin" || !_ptyPackageDir) return;
+  const candidates = [
+    // node-pty resolves native modules in this order. Keep the helper executable
+    // beside whichever native module its own loader selected.
+    `${_ptyPackageDir}/build/Release/spawn-helper`,
+    `${_ptyPackageDir}/build/Debug/spawn-helper`,
+    `${_ptyPackageDir}/prebuilds/${process.platform}-${process.arch}/spawn-helper`,
+  ];
+  for (const helper of candidates) {
+    try {
+      if (!fs.statSync(helper).isFile()) continue;
+      try {
+        fs.accessSync(helper, fs.constants.X_OK);
+      } catch {
+        fs.chmodSync(helper, fs.statSync(helper).mode | 0o755);
+      }
+      fs.accessSync(helper, fs.constants.X_OK);
+      return;
+    } catch {
+      // Try the next node-pty loader location.
+    }
+  }
 }
 
 function newId() {
@@ -300,8 +357,9 @@ class TerminalManager {
       throw new Error(`已达终端数量上限 (${MAX_TERMS})`);
     }
     const pty = loadPty();
+    ensureNodePtySpawnHelperReady();
     const useShell = shell || defaultShell();
-    const useCwd = cwd && typeof cwd === "string" ? cwd : os.homedir();
+    const useCwd = resolveCwd(cwd);
     const useEnv = { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor", ...(env || {}) };
 
     // Windows 下若 shell 是 powershell，附加 NoLogo 减少噪音输出
@@ -310,14 +368,23 @@ class TerminalManager {
       args = ["-NoLogo"];
     }
 
-    const proc = pty.spawn(useShell, args, {
-      name: "xterm-256color",
-      cols: Math.max(1, cols | 0),
-      rows: Math.max(1, rows | 0),
-      cwd: useCwd,
-      env: useEnv,
-      // ConPTY on Windows; default on others
-    });
+    let proc;
+    try {
+      proc = pty.spawn(useShell, args, {
+        name: "xterm-256color",
+        cols: Math.max(1, cols | 0),
+        rows: Math.max(1, rows | 0),
+        cwd: useCwd,
+        env: useEnv,
+        // ConPTY on Windows; default on others
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (process.platform === "darwin" && /posix_spawnp failed/i.test(msg)) {
+        throw new Error(`PTY 启动失败：node-pty spawn-helper 不可执行或缺失（shell=${useShell}, cwd=${useCwd}）`);
+      }
+      throw err;
+    }
 
     const id = newId();
     const session = new TerminalSession({ id, pty: proc, cwd: useCwd, shell: useShell, title });
@@ -362,3 +429,8 @@ class TerminalManager {
 // 单例
 export const terminalManager = new TerminalManager();
 export { TerminalManager, TerminalSession };
+export const __testing = {
+  defaultShell,
+  ensureNodePtySpawnHelperReady,
+  resolveCwd,
+};

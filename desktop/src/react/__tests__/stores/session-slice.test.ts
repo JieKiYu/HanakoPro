@@ -26,8 +26,10 @@ describe('session-slice', () => {
     expect(slice.pendingSessionSwitchPath).toBeNull();
     expect(slice.sessionStreams).toEqual({});
     expect(slice.pendingNewSession).toBe(false);
+    expect(slice.pendingSessionGoal).toBeNull();
     expect(slice.memoryEnabled).toBe(true);
     expect(slice.sessionTodos).toEqual([]);
+    expect(slice.sessionGoalByPath).toEqual({});
   });
 
   it('setSessionStream 添加 stream', () => {
@@ -72,5 +74,20 @@ describe('session-slice', () => {
     expect(slice.pendingSessionSwitchPath).toBe('/s2');
     slice.setPendingSessionSwitchPath(null);
     expect(slice.pendingSessionSwitchPath).toBeNull();
+  });
+
+  it('setSessionGoalForPath 与 pending goal 独立记录', () => {
+    const goal = {
+      objective: '完成 goal mode',
+      status: 'active',
+      createdAt: '2026-06-06T00:00:00.000Z',
+      updatedAt: '2026-06-06T00:00:00.000Z',
+    } as const;
+    slice.setPendingSessionGoal(goal);
+    slice.setSessionGoalForPath('/s1', goal);
+    expect(slice.pendingSessionGoal).toEqual(goal);
+    expect(slice.sessionGoalByPath['/s1']).toEqual(goal);
+    slice.setSessionGoalForPath('/s1', null);
+    expect(slice.sessionGoalByPath['/s1']).toBeNull();
   });
 });

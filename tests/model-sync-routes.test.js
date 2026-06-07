@@ -802,6 +802,82 @@ describe("model sync related routes", () => {
     expect(data.models[0].id).toBe("MiniMax-M2.5");
   });
 
+  it("normalizes bare OpenAI-compatible base URLs before fetching remote catalog", async () => {
+    const { createProvidersRoute } = await import("../server/routes/providers.js");
+    const app = new Hono();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [{ id: "gpt-4o-mini" }] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const engine = withResolveCreds({
+      getRegistryModelsForProvider: vi.fn().mockReturnValue([]),
+      providerRegistry: {
+        getCredentials: () => null,
+        getAuthJsonKey: (id) => id,
+        getDefaultModels: () => [],
+      },
+      hanakoHome: "/tmp",
+    });
+
+    app.route("/api", createProvidersRoute(engine));
+
+    const res = await app.request("/api/providers/fetch-models", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "302.ai",
+        base_url: "https://api.302.ai",
+        api: "openai-completions",
+        api_key: "sk-test",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://api.302.ai/v1/models");
+    const data = await res.json();
+    expect(data.models.map(m => m.id)).toEqual(["gpt-4o-mini"]);
+  });
+
+  it("folds OpenAI-compatible completion endpoints back to /v1/models", async () => {
+    const { createProvidersRoute } = await import("../server/routes/providers.js");
+    const app = new Hono();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [{ id: "gpt-5-mini" }] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const engine = withResolveCreds({
+      getRegistryModelsForProvider: vi.fn().mockReturnValue([]),
+      providerRegistry: {
+        getCredentials: () => null,
+        getAuthJsonKey: (id) => id,
+        getDefaultModels: () => [],
+      },
+      hanakoHome: "/tmp",
+    });
+
+    app.route("/api", createProvidersRoute(engine));
+
+    const res = await app.request("/api/providers/fetch-models", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "302.ai",
+        base_url: "https://api.302.ai/v1/chat/completions",
+        api: "openai-responses",
+        api_key: "sk-test",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://api.302.ai/v1/models");
+    const data = await res.json();
+    expect(data.models.map(m => m.id)).toEqual(["gpt-5-mini"]);
+  });
+
   it("fetch-models does not expose the official DeepSeek provider id as a model", async () => {
     const { createProvidersRoute } = await import("../server/routes/providers.js");
     const app = new Hono();
@@ -961,7 +1037,18 @@ describe("model sync related routes", () => {
   it("remote 401 returns error without fallback", async () => {
     const { createProvidersRoute } = await import("../server/routes/providers.js");
     const app = new Hono();
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401, statusText: "Unauthorized" }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      statusText: "Unauthorized",
+      text: async () => JSON.stringify({
+        error: {
+          err_code: -10004,
+          message: "Insufficient account balance.",
+          message_cn: "账户余额不足，创建属于自己的工具，更多请访问 302.AI",
+        },
+      }),
+    }));
 
     const engine = withResolveCreds({
       getRegistryModelsForProvider: vi.fn(),
@@ -983,7 +1070,45 @@ describe("model sync related routes", () => {
 
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.error).toContain("401");
+    expect(data.error).toContain("账户余额不足");
+    expect(data.error).toContain("-10004");
+    expect(data.models).toEqual([]);
+    expect(engine.getRegistryModelsForProvider).not.toHaveBeenCalled();
+  });
+
+  it("explicit remote network errors return an error instead of hiding behind fallback", async () => {
+    const { createProvidersRoute } = await import("../server/routes/providers.js");
+    const app = new Hono();
+    const timeout = new Error("fetch failed");
+    timeout.cause = { code: "ETIMEDOUT", message: "connect ETIMEDOUT" };
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(timeout));
+
+    const engine = withResolveCreds({
+      getRegistryModelsForProvider: vi.fn().mockReturnValue([{ id: "fallback-model" }]),
+      providerRegistry: {
+        getCredentials: () => null,
+        getAuthJsonKey: (id) => id,
+        getDefaultModels: () => [],
+      },
+      hanakoHome: "/tmp",
+    });
+
+    app.route("/api", createProvidersRoute(engine));
+
+    const res = await app.request("/api/providers/fetch-models", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "302.ai",
+        base_url: "https://api.302.ai/v1",
+        api: "openai-completions",
+        api_key: "sk-test",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.error).toContain("Network error");
     expect(data.models).toEqual([]);
     expect(engine.getRegistryModelsForProvider).not.toHaveBeenCalled();
   });

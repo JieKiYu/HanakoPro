@@ -20,6 +20,7 @@ vi.mock("../lib/pi-sdk/index.js", () => ({
   SettingsManager: { inMemory: vi.fn(() => ({})) },
   estimateTokens: vi.fn(() => 0),
   findCutPoint: vi.fn(),
+  formatSkillsForPrompt: vi.fn((skills) => `<available_skills>${skills.map(skill => skill.name).join(",")}</available_skills>`),
   generateSummary: vi.fn(),
   emitSessionShutdown: vi.fn(),
   refreshSessionModelFromRegistry: vi.fn(),
@@ -167,7 +168,10 @@ describe("SessionCoordinator ensureSessionLoaded owner restore", () => {
     expect(session).toBe(restoredSession);
     expect(capturedCreateOpts.resourceLoader.getSystemPrompt()).toBe("OWNER MEMORY OFF");
     expect(capturedCreateOpts.customTools.map((t) => t.name)).toEqual(["owner-tool"]);
-    expect(capturedCreateOpts.resourceLoader.getSkills().skills.map((s) => s.name)).toEqual(["skill-owner"]);
+    expect(capturedCreateOpts.resourceLoader.getSkills().skills).toEqual([]);
+    expect(ownerAgent.buildSystemPrompt).toHaveBeenCalledWith(expect.objectContaining({
+      skillsPrompt: "<available_skills>skill-owner</available_skills>",
+    }));
     expect(ownerAgent.setMemoryEnabled).toHaveBeenCalledTimes(2);
     expect(ownerAgent.setMemoryEnabled).toHaveBeenNthCalledWith(1, false);
     expect(ownerAgent.setMemoryEnabled).toHaveBeenNthCalledWith(2, true);

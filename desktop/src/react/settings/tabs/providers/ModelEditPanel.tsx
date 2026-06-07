@@ -14,7 +14,7 @@ export function ModelEditPanel({ modelId, providerId, anchorEl, onClose, onRefre
   onRefresh?: () => Promise<void>;
 }) {
   const showToast = useSettingsStore(s => s.showToast);
-  const meta = lookupModelMeta(modelId) || {};
+  const meta = lookupModelMeta(modelId, providerId) || {};
   const [displayName, setDisplayName] = useState(meta.displayName || meta.name || '');
   const [ctxVal, setCtxVal] = useState(String(meta.context || ''));
   const [outVal, setOutVal] = useState(String(meta.maxOutput || ''));

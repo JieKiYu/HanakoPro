@@ -1,0 +1,59 @@
+/*
+ * Hana Theme: 靛瓷
+ * Guizang indigo porcelain palette adapted for technical reading.
+ */
+
+[data-theme="indigo-porcelain"] {
+    /* Porcelain */
+    --bg:           #F1F3F5;
+    --bg-card:      #FAFBFC;
+    --bg-glass:     rgba(250, 251, 252, 0.93);
+    --sidebar-bg:   #E4E8EC;
+
+    /* Indigo ink */
+    --text:         #0A1F3D;
+    --text-light:   #334760;
+    --text-muted:   #6A7684;
+    --hana-text:    #071B36;
+
+    /* Main accent */
+    --accent:       #0A1F3D;
+    --accent-hover: #152A4A;
+    --accent-light: rgba(10, 31, 61, 0.07);
+    --accent-rgb:   10, 31, 61;
+    --link:         #0E5A8F;
+    --link-hover:   #0A3E67;
+    --link-rgb:     14, 90, 143;
+
+    /* Structure */
+    --border:       rgba(10, 31, 61, 0.18);
+    --shadow:       rgba(10, 31, 61, 0.08);
+
+    /* State colors */
+    --green:        #3F6E5B;
+    --green-rgb:    63, 110, 91;
+    --coral:        #A45B52;
+    --coral-rgb:    164, 91, 82;
+    --danger:       #823A3A;
+    --danger-rgb:   130, 58, 58;
+
+    /* Notes and chat */
+    --jian-note-bg:     #F6F1E6;
+    --jian-note-border: rgba(10, 31, 61, 0.11);
+    --mood-text:    #15365B;
+    --mood-bg:      rgba(10, 31, 61, 0.045);
+    --mood-border:  rgba(10, 31, 61, 0.18);
+    --tool-bg:      rgba(10, 31, 61, 0.05);
+    --tool-text:    #334760;
+    --user-bg:      rgba(10, 31, 61, 0.06);
+    --drop-overlay-bg: rgba(241, 243, 245, 0.86);
+    --attach-bg:    rgba(10, 31, 61, 0.045);
+
+    /* Overlays */
+    --overlay-subtle: rgba(10, 31, 61, 0.03);
+    --overlay-light:  rgba(10, 31, 61, 0.05);
+    --overlay-medium: rgba(10, 31, 61, 0.08);
+    --overlay-strong: rgba(10, 31, 61, 0.16);
+
+    --select-arrow: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%236A7684' fill='none' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+}

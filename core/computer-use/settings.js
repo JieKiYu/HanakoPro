@@ -6,6 +6,7 @@ export const COMPUTER_USE_DEFAULT_SETTINGS = Object.freeze({
     linux: "mock",
   },
   allow_windows_input_injection: false,
+  require_app_approval: false,
   app_approvals: [],
 });
 
@@ -48,6 +49,7 @@ export function normalizeComputerUseSettings(input = {}) {
     enabled: input.enabled === true,
     provider_by_platform: normalizeProviderByPlatform(input.provider_by_platform),
     allow_windows_input_injection: input.allow_windows_input_injection === true,
+    require_app_approval: input.require_app_approval === true,
     app_approvals: [...deduped.values()],
   };
 }

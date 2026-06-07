@@ -19,6 +19,7 @@ import { snapshotStreamBuffer, type StreamBufferSnapshot } from './stream-invali
 import { renderMarkdown } from '../utils/markdown';
 import type { ChatMessage, ContentBlock } from './chat-types';
 import { readMessageLiveVersion } from './message-live-version';
+import { isAbortLikeError } from '../../../../shared/abort-errors.js';
 
 // ── 防竞争计数器 ──
 
@@ -35,13 +36,6 @@ function invalidateSessionSwitches(): void {
 function isCurrentSwitch(version: number, path: string): boolean {
   const state = useStore.getState();
   return version === _switchVersion && state.pendingSessionSwitchPath === path;
-}
-
-function isAbortError(err: unknown): boolean {
-  return !!err && typeof err === 'object' && (
-    (err as { name?: string }).name === 'AbortError' ||
-    (err as { message?: string }).message === 'This operation was aborted'
-  );
 }
 
 function isDesktopShell(): boolean {
@@ -83,6 +77,7 @@ function clearSessionRuntimeCaches(path: string): void {
     const { [path]: _computerOverlay, ...computerOverlayBySession } = s.computerOverlayBySession || {};
     const { [path]: _scroll, ...scrollPositions } = s.scrollPositions || {};
     const { [path]: _todos, ...todosBySession } = s.todosBySession || {};
+    const { [path]: _goal, ...sessionGoalByPath } = s.sessionGoalByPath || {};
     const { [path]: _todosLive, ...todosLiveVersionBySession } = s.todosLiveVersionBySession || {};
     return {
       attachedFilesBySession,
@@ -94,6 +89,7 @@ function clearSessionRuntimeCaches(path: string): void {
       scrollPositions,
       streamingSessions: (s.streamingSessions || []).filter((sessionPath: string) => sessionPath !== path),
       todosBySession,
+      sessionGoalByPath,
       todosLiveVersionBySession,
       inlineErrors: s.inlineErrors ? { ...s.inlineErrors, [path]: null } : s.inlineErrors,
     };
@@ -341,6 +337,7 @@ export async function switchSession(path: string): Promise<void> {
       currentSessionPath: path,
       pendingSessionSwitchPath: null,
       pendingNewSession: false,
+      pendingSessionGoal: null,
       selectedFolder: null,
       workspaceFolders: Array.isArray(data.workspaceFolders) ? data.workspaceFolders : [],
       selectedAgentId: null,
@@ -377,6 +374,7 @@ export async function switchSession(path: string): Promise<void> {
     if (data.thinkingLevel) {
       useStore.getState().setThinkingLevel(data.thinkingLevel);
     }
+    useStore.getState().setSessionGoalForPath(path, data.goal || null);
 
     // 刷新模型列表（当前 session 的模型可能不同）
     loadModels();
@@ -412,7 +410,7 @@ export async function switchSession(path: string): Promise<void> {
     // Restore input focus only if the user is still in the chat surface that initiated the switch.
     requestChatInputFocus(path);
   } catch (err) {
-    if (myVersion !== _switchVersion || isAbortError(err)) return;
+    if (myVersion !== _switchVersion || isAbortLikeError(err)) return;
     useStore.setState((state: Record<string, any>) => (
       state.pendingSessionSwitchPath === path ? { pendingSessionSwitchPath: null } : {}
     ));
@@ -542,6 +540,7 @@ export async function ensureSession(): Promise<boolean> {
 
     if (data.path) {
       patch.currentSessionPath = data.path;
+      patch.pendingSessionGoal = null;
       // 初始化空 session，ChatArea 自动渲染
       useStore.getState().initSession(data.path, [], false);
     }
@@ -549,6 +548,9 @@ export async function ensureSession(): Promise<boolean> {
     useStore.setState(patch);
     if (data.thinkingLevel) {
       useStore.getState().setThinkingLevel(data.thinkingLevel);
+    }
+    if (data.path) {
+      useStore.getState().setSessionGoalForPath(data.path, data.goal || null);
     }
 
     await resetDeskForSessionCwd(data.cwd || null);
@@ -820,6 +822,7 @@ export async function compressForkSession(sessionPath: string): Promise<boolean>
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionPath }),
+      timeout: 240000,
     });
     const data = await res.json();
 

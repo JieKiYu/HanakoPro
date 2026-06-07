@@ -1,20 +1,36 @@
 // @vitest-environment jsdom
 
 import '@testing-library/jest-dom/vitest';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolGroupBlock } from '../../components/chat/ToolGroupBlock';
 import { AssistantMessage } from '../../components/chat/AssistantMessage';
+import { ChatTranscript } from '../../components/chat/ChatTranscript';
+import { BrowserCard } from '../../components/BrowserCard';
 import { useStore } from '../../stores';
+import type { ChatListItem } from '../../stores/chat-types';
+
+const hanaFetchMock = vi.fn();
+
+vi.mock('../../hooks/use-hana-fetch', () => ({
+  hanaFetch: (...args: unknown[]) => hanaFetchMock(...args),
+}));
 
 describe('ToolGroupBlock', () => {
   beforeEach(() => {
     window.t = ((key: string) => key) as typeof window.t;
+    window.platform = {
+      openBrowserViewer: vi.fn(),
+    } as unknown as typeof window.platform;
+    hanaFetchMock.mockResolvedValue({
+      json: async () => ({ ok: true }),
+    });
     useStore.setState({ settingsModal: { open: false, activeTab: 'agent' } } as never);
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
     cleanup();
   });
 
@@ -36,6 +52,29 @@ describe('ToolGroupBlock', () => {
     const detail = screen.getByTitle(command);
 
     expect(detail.textContent).toBe('rm -rf /Users/jason/.claude/plugins/mar…');
+  });
+
+  it('keeps expanded tool args whole so the details pane can scroll instead of truncating content', () => {
+    const longContent = `${'a'.repeat(900)}TAIL_MARKER`;
+
+    render(
+      <ToolGroupBlock
+        collapsed={false}
+        tools={[{
+          name: 'write',
+          args: { path: '/tmp/large.txt', content: longContent },
+          done: true,
+          success: true,
+        }]}
+      />,
+    );
+
+    const indicator = screen.getByText('tool._fallback.done').closest('[data-tool="write"]');
+    expect(indicator).toBeTruthy();
+    fireEvent.click(indicator as HTMLElement);
+
+    expect(screen.getByText((text) => text.includes('TAIL_MARKER'))).toBeTruthy();
+    expect(screen.queryByText((text) => text.includes('\n…'))).toBeNull();
   });
 
   it('syncs a multi-tool group to collapsed when the completed block updates', () => {
@@ -133,6 +172,240 @@ describe('ToolGroupBlock', () => {
     expect(screen.getByText('thinking.done')).toBeTruthy();
     expect(screen.queryByText('thinking.active')).toBeNull();
     expect(screen.getByText('正在准备写入文件内容')).toBeTruthy();
+  });
+
+  it('shows only one browser reply tag at the latest assistant message for a completed turn', async () => {
+    const items: ChatListItem[] = [
+      {
+        type: 'message',
+        data: {
+          id: 'u1',
+          role: 'user',
+          text: '打开 B 站动画页面',
+        },
+      },
+      {
+        type: 'message',
+        data: {
+          id: 'a-browser-1',
+          role: 'assistant',
+          blocks: [{
+            type: 'tool_group',
+            collapsed: true,
+            tools: [{
+              name: 'browser',
+              args: { action: 'navigate', url: 'https://www.bilibili.com/' },
+              done: true,
+              success: true,
+              details: {
+                action: 'navigate',
+                running: true,
+                url: 'https://www.bilibili.com/',
+              },
+            }],
+          }],
+        },
+      },
+      {
+        type: 'message',
+        data: {
+          id: 'a-browser-2',
+          role: 'assistant',
+          blocks: [{
+            type: 'tool_group',
+            collapsed: true,
+            tools: [{
+              name: 'browser',
+              args: { action: 'click' },
+              done: true,
+              success: true,
+              details: {
+                action: 'click',
+                running: true,
+                url: 'https://www.bilibili.com/c/douga/?spm_id_from=333.1007.0.0',
+              },
+            }],
+          }],
+        },
+      },
+      {
+        type: 'message',
+        data: {
+          id: 'a-final',
+          role: 'assistant',
+          blocks: [{
+            type: 'text',
+            html: '<p>已打开 B 站，并进入「动画」页面。</p>',
+          }],
+        },
+      },
+    ];
+
+    render(
+      <ChatTranscript
+        items={items}
+        sessionPath="/sessions/main.jsonl"
+        readOnly
+      />,
+    );
+
+    const tags = screen.getAllByRole('button', { name: 'browser.using: www.bilibili.com' });
+    expect(tags).toHaveLength(1);
+    const tag = tags[0];
+    expect(tag).toBeInTheDocument();
+    expect(tag).toHaveAttribute('title', 'https://www.bilibili.com/c/douga/?spm_id_from=333.1007.0.0');
+    expect(screen.getByText('已打开 B 站，并进入「动画」页面。')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /撤回此轮/ })).toBeNull();
+
+    fireEvent.click(tag);
+
+    await vi.waitFor(() => {
+      expect(hanaFetchMock).toHaveBeenCalledWith('/api/browser/show-session', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ sessionPath: '/sessions/main.jsonl' }),
+      }));
+    });
+    expect(window.platform?.openBrowserViewer).not.toHaveBeenCalled();
+  });
+
+  it('places the browser reply tag between the final text and the revert row', () => {
+    render(
+      <ChatTranscript
+        items={[
+          {
+            type: 'message',
+            data: { id: 'u1', role: 'user', text: '打开 B 站动画页面' },
+          },
+          {
+            type: 'message',
+            data: {
+              id: 'a-browser',
+              role: 'assistant',
+              blocks: [{
+                type: 'tool_group',
+                collapsed: true,
+                tools: [{
+                  name: 'browser',
+                  args: { action: 'navigate', url: 'https://www.bilibili.com/' },
+                  done: true,
+                  success: true,
+                  details: {
+                    action: 'navigate',
+                    running: true,
+                    url: 'https://www.bilibili.com/',
+                  },
+                }],
+              }],
+            },
+          },
+          {
+            type: 'message',
+            data: {
+              id: 'a-final',
+              role: 'assistant',
+              blocks: [{ type: 'text', html: '<p>已打开 B 站，并进入「动画」页面。</p>' }],
+            },
+          },
+        ]}
+        sessionPath="/sessions/main.jsonl"
+      />,
+    );
+
+    const tag = screen.getByRole('button', { name: 'browser.using: www.bilibili.com' });
+    const revert = screen.getByRole('button', { name: /chat\.revertTurn|撤回此轮/ });
+    const tagRow = tag.parentElement;
+    const revertRow = revert.parentElement;
+
+    expect(tagRow).toBeTruthy();
+    expect(revertRow).toBeTruthy();
+    const tagRowNode = tagRow as HTMLElement;
+    const revertRowNode = revertRow as HTMLElement;
+    expect(tagRowNode).not.toBe(revertRowNode);
+    expect(tagRowNode.compareDocumentPosition(revertRowNode) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('hides the latest-turn browser reply tag when the latest browser result is stopped', () => {
+    render(
+      <ChatTranscript
+        items={[
+          {
+            type: 'message',
+            data: { id: 'u1', role: 'user', text: '打开再关闭浏览器' },
+          },
+          {
+            type: 'message',
+            data: {
+              id: 'a-browser-stopped',
+              role: 'assistant',
+              blocks: [{
+                type: 'tool_group',
+                collapsed: true,
+                tools: [
+                  {
+                    name: 'browser',
+                    args: { action: 'navigate', url: 'https://www.bilibili.com/anime/' },
+                    done: true,
+                    success: true,
+                    details: {
+                      action: 'navigate',
+                      running: true,
+                      url: 'https://www.bilibili.com/anime/',
+                    },
+                  },
+                  {
+                    name: 'browser',
+                    args: { action: 'stop' },
+                    done: true,
+                    success: true,
+                    details: {
+                      action: 'stop',
+                      running: false,
+                      url: null,
+                    },
+                  },
+                ],
+              }],
+            },
+          },
+          {
+            type: 'message',
+            data: {
+              id: 'a-final',
+              role: 'assistant',
+              blocks: [{ type: 'text', html: '<p>已关闭。</p>' }],
+            },
+          },
+        ]}
+        sessionPath="/sessions/main.jsonl"
+        readOnly
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: /www\.bilibili\.com/ })).toBeNull();
+  });
+
+  it('dismisses the floating browser card after opening the viewer without stopping the browser', () => {
+    useStore.setState({
+      currentSessionPath: '/sessions/main.jsonl',
+      browserBySession: {
+        '/sessions/main.jsonl': {
+          running: true,
+          url: 'https://www.bilibili.com/',
+          thumbnail: null,
+        },
+      },
+    } as never);
+
+    render(<BrowserCard />);
+
+    const card = screen.getByText('browser.using').closest('#browserFloatingCard');
+    expect(card).toBeTruthy();
+
+    fireEvent.click(card as HTMLElement);
+
+    expect(window.platform?.openBrowserViewer).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('browser.using')).toBeNull();
+    expect(useStore.getState().browserBySession['/sessions/main.jsonl']?.running).toBe(true);
   });
 
   it('shows a Windsurf-style live file card without unreliable percentage progress', () => {

@@ -11,6 +11,13 @@ import { renderMarkdown } from './markdown';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- API 历史消息 JSON 结构动态，难以静态收窄 */
 
+type HistoryCompactionMarker = {
+  id: string;
+  yuan: string;
+  afterMessageId: string | null;
+  timestamp: number | string | null;
+};
+
 // ── API 响应类型 ──
 
 export interface HistoryApiResponse {
@@ -20,6 +27,7 @@ export interface HistoryApiResponse {
     role: string;
     content: string;
     thinking?: string;
+    hasThinking?: boolean;
     toolCalls?: Array<{ name: string; args?: Record<string, unknown>; done?: boolean; success?: boolean; details?: Record<string, unknown> }>;
     images?: Array<{ data: string; mimeType: string }>;
     timestamp?: number | string | null;
@@ -51,6 +59,13 @@ export interface HistoryApiResponse {
   cards?: Array<{
     afterIndex: number;
     card: { type: string; pluginId: string; route: string; title?: string; description?: string };
+  }>;
+  compactions?: Array<{
+    id?: string;
+    label?: string;
+    yuan?: string;
+    afterMessageId?: string | null;
+    timestamp?: number | string | null;
   }>;
   todos?: TodoItem[];
   hasMore?: boolean;
@@ -133,11 +148,39 @@ function normalizeHistoryTimestamp(value: number | string | null | undefined): n
   return undefined;
 }
 
+function insertMoodNearTurnStart(blocks: ContentBlock[] | undefined, moodBlock: Extract<ContentBlock, { type: 'mood' }>): boolean {
+  if (!blocks || blocks.some(block => block.type === 'mood')) return false;
+  const firstNonThinking = blocks.findIndex(block => block.type !== 'thinking');
+  blocks.splice(firstNonThinking >= 0 ? firstNonThinking : blocks.length, 0, moodBlock);
+  return true;
+}
+
 export function buildItemsFromHistory(data: HistoryApiResponse): ChatListItem[] {
   const items: ChatListItem[] = [];
+  let turnFirstAssistant: ChatMessage | null = null;
+  let turnMoodPlaced = false;
 
   // 防御：服务端可能返回 { error: "..." } 等非预期形状
   const messages = Array.isArray(data?.messages) ? data.messages : [];
+  const pendingCompactions: HistoryCompactionMarker[] = (Array.isArray(data?.compactions) ? data.compactions : []).map((c, index) => ({
+    id: c.id || `compaction-${index}`,
+    yuan: c.label || c.yuan || '上下文已自动压缩',
+    afterMessageId: c.afterMessageId ?? null,
+    timestamp: c.timestamp ?? null,
+  }));
+  const compactionsBeforeFirst = pendingCompactions.filter(c => c.afterMessageId == null);
+  const compactionsAfterMessage = new Map<string, HistoryCompactionMarker[]>();
+  for (const compaction of pendingCompactions) {
+    if (compaction.afterMessageId == null) continue;
+    const key = String(compaction.afterMessageId);
+    const list = compactionsAfterMessage.get(key) || [];
+    list.push(compaction);
+    compactionsAfterMessage.set(key, list);
+  }
+
+  for (const compaction of compactionsBeforeFirst) {
+    items.push({ type: 'compaction', ...compaction });
+  }
 
   // 按 afterIndex 分组统一 blocks
   const allBlocks = normalizeBlocks(data);
@@ -152,6 +195,9 @@ export function buildItemsFromHistory(data: HistoryApiResponse): ChatListItem[] 
     const timestamp = normalizeHistoryTimestamp(m.timestamp);
 
     if (m.role === 'user') {
+      turnFirstAssistant = null;
+      turnMoodPlaced = false;
+
       // strip steer 前缀（内部标记，不应展示给用户）
       const rawContent = (m.content || '')
         .replace(/^（插话，无需 MOOD）\n?/, '')
@@ -204,12 +250,15 @@ export function buildItemsFromHistory(data: HistoryApiResponse): ChatListItem[] 
         timestamp,
       };
       items.push({ type: 'message', data: msg });
+      for (const compaction of compactionsAfterMessage.get(String(id)) || []) {
+        items.push({ type: 'compaction', ...compaction });
+      }
     } else if (m.role === 'assistant') {
       const blocks: ContentBlock[] = [];
 
       // 1. Thinking
-      if (m.thinking) {
-        blocks.push({ type: 'thinking', content: m.thinking, sealed: true });
+      if (m.thinking || m.hasThinking) {
+        blocks.push({ type: 'thinking', content: m.thinking || '', sealed: true });
       }
 
       // 2. Mood + 主文本
@@ -239,6 +288,11 @@ export function buildItemsFromHistory(data: HistoryApiResponse): ChatListItem[] 
         blocks.push({ type: 'text', html: renderMarkdown(mainText) });
       }
 
+      for (const img of m.images || []) {
+        if (!img?.data) continue;
+        blocks.push({ type: 'screenshot', base64: img.data, mimeType: img.mimeType || 'image/png' });
+      }
+
       // 5. Cards (before file outputs)
       for (const card of cards) {
         blocks.push({ type: 'plugin_card', card });
@@ -252,7 +306,20 @@ export function buildItemsFromHistory(data: HistoryApiResponse): ChatListItem[] 
 
       const msg: ChatMessage = { id, sourceEntryId: m.entryId, role: 'assistant', blocks };
       if (timestamp !== undefined) msg.timestamp = timestamp;
+
+      const moodIndex = blocks.findIndex(block => block.type === 'mood');
+      if (!turnFirstAssistant) {
+        turnFirstAssistant = msg;
+        turnMoodPlaced = moodIndex >= 0;
+      } else if (!turnMoodPlaced && moodIndex >= 0) {
+        const [moodBlock] = blocks.splice(moodIndex, 1) as [Extract<ContentBlock, { type: 'mood' }>];
+        turnMoodPlaced = insertMoodNearTurnStart(turnFirstAssistant.blocks, moodBlock);
+      }
+
       items.push({ type: 'message', data: msg });
+      for (const compaction of compactionsAfterMessage.get(String(id)) || []) {
+        items.push({ type: 'compaction', ...compaction });
+      }
     }
   }
 

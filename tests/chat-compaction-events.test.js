@@ -33,8 +33,40 @@ describe("chat route compaction lifecycle messages", () => {
       tokens: null,
       contextWindow: 200_000,
       percent: null,
+      compressionAvailable: undefined,
     });
     expect(getSessionByPath).toHaveBeenCalledWith("/session/a.jsonl");
+  });
+
+  it("prefers explicit compaction_end usage from the event", () => {
+    const getSessionByPath = vi.fn(() => ({
+      getContextUsage: () => ({ tokens: 50_000, contextWindow: 200_000, percent: 25 }),
+    }));
+
+    expect(toCompactionLifecycleWsMessage(
+      {
+        type: "compaction_end",
+        reason: "auto-threshold",
+        aborted: false,
+        willRetry: false,
+        tokens: 90_000,
+        contextWindow: 200_000,
+        percent: 45,
+        compressionAvailable: false,
+      },
+      "/session/a.jsonl",
+      getSessionByPath,
+    )).toEqual({
+      type: "compaction_end",
+      sessionPath: "/session/a.jsonl",
+      reason: "auto-threshold",
+      aborted: false,
+      willRetry: false,
+      tokens: 90_000,
+      contextWindow: 200_000,
+      percent: 45,
+      compressionAvailable: false,
+    });
   });
 
   it("ignores non-compaction events", () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   EMPTY_SELECTED_IDS,
   selectIsStreamingSession,
+  selectLatestTerminalSession,
   selectSelectedIdsBySession,
 } from '../../stores/session-selectors';
 
@@ -39,5 +40,88 @@ describe('session-selectors', () => {
     expect(selectIsStreamingSession(state, '/panel')).toBe(true);
     expect(selectIsStreamingSession(state, '/current')).toBe(false);
     expect(selectIsStreamingSession(state, '')).toBe(false);
+  });
+
+  it('返回当前会话最近的 AI 终端会话，供顶栏按钮聚焦', () => {
+    const state = {
+      chatSessions: {
+        '/current': {
+          items: [
+            { type: 'message' as const, data: { id: 'u1', role: 'user' as const, text: 'run tests' } },
+            {
+              type: 'message' as const,
+              data: {
+                id: 'a1',
+                role: 'assistant' as const,
+                blocks: [{
+                  type: 'tool_group' as const,
+                  collapsed: false,
+                  tools: [{
+                    name: 'terminal_create',
+                    args: {},
+                    done: true,
+                    success: true,
+                    details: { id: 'term-old', title: 'Old', cwd: '/old', alive: false },
+                  }],
+                }],
+              },
+            },
+            {
+              type: 'message' as const,
+              data: {
+                id: 'a2',
+                role: 'assistant' as const,
+                blocks: [{
+                  type: 'tool_group' as const,
+                  collapsed: false,
+                  tools: [{
+                    name: 'terminal_write',
+                    args: { id: 'term-new' },
+                    done: false,
+                    success: false,
+                    details: { id: 'term-new', title: 'Tests', cwd: '/repo', alive: true },
+                  }],
+                }],
+              },
+            },
+          ],
+          hasMore: false,
+          loadingMore: false,
+        },
+      },
+    };
+
+    expect(selectLatestTerminalSession(state, '/current')).toEqual({
+      id: 'term-new',
+      title: 'Tests',
+      cwd: '/repo',
+      alive: true,
+      running: true,
+    });
+  });
+
+  it('没有终端工具时返回 null', () => {
+    const state = {
+      chatSessions: {
+        '/current': {
+          items: [{
+            type: 'message' as const,
+            data: {
+              id: 'a1',
+              role: 'assistant' as const,
+              blocks: [{
+                type: 'tool_group' as const,
+                collapsed: false,
+                tools: [{ name: 'read', args: { path: '/tmp/a' }, done: true, success: true }],
+              }],
+            },
+          }],
+          hasMore: false,
+          loadingMore: false,
+        },
+      },
+    };
+
+    expect(selectLatestTerminalSession(state, '/current')).toBeNull();
   });
 });

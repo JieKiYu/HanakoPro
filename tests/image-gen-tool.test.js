@@ -51,6 +51,9 @@ function makeCtx(mediaGen, busOverrides = {}) {
     _mediaGen: mediaGen,
     dataDir: "/tmp/test-data",
     sessionPath: "/sessions/test.jsonl",
+    config: {
+      get: vi.fn(() => null),
+    },
     bus: {
       request: vi.fn(async () => ({})),
       ...busOverrides,
@@ -151,6 +154,37 @@ describe("generate-image tool — adapter resolution", () => {
 
     expect(openaiAdapter.submit).toHaveBeenCalledOnce();
     expect(codexAdapter.submit).not.toHaveBeenCalled();
+    expect(result.details.card.type).toBe("iframe");
+  });
+
+  it("uses the generic OpenAI-compatible adapter for a configured custom image provider", async () => {
+    const genericAdapter = makeAdapter({
+      id: "openai-compatible",
+      checkAuth: vi.fn(async () => ({ ok: true })),
+      submit: vi.fn(async () => ({ taskId: "task-agnes", files: ["agnes.png"] })),
+    });
+    const registry = {
+      get: vi.fn((id) => (id === "openai-compatible" ? genericAdapter : undefined)),
+      getDefault: vi.fn(),
+      getByType: vi.fn(() => [genericAdapter]),
+    };
+    const store = { add: vi.fn(), update: vi.fn() };
+    const poller = { add: vi.fn() };
+    const ctx = makeCtx({ registry, store, poller });
+    ctx.config.get = vi.fn((key) => {
+      if (key === "defaultImageModel") return { provider: "agnes", id: "agnes-image-2.1-flash" };
+      return null;
+    });
+
+    const result = await execute({ prompt: "a profile photo" }, ctx);
+
+    expect(registry.get).toHaveBeenCalledWith("agnes");
+    expect(registry.get).toHaveBeenCalledWith("openai-compatible");
+    expect(genericAdapter.submit).toHaveBeenCalledOnce();
+    expect(genericAdapter.submit.mock.calls[0][0]).toMatchObject({
+      provider: "agnes",
+      prompt: "a profile photo",
+    });
     expect(result.details.card.type).toBe("iframe");
   });
 });

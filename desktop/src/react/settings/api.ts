@@ -12,6 +12,23 @@ import {
 
 const DEFAULT_TIMEOUT = 30_000;
 
+async function responseErrorMessage(res: Response, path: string): Promise<string> {
+  let detail = '';
+  try {
+    const contentType = res.headers?.get?.('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const body = await res.json();
+      detail = body?.error || body?.message || '';
+    } else {
+      detail = await res.text();
+    }
+  } catch {
+    detail = '';
+  }
+  const suffix = detail ? `: ${detail}` : '';
+  return `hanaFetch ${path}: ${res.status} ${res.statusText}${suffix}`;
+}
+
 /**
  * 构建带认证的 Hana Server URL（设置窗口版本）
  *
@@ -56,7 +73,7 @@ export async function hanaFetch(
       signal: controller.signal,
     });
     if (!res.ok) {
-      throw new Error(`hanaFetch ${path}: ${res.status} ${res.statusText}`);
+      throw new Error(await responseErrorMessage(res, path));
     }
     return res;
   } finally {

@@ -2,6 +2,27 @@ import { describe, expect, it } from 'vitest';
 import { buildItemsFromHistory } from '../../utils/history-builder';
 
 describe('buildItemsFromHistory user image restoration', () => {
+  it('把上下文压缩 marker 插入消息列表', () => {
+    const items = buildItemsFromHistory({
+      messages: [
+        { id: '0', role: 'user', content: 'before' },
+        { id: '1', role: 'assistant', content: 'after' },
+      ],
+      compactions: [{
+        id: 'c1',
+        label: '上下文已自动压缩',
+        afterMessageId: '0',
+      }],
+    });
+
+    expect(items.map(item => item.type)).toEqual(['message', 'compaction', 'message']);
+    const marker = items[1];
+    expect(marker.type).toBe('compaction');
+    if (marker.type !== 'compaction') throw new Error('expected compaction');
+    expect(marker.yuan).toBe('上下文已自动压缩');
+    expect(marker.afterMessageId).toBe('0');
+  });
+
   it('把服务端 ISO timestamp 归一成前端毫秒时间', () => {
     const items = buildItemsFromHistory({
       messages: [{
@@ -33,6 +54,53 @@ describe('buildItemsFromHistory user image restoration', () => {
     if (first.type !== 'message') throw new Error('expected message');
     expect(first.data.id).toBe('0');
     expect(first.data.sourceEntryId).toBe('entry-user-1');
+  });
+
+  it('保留加密 reasoning 的空 thinking 完成块', () => {
+    const items = buildItemsFromHistory({
+      messages: [{
+        id: 'a1',
+        role: 'assistant',
+        content: '<mood>\nVibe: 静\n</mood>\n\n正文',
+        hasThinking: true,
+      }],
+    });
+
+    const first = items[0];
+    expect(first.type).toBe('message');
+    if (first.type !== 'message') throw new Error('expected message');
+    expect(first.data.blocks?.[0]).toEqual({ type: 'thinking', content: '', sealed: true });
+    expect(first.data.blocks?.map(block => block.type)).toEqual(['thinking', 'mood', 'text']);
+  });
+
+  it('把同一轮最终回复里的 mood 提到工具卡前面', () => {
+    const items = buildItemsFromHistory({
+      messages: [
+        { id: 'u1', role: 'user', content: '打开网页' },
+        {
+          id: 'a-tool',
+          role: 'assistant',
+          content: '',
+          hasThinking: true,
+          toolCalls: [{ name: 'browser', args: { action: 'start' }, done: true, success: true }],
+        },
+        {
+          id: 'a-final',
+          role: 'assistant',
+          content: '<mood>\n气：稳。\n</mood>\n\n已打开页面。',
+        },
+      ],
+    });
+
+    const firstAssistant = items[1];
+    const finalAssistant = items[2];
+    expect(firstAssistant.type).toBe('message');
+    expect(finalAssistant.type).toBe('message');
+    if (firstAssistant.type !== 'message' || finalAssistant.type !== 'message') {
+      throw new Error('expected assistant messages');
+    }
+    expect(firstAssistant.data.blocks?.map(block => block.type)).toEqual(['thinking', 'mood', 'tool_group']);
+    expect(finalAssistant.data.blocks?.map(block => block.type)).toEqual(['text']);
   });
 
   it('隐藏 bridge 写入用户消息里的内部时间标签', () => {
@@ -94,5 +162,23 @@ describe('buildItemsFromHistory user image restoration', () => {
       mimeType: 'image/png',
       visionAuxiliary: false,
     }]);
+  });
+
+  it('把 assistant 原生生成图片恢复成可点击图片块', () => {
+    const items = buildItemsFromHistory({
+      messages: [{
+        id: 'a-img',
+        role: 'assistant',
+        content: '',
+        images: [{ data: 'IMG_BASE64', mimeType: 'image/png' }],
+      }],
+    });
+
+    const first = items[0];
+    expect(first.type).toBe('message');
+    if (first.type !== 'message') throw new Error('expected message');
+    expect(first.data.blocks).toEqual([
+      { type: 'screenshot', base64: 'IMG_BASE64', mimeType: 'image/png' },
+    ]);
   });
 });

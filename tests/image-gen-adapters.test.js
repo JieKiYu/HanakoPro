@@ -274,6 +274,45 @@ describe("openai adapter", () => {
   });
 });
 
+describe("openai-compatible adapter", () => {
+  beforeEach(() => mockFetch.mockReset());
+
+  it("uses configured custom provider credentials and defaults", async () => {
+    const { openaiCompatibleImageAdapter } = await import("../plugins/image-gen/adapters/openai-compatible.js");
+
+    const fakeB64 = Buffer.from("custom-image").toString("base64");
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ data: [{ b64_json: fakeB64 }] }),
+    });
+
+    const ctx = makeBusCtx("sk-custom", "https://custom.example/v1", "agnes");
+    ctx.config.get = vi.fn((key) => {
+      if (key === "defaultImageModel") return { provider: "agnes", id: "agnes-image-2.1-flash" };
+      if (key === "providerDefaults") return { agnes: { size: "4K", quality: "high", format: "png" } };
+      return null;
+    });
+
+    const result = await openaiCompatibleImageAdapter.submit({
+      prompt: "a portrait",
+      provider: "agnes",
+    }, ctx);
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("https://custom.example/v1/images/generations");
+    expect(opts.headers["Authorization"]).toBe("Bearer sk-custom");
+    const body = JSON.parse(opts.body);
+    expect(body).toMatchObject({
+      model: "agnes-image-2.1-flash",
+      prompt: "a portrait",
+      size: "4K",
+      quality: "high",
+      output_format: "png",
+    });
+    expect(result.files).toHaveLength(1);
+  });
+});
+
 describe("openai codex oauth adapter", () => {
   beforeEach(() => mockFetch.mockReset());
 

@@ -66,9 +66,23 @@ describe('hanaFetch', () => {
       ok: false,
       status: 404,
       statusText: 'Not Found',
+      headers: { get: () => '' },
+      text: async () => '',
     });
 
     await expect(hanaFetch('/api/missing')).rejects.toThrow('404');
+  });
+
+  it('非 2xx 状态码包含 JSON error 时抛出具体错误', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      statusText: 'Internal Server Error',
+      headers: { get: () => 'application/json' },
+      json: async () => ({ error: 'no compressible messages' }),
+    });
+
+    await expect(hanaFetch('/api/sessions/compress-fork')).rejects.toThrow('no compressible messages');
   });
 
   it('传递自定义 method 和 headers', async () => {

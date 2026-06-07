@@ -166,6 +166,27 @@ describe("memory ticker respects session-level memory toggle", () => {
     expect(assemble).not.toHaveBeenCalled();
   });
 
+  it("supports dynamic automaticEnabled functions for runtime generation toggles", async () => {
+    let generateOn = false;
+    const { ticker, summaryManager } = makeTicker(tmpDir, () => true, {
+      automaticEnabled: () => generateOn,
+    });
+
+    expect(ticker.isAutomaticEnabled()).toBe(false);
+    ticker.notifyTurn(sessionPath);
+    await ticker.notifySessionEnd(sessionPath);
+    expect(summaryManager.rollingSummary).not.toHaveBeenCalled();
+
+    generateOn = true;
+    expect(ticker.isAutomaticEnabled()).toBe(true);
+    ticker.notifyTurn(sessionPath);
+    await ticker.notifySessionEnd(sessionPath);
+
+    expect(summaryManager.rollingSummary).toHaveBeenCalledOnce();
+    expect(compileToday).toHaveBeenCalled();
+    expect(assemble).toHaveBeenCalled();
+  });
+
   it("never summarizes agent phone sessions even if session memory is enabled", async () => {
     const phoneSessionPath = path.join(tmpDir, "phone", "sessions", "ch_crew", "phone.jsonl");
     fs.mkdirSync(path.dirname(phoneSessionPath), { recursive: true });

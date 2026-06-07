@@ -12,27 +12,28 @@ import {
   resolveContextConfig,
   splitMessages,
 } from "../core/context-compressor.js";
+import { MANUAL_CONTEXT_COMPRESSION_THRESHOLD } from "../shared/context-compression.js";
+import { resolveCompressionModel, splitMessagesForCompressFork } from "../core/session-coordinator.js";
 
 describe("compress-fork: threshold detection", () => {
-  it("compressionAvailable is true when percent >= threshold * 100", () => {
-    const ctxConfig = resolveContextConfig({ context: { enabled: true, threshold: 0.7 } });
-    // Simulating what chat.js does: pct from getContextUsage is 0-100
-    const pct = 75; // 75%
-    const available = ctxConfig.enabled && pct != null && (pct / 100) >= ctxConfig.threshold;
+  it("compressionAvailable is true at the fixed manual threshold, independent of auto threshold", () => {
+    const ctxConfig = resolveContextConfig({ context: { enabled: true, threshold: 0.8 } });
+    const pct = 75;
+    const available = ctxConfig.enabled && pct != null && (pct / 100) >= MANUAL_CONTEXT_COMPRESSION_THRESHOLD;
     expect(available).toBe(true);
   });
 
-  it("compressionAvailable is false when percent < threshold * 100", () => {
-    const ctxConfig = resolveContextConfig({ context: { enabled: true, threshold: 0.7 } });
+  it("compressionAvailable is false below the fixed manual threshold", () => {
+    const ctxConfig = resolveContextConfig({ context: { enabled: true, threshold: 0.8 } });
     const pct = 50;
-    const available = ctxConfig.enabled && pct != null && (pct / 100) >= ctxConfig.threshold;
+    const available = ctxConfig.enabled && pct != null && (pct / 100) >= MANUAL_CONTEXT_COMPRESSION_THRESHOLD;
     expect(available).toBe(false);
   });
 
   it("compressionAvailable is false when compression disabled", () => {
-    const ctxConfig = resolveContextConfig({ context: { enabled: false, threshold: 0.7 } });
+    const ctxConfig = resolveContextConfig({ context: { enabled: false, threshold: 0.8 } });
     const pct = 90;
-    const available = ctxConfig.enabled && pct != null && (pct / 100) >= ctxConfig.threshold;
+    const available = ctxConfig.enabled && pct != null && (pct / 100) >= MANUAL_CONTEXT_COMPRESSION_THRESHOLD;
     expect(available).toBe(false);
   });
 });
@@ -137,6 +138,33 @@ describe("compress-fork: message structure", () => {
     expect(originalMessages).toEqual(snapshot);
   });
 
+  it("adapts protected turns when a tool-heavy session has few user turns", () => {
+    const messages = [];
+    for (let turn = 1; turn <= 5; turn += 1) {
+      messages.push({ role: "user", content: `u${turn}` });
+      for (let i = 0; i < 20; i += 1) {
+        messages.push({ role: "assistant", content: `a${turn}-${i}` });
+        messages.push({ role: "toolResult", content: [{ type: "text", text: `tool ${turn}-${i}` }] });
+      }
+    }
+
+    const contextConfig = resolveContextConfig({
+      context: {
+        enabled: true,
+        recentTurnsProtected: 5,
+        protect: { systemPrompt: true, recentToolResults: true },
+      },
+    });
+    const normalSplit = splitMessages(messages, contextConfig.recentTurnsProtected, contextConfig.protect);
+    expect(normalSplit.compressible).toHaveLength(0);
+
+    const adaptedSplit = splitMessagesForCompressFork(messages, contextConfig);
+    expect(adaptedSplit.adapted).toBe(true);
+    expect(adaptedSplit.recentTurnsProtected).toBeLessThan(5);
+    expect(adaptedSplit.compressible.length).toBeGreaterThan(0);
+    expect(adaptedSplit.retained.some(m => m.content === "u5")).toBe(true);
+  });
+
   it("strips stale assistant usage when retaining messages for a fork", () => {
     const original = {
       role: "assistant",
@@ -150,5 +178,58 @@ describe("compress-fork: message structure", () => {
     expect(forked).not.toHaveProperty("usage");
     expect(forked.content).toEqual(original.content);
     expect(original).toHaveProperty("usage");
+  });
+});
+
+describe("compress-fork: compression model selection", () => {
+  const sessionModel = { provider: "chat-provider", id: "chat-model", api: "openai-responses" };
+  const utilityModel = { provider: "utility-provider", id: "utility-model", api: "openai-completions" };
+  const customModel = { provider: "custom-provider", id: "custom-model", api: "openai-completions" };
+
+  it("uses the current chat model when context.compressionModel is chat", () => {
+    const models = {
+      utilityModel,
+      resolveExecutionModel: () => customModel,
+    };
+    const contextConfig = resolveContextConfig({
+      context: {
+        compressionModel: "chat",
+        compressionCustomModel: { provider: "custom-provider", id: "custom-model" },
+      },
+    });
+
+    expect(resolveCompressionModel(models, contextConfig, sessionModel)).toBe(sessionModel);
+  });
+
+  it("uses the configured custom compression model when context.compressionModel is custom", () => {
+    const models = {
+      utilityModel,
+      resolveExecutionModel: (ref) => ({ ...customModel, provider: ref.provider, id: ref.id }),
+    };
+    const contextConfig = resolveContextConfig({
+      context: {
+        compressionModel: "custom",
+        compressionCustomModel: { provider: "custom-provider", id: "custom-model" },
+      },
+    });
+
+    expect(resolveCompressionModel(models, contextConfig, sessionModel)).toEqual(customModel);
+  });
+
+  it("falls back to utility model when the configured custom compression model is unavailable", () => {
+    const models = {
+      utilityModel,
+      resolveExecutionModel: () => {
+        throw new Error("missing model");
+      },
+    };
+    const contextConfig = resolveContextConfig({
+      context: {
+        compressionModel: "custom",
+        compressionCustomModel: { provider: "gone-provider", id: "gone-model" },
+      },
+    });
+
+    expect(resolveCompressionModel(models, contextConfig, sessionModel)).toBe(utilityModel);
   });
 });

@@ -9,6 +9,7 @@
  * 都在这个数组上完成，不再经过中间层。
  */
 import path from "path";
+import fs from "fs";
 import { AuthStorage, createModelRegistry } from "../lib/pi-sdk/index.js";
 import { t } from "../server/i18n.js";
 import { ProviderRegistry } from "./provider-registry.js";
@@ -62,6 +63,7 @@ export class ModelManager {
   get availableModels() { return this._availableModels; }
   get modelsJsonPath() { return path.join(this._hanakoHome, "models.json"); }
   get authJsonPath() { return path.join(this._hanakoHome, "auth.json"); }
+  get modelsCachePath() { return path.join(this._hanakoHome, "models-cache.json"); }
 
   // ── 模型解析：_availableModels 唯一真理源 ──
 
@@ -325,5 +327,22 @@ export class ModelManager {
     const authKey = this.providerRegistry.getAuthJsonKey(name);
     const all = this._modelRegistry.getAll();
     return all.filter(m => m.provider === name || m.provider === authKey);
+  }
+
+  /**
+   * 读取模型发现缓存里的 provider 模型。
+   * 用于设置页展示“已发现但尚未加入”的可选模型，不影响运行期 availableModels。
+   * @param {string} name - provider ID
+   * @returns {object[]}
+   */
+  getCachedModelsForProvider(name) {
+    if (!name) return [];
+    try {
+      const cache = JSON.parse(fs.readFileSync(this.modelsCachePath, "utf-8"));
+      const models = cache?.[name]?.models;
+      return Array.isArray(models) ? models : [];
+    } catch {
+      return [];
+    }
   }
 }

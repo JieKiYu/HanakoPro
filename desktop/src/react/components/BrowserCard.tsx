@@ -5,18 +5,27 @@
  * 由 App.tsx 在 .main-content 内直接渲染。
  */
 
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useStore } from '../stores';
 import { updateKeyed } from '../stores/create-keyed-slice';
 import { hanaFetch } from '../hooks/use-hana-fetch';
 import { useBrowserState } from '../stores/browser-slice';
 
 export function BrowserCard() {
+  const currentSessionPath = useStore(s => s.currentSessionPath);
   const { running: browserRunning, url: browserUrl, thumbnail: browserThumbnail } = useBrowserState();
+  const [dismissedKey, setDismissedKey] = useState<string | null>(null);
+
+  const displayKey = browserRunning ? `${currentSessionPath || ''}:${browserUrl || ''}` : null;
+
+  useEffect(() => {
+    if (!browserRunning) setDismissedKey(null);
+  }, [browserRunning, displayKey]);
 
   const handleClick = useCallback(() => {
     window.platform?.openBrowserViewer?.();
-  }, []);
+    setDismissedKey(displayKey);
+  }, [displayKey]);
 
   const handleClose = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -36,7 +45,7 @@ export function BrowserCard() {
     }
   }, []);
 
-  if (!browserRunning) return null;
+  if (!browserRunning || (displayKey && dismissedKey === displayKey)) return null;
 
   let displayUrl = '';
   try {

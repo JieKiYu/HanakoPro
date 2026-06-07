@@ -9,21 +9,30 @@ import { Toggle } from '../../widgets/Toggle';
 import { getApiKeySavePlan } from './api-key-save-plan';
 import styles from '../../Settings.module.css';
 
-export function ApiKeyCredentials({ providerId, summary, providerConfig, isPresetSetup, presetInfo, onRefresh }: {
+export interface ProviderCredentialDraft {
+  base_url: string;
+  api: string;
+  api_key: string;
+}
+
+export function ApiKeyCredentials({ providerId, summary, providerConfig, isPresetSetup, presetInfo, onRefresh, onDraftChange }: {
   providerId: string;
   summary: ProviderSummary;
   providerConfig?: Record<string, unknown>;
   isPresetSetup?: boolean;
   presetInfo?: { label: string; value: string; url?: string; api?: string; local?: boolean };
   onRefresh: () => Promise<void>;
+  onDraftChange?: (draft: ProviderCredentialDraft) => void;
 }) {
   const showToast = useSettingsStore(s => s.showToast);
-  const [keyVal, setKeyVal] = useState('');
+  const [keyVal, setKeyVal] = useState(summary.api_key || '');
   const [keyEdited, setKeyEdited] = useState(false);
   const derivedBaseUrl = summary.base_url || presetInfo?.url || '';
   const [urlVal, setUrlVal] = useState(derivedBaseUrl);
   const [urlEdited, setUrlEdited] = useState(false);
-  const api = summary.api || presetInfo?.api || '';
+  const derivedApi = summary.api || presetInfo?.api || '';
+  const [apiVal, setApiVal] = useState(derivedApi);
+  const [apiEdited, setApiEdited] = useState(false);
   const isDeepSeek = providerId === 'deepseek';
   const deepseekBetaStrictTools = summary.deepseek_beta_strict_tools === true
     || providerConfig?.deepseek_beta_strict_tools === true;
@@ -40,7 +49,19 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig, isPrese
     if (!urlEdited) setUrlVal(derivedBaseUrl);
   }, [derivedBaseUrl, urlEdited]);
 
-  const verifyAndSave = async (btn: HTMLButtonElement) => {
+  useEffect(() => {
+    if (!apiEdited) setApiVal(derivedApi);
+  }, [apiEdited, derivedApi]);
+
+  useEffect(() => {
+    onDraftChange?.({
+      base_url: urlVal,
+      api: apiVal,
+      api_key: keyVal,
+    });
+  }, [apiVal, keyVal, onDraftChange, urlVal]);
+
+  const saveKeyDraft = async ({ verify, btn }: { verify: boolean; btn?: HTMLButtonElement }) => {
     const plan = getApiKeySavePlan({
       keyEdited,
       keyVal,
@@ -50,13 +71,13 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig, isPrese
       isPresetSetup: !!isPresetSetup,
       isLocalPreset: !!presetInfo?.local,
       seedDefaultModels: !!presetInfo && (summary.models?.length ?? 0) === 0,
-      api,
+      api: apiVal,
     });
     if (!plan.shouldSave) return;
     setConnHint(null);
-    btn.classList.add(styles['spinning']);
+    if (btn) btn.classList.add(styles['spinning']);
     try {
-      if (plan.shouldVerify) {
+      if (verify && plan.shouldVerify) {
         const testRes = await hanaFetch('/api/providers/test', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -65,8 +86,9 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig, isPrese
         const testData = await testRes.json();
         if (!testData.ok) {
           setConnStatus('fail');
-          showConnHint(t('settings.providers.verifyFailed'), false);
-          showToast(t('settings.providers.verifyFailed'), 'error');
+          const msg = verifyFailureMessage(testData.error);
+          showConnHint(msg, false);
+          showToast(msg, 'error');
           return;
         }
         setConnStatus('ok');
@@ -78,7 +100,7 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig, isPrese
         body: JSON.stringify({ providers: { [providerId]: plan.payload } }),
       });
       invalidateConfigCache();
-      showToast(plan.shouldVerify ? t('settings.providers.verifySuccess') : t('settings.saved'), 'success');
+      showToast(verify && plan.shouldVerify ? t('settings.providers.verifySuccess') : t('settings.saved'), 'success');
       if (isPresetSetup) useSettingsStore.setState({ selectedProviderId: providerId });
       setKeyEdited(false);
       if (urlEdited) setUrlEdited(false);
@@ -87,8 +109,12 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig, isPrese
       const msg = err instanceof Error ? err.message : String(err);
       showToast(t('settings.saveFailed') + ': ' + msg, 'error');
     } finally {
-      btn.classList.remove(styles['spinning']);
+      if (btn) btn.classList.remove(styles['spinning']);
     }
+  };
+
+  const verifyAndSave = async (btn: HTMLButtonElement) => {
+    await saveKeyDraft({ verify: true, btn });
   };
 
   const [connStatus, setConnStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
@@ -118,6 +144,11 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig, isPrese
     connHintTimer.current = setTimeout(() => setConnHint(null), 4000);
   };
 
+  const verifyFailureMessage = (error?: unknown) => {
+    const detail = typeof error === 'string' && error.trim() ? error.trim() : '';
+    return detail ? `${t('settings.providers.verifyFailed')}: ${detail}` : t('settings.providers.verifyFailed');
+  };
+
   const verifyOnly = async (btn: HTMLButtonElement) => {
     setConnStatus('testing');
     setConnHint(null);
@@ -126,16 +157,18 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig, isPrese
       const testRes = await hanaFetch('/api/providers/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: providerId, base_url: urlVal.trim() || derivedBaseUrl, api, api_key: keyVal.trim() || undefined }),
+        body: JSON.stringify({ name: providerId, base_url: urlVal.trim() || derivedBaseUrl, api: apiVal, api_key: keyVal.trim() || undefined }),
       });
       const testData = await testRes.json();
       setConnStatus(testData.ok ? 'ok' : 'fail');
-      showConnHint(testData.ok ? t('settings.providers.verifySuccess') : t('settings.providers.verifyFailed'), testData.ok);
-      showToast(testData.ok ? t('settings.providers.verifySuccess') : t('settings.providers.verifyFailed'), testData.ok ? 'success' : 'error');
-    } catch {
+      const msg = testData.ok ? t('settings.providers.verifySuccess') : verifyFailureMessage(testData.error);
+      showConnHint(msg, testData.ok);
+      showToast(msg, testData.ok ? 'success' : 'error');
+    } catch (err: unknown) {
       setConnStatus('fail');
-      showConnHint(t('settings.providers.verifyFailed'), false);
-      showToast(t('settings.providers.verifyFailed'), 'error');
+      const msg = verifyFailureMessage(err instanceof Error ? err.message : String(err));
+      showConnHint(msg, false);
+      showToast(msg, 'error');
     } finally {
       btn.classList.remove(styles['spinning']);
     }
@@ -150,6 +183,10 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig, isPrese
             value={keyVal}
             onChange={(v) => { setKeyVal(v); setKeyEdited(true); setConnStatus('idle'); setConnHint(null); }}
             placeholder={isPresetSetup ? t('settings.providers.setupHint') : ''}
+            onBlur={() => {
+              if (!keyEdited) return;
+              void saveKeyDraft({ verify: false });
+            }}
           />
           <button
             className={`${styles['pv-cred-conn-icon']} ${styles[connStatus] || ''}`}
@@ -221,9 +258,11 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig, isPrese
           <SelectWidget
             className={styles['pv-cred-select']}
             options={API_FORMAT_OPTIONS}
-            value={api || ''}
+            value={apiVal || ''}
             onChange={async (val) => {
               if (isPresetSetup) return;
+              setApiVal(val);
+              setApiEdited(true);
               try {
                 await hanaFetch('/api/config', {
                   method: 'PUT',
@@ -232,6 +271,7 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig, isPrese
                 });
                 invalidateConfigCache();
                 showToast(t('settings.saved'), 'success');
+                setApiEdited(false);
                 await onRefresh();
               } catch { /* swallow */ }
             }}

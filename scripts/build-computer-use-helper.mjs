@@ -32,6 +32,67 @@ export function computerUseHelperOutputDir({
   return path.join(rootDir, "dist-computer-use", `${osName}-${arch}`);
 }
 
+export function computerUseHelperAppName() {
+  return "Hanako Computer Use.app";
+}
+
+export function computerUseHelperAppPath(outputDir) {
+  return path.join(outputDir, computerUseHelperAppName());
+}
+
+export function computerUseHelperAppExecutablePath(outputDir) {
+  return path.join(computerUseHelperAppPath(outputDir), "Contents", "MacOS", "hana-computer-use-helper");
+}
+
+function escapePlistString(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+export function createComputerUseHelperAppBundle({ outputDir, sourceBinary }) {
+  const appPath = computerUseHelperAppPath(outputDir);
+  const contentsDir = path.join(appPath, "Contents");
+  const macosDir = path.join(contentsDir, "MacOS");
+  fs.rmSync(appPath, { recursive: true, force: true });
+  fs.mkdirSync(macosDir, { recursive: true });
+
+  const executable = path.join(macosDir, "hana-computer-use-helper");
+  fs.copyFileSync(sourceBinary, executable);
+  fs.chmodSync(executable, 0o755);
+
+  const info = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleExecutable</key>
+  <string>hana-computer-use-helper</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.hanakopro.computer-use</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>${escapePlistString(computerUseHelperAppName().replace(/\.app$/, ""))}</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>LSUIElement</key>
+  <true/>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+</dict>
+</plist>
+`;
+  fs.writeFileSync(path.join(contentsDir, "Info.plist"), info);
+  return { appPath, executable };
+}
+
 export function swiftBuildScratchPath({
   rootDir = path.resolve(__dirname, ".."),
   arch = process.arch,
@@ -59,9 +120,31 @@ const CUA_CLICK_TOOL_RELATIVE_PATH = path.join(
   "Tools",
   "ClickTool.swift",
 );
+const CUA_PERMISSIONS_RELATIVE_PATH = path.join(
+  "checkouts",
+  "cua",
+  "libs",
+  "cua-driver",
+  "Sources",
+  "CuaDriverCore",
+  "Permissions",
+  "Permissions.swift",
+);
+const CUA_CHECK_PERMISSIONS_TOOL_RELATIVE_PATH = path.join(
+  "checkouts",
+  "cua",
+  "libs",
+  "cua-driver",
+  "Sources",
+  "CuaDriverServer",
+  "Tools",
+  "CheckPermissionsTool.swift",
+);
 
 const CUA_AX_PATCH_SENTINEL = "cuaDriverAXMessagingTimeoutSeconds";
 const CUA_CLICK_PATCH_SENTINEL = '"show_default_ui": "AXShowDefaultUI"';
+const CUA_PERMISSIONS_PATCH_SENTINEL = "static func preflightStatus() -> PermissionsStatus";
+const CUA_CHECK_PERMISSIONS_PATCH_SENTINEL = "Permissions.preflightStatus()";
 
 function replaceRequired(source, needle, replacement, label) {
   if (!source.includes(needle)) {
@@ -369,6 +452,68 @@ export function patchCuaDriverClickToolSource(source) {
   return patched;
 }
 
+export function patchCuaDriverPermissionsSource(source) {
+  if (source.includes(CUA_PERMISSIONS_PATCH_SENTINEL)) return source;
+  let patched = source;
+
+  patched = replaceRequired(
+    patched,
+    `public enum Permissions {
+    /// Accurate TCC status for both grants.
+`,
+    `public enum Permissions {
+    /// Pure read-only TCC preflight. Avoid ScreenCaptureKit probes here so a
+    /// status refresh does not raise macOS's direct screen/audio consent panel.
+    public static func preflightStatus() -> PermissionsStatus {
+        PermissionsStatus(
+            accessibility: AXIsProcessTrusted(),
+            screenRecording: CGPreflightScreenCaptureAccess()
+        )
+    }
+
+    /// Accurate TCC status for both grants.
+`,
+    "read-only permission preflight",
+  );
+
+  return patched;
+}
+
+export function patchCuaDriverCheckPermissionsToolSource(source) {
+  if (source.includes(CUA_CHECK_PERMISSIONS_PATCH_SENTINEL)) return source;
+  let patched = source;
+
+  patched = replaceRequired(
+    patched,
+    `                Report TCC permission status for Accessibility and Screen Recording.
+                By default also raises the system permission dialogs for any missing
+                grants — Apple's request APIs are no-ops when the grant is already
+                active, so this is safe to call repeatedly. Pass {"prompt": false}
+                for a purely read-only status check.
+`,
+    `                Report TCC permission status for Accessibility and Screen Recording.
+                By default also raises the system permission dialogs for any missing
+                grants. Pass {"prompt": false} for a purely read-only preflight that
+                avoids ScreenCaptureKit probes and therefore will not raise macOS's
+                direct screen/audio access consent panel.
+`,
+    "permission tool description",
+  );
+
+  patched = replaceRequired(
+    patched,
+    `            let status = await Permissions.currentStatus()
+`,
+    `            let status = shouldPrompt
+                ? await Permissions.currentStatus()
+                : Permissions.preflightStatus()
+`,
+    "non-prompting permission status path",
+  );
+
+  return patched;
+}
+
 export function applyCuaDriverSourcePatches({ scratchPath } = {}) {
   const appStatePath = path.join(scratchPath, CUA_APP_STATE_RELATIVE_PATH);
   if (!fs.existsSync(appStatePath)) {
@@ -377,6 +522,14 @@ export function applyCuaDriverSourcePatches({ scratchPath } = {}) {
   const clickToolPath = path.join(scratchPath, CUA_CLICK_TOOL_RELATIVE_PATH);
   if (!fs.existsSync(clickToolPath)) {
     throw new Error(`[computer-use-helper] Cua ClickTool.swift not found at ${clickToolPath}`);
+  }
+  const permissionsPath = path.join(scratchPath, CUA_PERMISSIONS_RELATIVE_PATH);
+  if (!fs.existsSync(permissionsPath)) {
+    throw new Error(`[computer-use-helper] Cua Permissions.swift not found at ${permissionsPath}`);
+  }
+  const checkPermissionsToolPath = path.join(scratchPath, CUA_CHECK_PERMISSIONS_TOOL_RELATIVE_PATH);
+  if (!fs.existsSync(checkPermissionsToolPath)) {
+    throw new Error(`[computer-use-helper] Cua CheckPermissionsTool.swift not found at ${checkPermissionsToolPath}`);
   }
 
   let patchedAny = false;
@@ -395,6 +548,24 @@ export function applyCuaDriverSourcePatches({ scratchPath } = {}) {
     fs.chmodSync(clickToolPath, 0o644);
     fs.writeFileSync(clickToolPath, patchedClickTool);
     console.log("[computer-use-helper] patched Cua ClickTool for AXShowDefaultUI row actions");
+    patchedAny = true;
+  }
+
+  const permissionsSource = fs.readFileSync(permissionsPath, "utf8");
+  const patchedPermissions = patchCuaDriverPermissionsSource(permissionsSource);
+  if (patchedPermissions !== permissionsSource) {
+    fs.chmodSync(permissionsPath, 0o644);
+    fs.writeFileSync(permissionsPath, patchedPermissions);
+    console.log("[computer-use-helper] patched Cua permissions for quiet read-only status checks");
+    patchedAny = true;
+  }
+
+  const checkPermissionsToolSource = fs.readFileSync(checkPermissionsToolPath, "utf8");
+  const patchedCheckPermissionsTool = patchCuaDriverCheckPermissionsToolSource(checkPermissionsToolSource);
+  if (patchedCheckPermissionsTool !== checkPermissionsToolSource) {
+    fs.chmodSync(checkPermissionsToolPath, 0o644);
+    fs.writeFileSync(checkPermissionsToolPath, patchedCheckPermissionsTool);
+    console.log("[computer-use-helper] patched Cua check_permissions prompt=false preflight path");
     patchedAny = true;
   }
 
@@ -453,8 +624,10 @@ export function buildComputerUseHelper({
   const target = path.join(outDir, "hana-computer-use-helper");
   fs.copyFileSync(source, target);
   fs.chmodSync(target, 0o755);
+  const app = createComputerUseHelperAppBundle({ outputDir: outDir, sourceBinary: source });
   console.log(`[computer-use-helper] copied ${target}`);
-  return { skipped: false, target };
+  console.log(`[computer-use-helper] created ${app.appPath}`);
+  return { skipped: false, target, app };
 }
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {

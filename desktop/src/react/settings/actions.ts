@@ -4,13 +4,10 @@
 import { useSettingsStore } from './store';
 import { hanaFetch, hanaUrl } from './api';
 import { t } from './helpers';
+import { isAbortLikeError } from '../../../../shared/abort-errors.js';
 
 let _settingsConfigLoadVersion = 0;
 let _settingsConfigAbortController: AbortController | null = null;
-
-function isAbortError(err: unknown): boolean {
-  return !!err && typeof err === 'object' && (err as { name?: string }).name === 'AbortError';
-}
 
 export async function loadAgents() {
   const store = useSettingsStore.getState();
@@ -105,7 +102,7 @@ export async function loadSettingsConfig() {
       currentPins: pinnedData.pins || [],
     });
   } catch (err) {
-    if (isAbortError(err)) return;
+    if (isAbortLikeError(err)) return;
     console.error('[settings] load failed:', err);
   } finally {
     if (_settingsConfigAbortController === controller) {

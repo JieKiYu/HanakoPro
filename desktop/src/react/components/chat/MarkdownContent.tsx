@@ -77,6 +77,115 @@ function applyTailFade(root: HTMLElement, count: number): void {
   }
 }
 
+function enhanceCodeBlockScrollbars(root: HTMLElement): () => void {
+  const oldBars = Array.from(root.querySelectorAll<HTMLElement>('[data-md-code-scrollbar="true"]'));
+  for (const bar of oldBars) bar.remove();
+
+  const cleanups: Array<() => void> = [];
+  const updates: Array<() => void> = [];
+  const blocks = Array.from(root.querySelectorAll<HTMLPreElement>('pre'));
+
+  for (const pre of blocks) {
+    const track = document.createElement('div');
+    const thumb = document.createElement('div');
+    track.className = styles.markdownCodeScrollbar;
+    track.dataset.mdCodeScrollbar = 'true';
+    thumb.className = styles.markdownCodeScrollbarThumb;
+    track.appendChild(thumb);
+    pre.insertAdjacentElement('afterend', track);
+
+    const update = () => {
+      const canScrollX = pre.scrollWidth > pre.clientWidth + 1;
+      track.hidden = !canScrollX;
+      if (!canScrollX) return;
+      const trackWidth = track.clientWidth;
+      if (trackWidth <= 0) return;
+      const thumbWidth = Math.min(trackWidth, Math.max(32, (pre.clientWidth / pre.scrollWidth) * trackWidth));
+      const maxThumbLeft = Math.max(0, trackWidth - thumbWidth);
+      const maxScrollLeft = Math.max(1, pre.scrollWidth - pre.clientWidth);
+      const thumbLeft = (pre.scrollLeft / maxScrollLeft) * maxThumbLeft;
+      thumb.style.width = `${thumbWidth}px`;
+      thumb.style.transform = `translateX(${thumbLeft}px)`;
+    };
+    updates.push(update);
+
+    let dragging: {
+      pointerId: number;
+      startX: number;
+      scrollLeft: number;
+      trackWidth: number;
+      thumbWidth: number;
+    } | null = null;
+
+    const pointerDown = (event: PointerEvent) => {
+      if (event.button !== 0 || track.hidden) return;
+      const rect = track.getBoundingClientRect();
+      const thumbWidth = Math.min(rect.width, Math.max(32, (pre.clientWidth / pre.scrollWidth) * rect.width));
+      const maxThumbLeft = Math.max(1, rect.width - thumbWidth);
+      const targetThumbLeft = Math.min(maxThumbLeft, Math.max(0, event.clientX - rect.left - thumbWidth / 2));
+      pre.scrollLeft = (targetThumbLeft / maxThumbLeft) * (pre.scrollWidth - pre.clientWidth);
+      dragging = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        scrollLeft: pre.scrollLeft,
+        trackWidth: rect.width,
+        thumbWidth,
+      };
+      track.setPointerCapture(event.pointerId);
+      event.preventDefault();
+      update();
+    };
+
+    const pointerMove = (event: PointerEvent) => {
+      if (!dragging || dragging.pointerId !== event.pointerId) return;
+      const maxThumbTravel = Math.max(1, dragging.trackWidth - dragging.thumbWidth);
+      const maxScrollLeft = Math.max(0, pre.scrollWidth - pre.clientWidth);
+      pre.scrollLeft = dragging.scrollLeft + ((event.clientX - dragging.startX) / maxThumbTravel) * maxScrollLeft;
+      event.preventDefault();
+      update();
+    };
+
+    const pointerEnd = (event: PointerEvent) => {
+      if (dragging && dragging.pointerId === event.pointerId && track.hasPointerCapture(event.pointerId)) {
+        track.releasePointerCapture(event.pointerId);
+      }
+      dragging = null;
+    };
+
+    pre.addEventListener('scroll', update);
+    track.addEventListener('pointerdown', pointerDown);
+    track.addEventListener('pointermove', pointerMove);
+    track.addEventListener('pointerup', pointerEnd);
+    track.addEventListener('pointercancel', pointerEnd);
+    const frame = window.requestAnimationFrame(update);
+
+    cleanups.push(() => {
+      window.cancelAnimationFrame(frame);
+      pre.removeEventListener('scroll', update);
+      track.removeEventListener('pointerdown', pointerDown);
+      track.removeEventListener('pointermove', pointerMove);
+      track.removeEventListener('pointerup', pointerEnd);
+      track.removeEventListener('pointercancel', pointerEnd);
+      track.remove();
+    });
+  }
+
+  const ResizeObserverCtor = window.ResizeObserver;
+  let observer: ResizeObserver | null = null;
+  if (ResizeObserverCtor && blocks.length > 0) {
+    observer = new ResizeObserverCtor(() => {
+      for (const update of updates) update();
+    });
+    for (const pre of blocks) observer.observe(pre);
+    observer.observe(root);
+  }
+
+  return () => {
+    observer?.disconnect();
+    for (const cleanup of cleanups) cleanup();
+  };
+}
+
 export const MarkdownContent = memo(function MarkdownContent({ html, className, tailFadeCount = 0 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const classes = className ? `md-content ${className}` : 'md-content';
@@ -89,6 +198,7 @@ export const MarkdownContent = memo(function MarkdownContent({ html, className, 
   useEffect(() => {
     if (!ref.current) return;
     injectCopyButtons(ref.current);
+    return enhanceCodeBlockScrollbars(ref.current);
   }, [html]);
   useMermaidDiagrams(ref, [html]);
 

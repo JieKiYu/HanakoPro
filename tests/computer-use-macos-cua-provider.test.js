@@ -38,7 +38,46 @@ describe("macos Cua provider", () => {
     expect(command).toBe("/opt/cua-driver");
   });
 
-  it("prefers a Hana-bundled Computer Use helper over an external Cua Driver install", () => {
+  it("prefers the bundled Computer Use app helper over an external Cua Driver install", () => {
+    const copied = new Set();
+    const fsImpl = {
+      existsSync: (p) => p === "/Applications/Hanako.app/Contents/Resources/computer-use/macos/Hanako Computer Use.app"
+        || p === "/Applications/Hanako.app/Contents/Resources/computer-use/macos/Hanako Computer Use.app/Contents/MacOS/hana-computer-use-helper"
+        || p === "/Applications/Hanako.app/Contents/Resources/computer-use/macos/Hanako Computer Use.app/Contents/Info.plist"
+        || copied.has(p),
+      statSync: () => ({ size: 42, mtimeMs: 1000 }),
+      readFileSync: () => { throw new Error("missing stamp"); },
+      writeFileSync: vi.fn(),
+      mkdirSync: vi.fn(),
+      rmSync: vi.fn(),
+      cpSync: vi.fn((_from, to) => {
+        copied.add(to);
+        copied.add(`${to}/Contents/MacOS/hana-computer-use-helper`);
+      }),
+      chmodSync: vi.fn(),
+    };
+    const command = resolveCuaDriverCommand({
+      env: {
+        HANA_ROOT: "/Applications/Hanako.app/Contents/Resources/server",
+        HANA_CUA_DRIVER_PATH: "/opt/cua-driver",
+      },
+      existsSync: fsImpl.existsSync,
+      fsImpl,
+      execFileSyncImpl: vi.fn(),
+      homeDir: "/Users/hana",
+      arch: "arm64",
+      cwd: "/Users/hana/project-hana",
+    });
+
+    expect(command).toBe("/Users/hana/Library/Application Support/HanakoPro/ComputerUse/Hanako Computer Use.app/Contents/MacOS/hana-computer-use-helper");
+    expect(fsImpl.cpSync).toHaveBeenCalledWith(
+      "/Applications/Hanako.app/Contents/Resources/computer-use/macos/Hanako Computer Use.app",
+      "/Users/hana/Library/Application Support/HanakoPro/ComputerUse/Hanako Computer Use.app",
+      { recursive: true, preserveTimestamps: true },
+    );
+  });
+
+  it("falls back to the legacy bundled helper when the Computer Use app is absent", () => {
     const command = resolveCuaDriverCommand({
       env: {
         HANA_ROOT: "/Applications/Hanako.app/Contents/Resources/server",
@@ -57,13 +96,13 @@ describe("macos Cua provider", () => {
   it("resolves the development helper build output before falling back to PATH", () => {
     const command = resolveCuaDriverCommand({
       env: { HANA_ROOT: "/Users/hana/project-hana" },
-      existsSync: (p) => p === "/Users/hana/project-hana/dist-computer-use/mac-arm64/hana-computer-use-helper",
+      existsSync: (p) => p === "/Users/hana/project-hana/dist-computer-use/mac-arm64/Hanako Computer Use.app/Contents/MacOS/hana-computer-use-helper",
       homeDir: "/Users/hana",
       arch: "arm64",
       cwd: "/Users/hana/project-hana",
     });
 
-    expect(command).toBe("/Users/hana/project-hana/dist-computer-use/mac-arm64/hana-computer-use-helper");
+    expect(command).toBe("/Users/hana/project-hana/dist-computer-use/mac-arm64/Hanako Computer Use.app/Contents/MacOS/hana-computer-use-helper");
   });
 
   it("reports unavailable on non-macOS platforms", async () => {
@@ -92,6 +131,7 @@ describe("macos Cua provider", () => {
       command: "/tmp/hana-computer-use-helper",
       runner,
       socketPath: "/tmp/hana.sock",
+      autoStartDaemon: false,
     });
 
     await expect(provider.getStatus()).resolves.toMatchObject({
@@ -101,6 +141,81 @@ describe("macos Cua provider", () => {
         { name: "Screen Recording", granted: false },
       ],
     });
+  });
+
+  it("reports granted permissions even when the helper daemon is not running yet", async () => {
+    const { runner } = makeRunner((_command, args) => {
+      if (args[0] === "status") {
+        return {
+          stdout: "",
+          stderr: "hana-computer-use-helper daemon is not running",
+          exitCode: 1,
+        };
+      }
+      expect(args[0]).toBe("check_permissions");
+      return rawResult(null, [{ type: "text", text: "✅ Accessibility: granted.\n✅ Screen Recording: granted." }]);
+    });
+    const provider = createMacosCuaProvider({
+      platform: "darwin",
+      command: "/tmp/hana-computer-use-helper",
+      runner,
+      socketPath: "/tmp/hana.sock",
+      autoStartDaemon: false,
+    });
+
+    await expect(provider.getStatus()).resolves.toMatchObject({
+      providerId: "macos:cua",
+      available: true,
+      daemonAvailable: false,
+      daemonReason: "daemon-unavailable",
+      permissions: [
+        { name: "Accessibility", granted: true },
+        { name: "Screen Recording", granted: true },
+      ],
+    });
+  });
+
+  it("starts the bundled helper app before requesting macOS permissions", async () => {
+    let statusChecks = 0;
+    const { runner, calls } = makeRunner((_command, args) => {
+      if (args[0] === "status") {
+        statusChecks += 1;
+        return statusChecks === 1
+          ? { stdout: "", stderr: "not running", exitCode: 1 }
+          : { stdout: "running", stderr: "", exitCode: 0 };
+      }
+      expect(args[0]).toBe("check_permissions");
+      return rawResult(null, [{ type: "text", text: "❌ Accessibility: NOT granted.\n❌ Screen Recording: NOT granted." }]);
+    });
+    const provider = createMacosCuaProvider({
+      platform: "darwin",
+      command: "/Users/hana/Library/Application Support/HanakoPro/ComputerUse/Hanako Computer Use.app/Contents/MacOS/hana-computer-use-helper",
+      runner,
+      socketPath: "/tmp/hana.sock",
+      daemonStartupTimeoutMs: 1000,
+      cursorEnabled: false,
+    });
+
+    await expect(provider.requestPermissions()).resolves.toMatchObject({
+      providerId: "macos:cua",
+      available: true,
+      permissions: [
+        { name: "Accessibility", granted: false },
+        { name: "Screen Recording", granted: false },
+      ],
+    });
+
+    const launchCall = calls.find((call) => call.spawned === true);
+    expect(launchCall).toMatchObject({
+      command: "/usr/bin/open",
+      options: { detached: true, stdio: "ignore" },
+    });
+    expect(calls.map((call) => call.args[0])).toEqual([
+      "status",
+      "-n",
+      "status",
+      "check_permissions",
+    ]);
   });
 
   it("falls back to launch_app when the target app is not running", async () => {
@@ -139,9 +254,9 @@ describe("macos Cua provider", () => {
       windowId: "10725",
       providerState: { pid: 844, windowId: 10725, bundleId: "com.apple.calculator" },
     });
-    expect(lease.allowedActions).not.toContain("click_point");
-    expect(lease.allowedActions).not.toContain("double_click");
-    expect(lease.allowedActions).not.toContain("drag");
+    expect(lease.allowedActions).toContain("click_point");
+    expect(lease.allowedActions).toContain("double_click");
+    expect(lease.allowedActions).toContain("drag");
     expect(lease.allowedActions).toContain("click_element");
   });
 
@@ -287,7 +402,7 @@ describe("macos Cua provider", () => {
     });
     const provider = createMacosCuaProvider({
       platform: "darwin",
-      command: "/tmp/hana-computer-use-helper",
+      command: "/Users/hana/Library/Application Support/HanakoPro/ComputerUse/Hanako Computer Use.app/Contents/MacOS/hana-computer-use-helper",
       runner,
       socketPath: "/tmp/hana.sock",
       daemonStartupTimeoutMs: 1000,
@@ -297,13 +412,26 @@ describe("macos Cua provider", () => {
 
     const serveCall = calls.find((call) => call.spawned === true);
     expect(serveCall).toMatchObject({
-      command: "/tmp/hana-computer-use-helper",
-      args: ["serve", "--socket", "/tmp/hana.sock"],
+      command: "/usr/bin/open",
       options: { detached: true, stdio: "ignore" },
     });
+    expect(serveCall.args).toEqual([
+      "-n",
+      "-g",
+      "-j",
+      "--env",
+      "HANA_COMPUTER_USE_SOCKET_PATH=/tmp/hana.sock",
+      "--env",
+      expect.stringMatching(/^HANA_AGENT_CURSOR_CONFIG_JSON=/),
+      "/Users/hana/Library/Application Support/HanakoPro/ComputerUse/Hanako Computer Use.app",
+      "--args",
+      "serve",
+      "--socket",
+      "/tmp/hana.sock",
+    ]);
     expect(calls.map((call) => call.args[0])).toEqual([
       "status",
-      "serve",
+      "-n",
       "status",
       "set_agent_cursor_style",
       "set_agent_cursor_motion",
@@ -465,7 +593,7 @@ describe("macos Cua provider", () => {
     expect(helperCalls[1].args[1]).toBe(JSON.stringify({ pid: 844, key: "return" }));
   });
 
-  it("rejects aggressive pixel actions by default before invoking Cua", async () => {
+  it("maps screenshot-coordinate actions to Cua pixel tools", async () => {
     const { runner, calls } = makeRunner(() => rawResult({ ok: true }));
     const provider = createMacosCuaProvider({ platform: "darwin", command: "/tmp/cua-driver", runner });
     const lease = {
@@ -482,30 +610,35 @@ describe("macos Cua provider", () => {
       scaleFactor: 2,
     };
 
-    await expect(provider.performAction({}, lease, { type: "click_point", x: 125, y: 80, snapshotDisplay }))
-      .rejects.toMatchObject({ code: COMPUTER_USE_ERRORS.CAPABILITY_UNSUPPORTED });
-    await expect(provider.performAction({}, lease, {
+    await provider.performAction({}, lease, { type: "click_point", x: 125, y: 80, snapshotDisplay });
+    await provider.performAction({}, lease, { type: "double_click", x: 126, y: 81, snapshotDisplay });
+    await provider.performAction({}, lease, {
       type: "drag",
       fromX: 10,
       fromY: 20,
       toX: 300,
       toY: 120,
       snapshotDisplay,
-    })).rejects.toMatchObject({ code: COMPUTER_USE_ERRORS.CAPABILITY_UNSUPPORTED });
-    await expect(provider.performAction({}, lease, { type: "double_click", elementId: "14" }))
-      .rejects.toMatchObject({ code: COMPUTER_USE_ERRORS.CAPABILITY_UNSUPPORTED });
+    });
+    await provider.performAction({}, lease, { type: "double_click", elementId: "14" });
 
     const helperCalls = calls.filter((c) => c.command === "/tmp/cua-driver");
-    expect(helperCalls).toHaveLength(0);
+    expect(helperCalls.map((c) => c.args[0])).toEqual(["click", "double_click", "drag", "double_click"]);
+    expect(helperCalls.map((c) => JSON.parse(c.args[1]))).toEqual([
+      { pid: 844, window_id: 10725, x: 125, y: 80 },
+      { pid: 844, window_id: 10725, x: 126, y: 81 },
+      { pid: 844, window_id: 10725, from_x: 10, from_y: 20, to_x: 300, to_y: 120 },
+      { pid: 844, window_id: 10725, element_index: 14 },
+    ]);
   });
 
-  it("declares clean AX-first capabilities by default", async () => {
+  it("declares native virtual pointer capabilities by default", async () => {
     const { runner } = makeRunner(() => rawResult({ ok: true }));
     const provider = createMacosCuaProvider({ platform: "darwin", command: "/tmp/cua-driver", runner });
 
-    expect(provider.capabilities.elementDoubleClick).toBe(false);
-    expect(provider.capabilities.pointClick).toBe("unsupported");
-    expect(provider.capabilities.drag).toBe("unsupported");
+    expect(provider.capabilities.elementDoubleClick).toBe(true);
+    expect(provider.capabilities.pointClick).toBe("allowed");
+    expect(provider.capabilities.drag).toBe("allowed");
     expect(provider.capabilities.requiresForegroundForInput).toBe(false);
   });
 

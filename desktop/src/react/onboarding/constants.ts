@@ -24,7 +24,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
 ];
 
 export const OB_THEMES = [
-  'warm-paper', 'midnight', 'auto', 'high-contrast', 'grass-aroma',
+  'warm-paper', 'midnight', 'auto', 'high-contrast', 'mo-bai', 'indigo-porcelain', 'grass-aroma',
   'contemplation', 'absolutely', 'delve', 'deep-think',
 ] as const;
 

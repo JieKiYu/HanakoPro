@@ -37,6 +37,7 @@ import { initApp } from './app-init';
 import { useAnyBrowserRunning } from './stores/browser-slice';
 import { openSettingsModal } from './stores/settings-modal-actions';
 import { AppPages } from './components/app/AppPages';
+import { selectLatestTerminalSession } from './stores/session-selectors';
 
 declare function t(key: string, vars?: Record<string, string | number>): string;
 
@@ -142,6 +143,11 @@ function App() {
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => {
               const s = useStore.getState();
+              const activeTerminal = selectLatestTerminalSession(s, s.currentSessionPath);
+              if (activeTerminal) {
+                window.platform?.openTerminal?.({ focusId: activeTerminal.id, cwd: activeTerminal.cwd });
+                return;
+              }
               const cwd = (s.deskBasePath || '').trim();
               window.platform?.openTerminal?.(cwd || undefined);
             }}

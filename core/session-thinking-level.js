@@ -18,6 +18,7 @@ export function modelSupportsXhigh(model) {
     || id.includes("gpt-5.2")
     || id.includes("gpt-5.3")
     || id.includes("gpt-5.4")
+    || id.includes("gpt-5.5")
     || id.includes("opus-4-6")
     || id.includes("opus-4.6");
 }

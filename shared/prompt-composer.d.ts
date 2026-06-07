@@ -36,6 +36,16 @@ export type PromptSimplePreset = {
   content: string;
 };
 
+export type PromptComposerOriginConfig = {
+  root: string;
+  mood: string;
+  anchor: string;
+  conduct: string;
+  keepBlockIds: string[];
+  includePersonality: boolean;
+  includeMood: boolean;
+};
+
 export type BuiltinSimplePromptTemplate = {
   id: string;
   name: string;
@@ -45,11 +55,12 @@ export type BuiltinSimplePromptTemplate = {
 
 export type PromptComposerConfig = {
   enabled: boolean;
-  mode: "blocks" | "simple";
+  mode: "blocks" | "simple" | "origin";
   activeRouteId: string;
   activeSimplePresetId: string;
   simpleContent: string;
   simplePresets: PromptSimplePreset[];
+  origin: PromptComposerOriginConfig;
   blockOverrides: PromptComposerBlockOverride[];
   blocks: PromptComposerBlock[];
   routes: PromptComposerRoute[];
@@ -65,13 +76,20 @@ export type BuiltinPromptBlockMeta = {
 export const DEFAULT_PROMPT_BLOCK_ORDER: string[];
 export const SYSTEM_GENERATED_PROMPT_BLOCK_IDS: string[];
 export const DEFAULT_SIMPLE_PROMPT_TEMPLATE_ID: string;
+export const DEFAULT_ORIGIN_KEEP_BLOCK_ORDER: string[];
+export const DEFAULT_ORIGIN_ROOT_PROMPT: string;
+export const DEFAULT_ORIGIN_CONDUCT_PROMPT: string;
+export const DEFAULT_ORIGIN_MOOD_PROMPT: string;
+export const DEFAULT_ORIGIN_TURN_ANCHOR: string;
 export const BUILTIN_SIMPLE_PROMPT_TEMPLATES: BuiltinSimplePromptTemplate[];
-export const PROMPT_COMPOSER_MODES: Array<"blocks" | "simple">;
+export const PROMPT_COMPOSER_MODES: Array<"blocks" | "simple" | "origin">;
 export const BUILTIN_PROMPT_BLOCKS: BuiltinPromptBlockMeta[];
 export function createDefaultPromptComposerConfig(): PromptComposerConfig;
 export function normalizePromptComposerConfig(value: unknown): PromptComposerConfig;
+export function extractOriginRootFromSimpleContent(simpleContent: string, variables?: Record<string, unknown>): string;
 export function composePromptFromBlocks(args?: {
   config?: unknown;
   builtInBlocks?: Array<{ id: string; content: string }>;
   variables?: Record<string, unknown>;
+  includeRuntimeFoundation?: boolean;
 }): string | null;

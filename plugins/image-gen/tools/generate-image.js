@@ -33,13 +33,24 @@ async function adapterIsAvailable(adapter, submitCtx) {
   }
 }
 
+async function resolveAdapterForProvider(providerId, registry, submitCtx) {
+  if (!providerId) return null;
+  const adapter = registry.get(providerId);
+  if (adapter) return adapter;
+  const generic = registry.get("openai-compatible");
+  if (!generic) return null;
+  return await adapterIsAvailable(generic, { ...submitCtx, providerOverride: providerId })
+    ? generic
+    : null;
+}
+
 export async function resolveImageAdapter(input, registry, submitCtx) {
-  if (input.provider) return registry.get(input.provider);
+  if (input.provider) return resolveAdapterForProvider(input.provider, registry, submitCtx);
 
   const defaultProvider = submitCtx.config?.get?.("defaultImageModel")?.provider;
   if (defaultProvider) {
-    const adapter = registry.get(defaultProvider);
-    if (adapter && await adapterIsAvailable(adapter, submitCtx)) return adapter;
+    const adapter = await resolveAdapterForProvider(defaultProvider, registry, submitCtx);
+    if (adapter && await adapterIsAvailable(adapter, { ...submitCtx, providerOverride: defaultProvider })) return adapter;
   }
 
   const adapters = registry.getByType("image");
@@ -68,10 +79,13 @@ export async function execute(input, ctx) {
 
   const count = Math.min(Math.max(input.count || 1, 1), 9);
   const batchId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const defaultImageModel = ctx.config?.get?.("defaultImageModel") || null;
+  const effectiveProvider = input.provider || defaultImageModel?.provider;
 
   const params = {
     type: "image",
     prompt: input.prompt,
+    ...(effectiveProvider && { provider: effectiveProvider }),
     ...(input.ratio && { ratio: input.ratio }),
     ...(input.resolution && { resolution: input.resolution }),
     ...(input.model && { model: input.model }),

@@ -13,6 +13,92 @@ import { estimateTokens, serializeConversation } from "../lib/pi-sdk/index.js";
 import { createModuleLogger } from "../lib/debug-log.js";
 
 const log = createModuleLogger("context-compressor");
+const FALLBACK_SUMMARY_MAX_CHARS = 36_000;
+const FALLBACK_SUMMARY_MAX_BLOCK_CHARS = 1_600;
+const FALLBACK_SUMMARY_HEAD_MESSAGES = 8;
+const FALLBACK_SUMMARY_TAIL_MESSAGES = 56;
+
+function truncateText(text, maxChars = FALLBACK_SUMMARY_MAX_BLOCK_CHARS) {
+  const normalized = String(text || "").replace(/\s+\n/g, "\n").trim();
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, maxChars)}...[truncated]`;
+}
+
+function textFromContent(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const parts = [];
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue;
+    if (block.type === "text" && block.text) {
+      parts.push(block.text);
+    } else if (block.type === "toolCall") {
+      parts.push(`[tool call: ${block.name || "unknown"} ${JSON.stringify(block.arguments || {})}]`);
+    } else if (block.type === "image") {
+      parts.push("[image omitted]");
+    } else if (block.type === "video") {
+      parts.push("[video omitted]");
+    }
+  }
+  return parts.join("\n");
+}
+
+function selectedFallbackMessages(messages) {
+  const list = Array.isArray(messages) ? messages : [];
+  if (list.length <= FALLBACK_SUMMARY_HEAD_MESSAGES + FALLBACK_SUMMARY_TAIL_MESSAGES) {
+    return { selected: list, omitted: 0 };
+  }
+  return {
+    selected: [
+      ...list.slice(0, FALLBACK_SUMMARY_HEAD_MESSAGES),
+      ...list.slice(-FALLBACK_SUMMARY_TAIL_MESSAGES),
+    ],
+    omitted: list.length - FALLBACK_SUMMARY_HEAD_MESSAGES - FALLBACK_SUMMARY_TAIL_MESSAGES,
+  };
+}
+
+export function buildExtractiveCompressionSummary(messages, { reason = "" } = {}) {
+  const list = Array.isArray(messages) ? messages : [];
+  if (list.length === 0) return "";
+  const counts = list.reduce((acc, message) => {
+    const role = message?.role || "unknown";
+    acc[role] = (acc[role] || 0) + 1;
+    return acc;
+  }, {});
+  const { selected, omitted } = selectedFallbackMessages(list);
+  const lines = [
+    "# 上下文压缩摘要",
+    "",
+    "Hanako 在自动摘要模型不可用、超时或返回空内容时生成了这份抽取式摘要。",
+    "它保留了可压缩历史中的用户目标、助手结论、工具调用结果片段、文件路径、错误信息和代码线索；请把它当作继续工作的上下文，而不是完整逐字记录。",
+    reason ? `触发原因：${reason}` : "",
+    `原始可压缩消息数：${list.length}`,
+    `角色分布：${Object.entries(counts).map(([role, count]) => `${role}=${count}`).join(", ")}`,
+    omitted > 0 ? `中间省略消息数：${omitted}` : "",
+    "",
+    "## 关键历史片段",
+  ].filter(Boolean);
+
+  let used = lines.join("\n").length;
+  let written = 0;
+  for (let i = 0; i < selected.length; i += 1) {
+    const message = selected[i];
+    const text = truncateText(textFromContent(message?.content));
+    if (!text && !message?.errorMessage) continue;
+    const role = message?.role || "unknown";
+    const toolName = message?.toolName ? `/${message.toolName}` : "";
+    const errorText = message?.errorMessage ? `\n[error] ${message.errorMessage}` : "";
+    const chunk = `\n\n### ${written + 1}. ${role}${toolName}\n${text}${errorText}`;
+    if (used + chunk.length > FALLBACK_SUMMARY_MAX_CHARS) {
+      lines.push(`\n\n[后续片段因长度上限省略，已写入 ${written} 条片段。]`);
+      break;
+    }
+    lines.push(chunk);
+    used += chunk.length;
+    written += 1;
+  }
+  return lines.join("\n").trim();
+}
 
 /**
  * 从 agent config 中读取并规范化 context 压缩配置。
@@ -44,11 +130,14 @@ export function resolveContextConfig(agentConfig) {
  * @param {Array} params.messages - 当前 session 的消息列表
  * @param {number} params.contextWindow - 模型上下文窗口大小（token）
  * @param {object} params.contextConfig - resolveContextConfig 的结果
+ * @param {number|null} [params.tokens] - 已计算好的上下文 token 数；未提供时按 messages 估算
  * @returns {boolean}
  */
-export function shouldTriggerCompression({ messages, contextWindow, contextConfig }) {
+export function shouldTriggerCompression({ messages, contextWindow, contextConfig, tokens = null }) {
   if (!contextConfig.enabled) return false;
-  const totalTokens = messages.reduce((sum, m) => sum + estimateTokens(m), 0);
+  const totalTokens = Number.isFinite(tokens)
+    ? tokens
+    : messages.reduce((sum, m) => sum + estimateTokens(m), 0);
   const ratio = totalTokens / contextWindow;
   return ratio >= contextConfig.threshold;
 }

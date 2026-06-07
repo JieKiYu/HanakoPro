@@ -1,16 +1,17 @@
-﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useShallow } from 'zustand/react/shallow';
 import { useSettingsStore } from '../store';
 import { autoSaveConfig } from '../helpers';
 import { hanaFetch } from '../api';
 import { SettingsSection } from '../components/SettingsSection';
-import { SettingsRow } from '../components/SettingsRow';
 import { Toggle } from '../widgets/Toggle';
-import { renderMarkdownPreview } from '../../utils/markdown';
+import { renderMarkdown } from '../../utils/markdown';
 import styles from '../Settings.module.css';
 import {
-  BUILTIN_SIMPLE_PROMPT_TEMPLATES,
+  DEFAULT_ORIGIN_CONDUCT_PROMPT,
+  DEFAULT_ORIGIN_MOOD_PROMPT,
+  DEFAULT_ORIGIN_ROOT_PROMPT,
   normalizePromptComposerConfig,
 } from '../../../../../shared/prompt-composer.js';
 
@@ -52,20 +53,24 @@ type PromptSimplePreset = {
   content: string;
 };
 
-type BuiltinSimplePromptTemplate = {
-  id: string;
-  name: string;
-  description: string;
-  content: string;
+type PromptOriginConfig = {
+  root: string;
+  mood: string;
+  anchor: string;
+  conduct: string;
+  keepBlockIds: string[];
+  includePersonality: boolean;
+  includeMood: boolean;
 };
 
 type PromptComposerConfig = {
   enabled: boolean;
-  mode: 'blocks' | 'simple';
+  mode: 'blocks' | 'simple' | 'origin';
   activeRouteId: string;
   activeSimplePresetId: string;
   simpleContent: string;
   simplePresets: PromptSimplePreset[];
+  origin: PromptOriginConfig;
   blockOverrides: PromptBlockOverride[];
   blocks: PromptBlock[];
   routes: PromptRoute[];
@@ -91,41 +96,103 @@ type SystemPromptPreview = {
   model?: { id?: string; provider?: string; name?: string } | null;
 };
 
+type PromptModuleKey = '核' | '形' | '时' | '忆' | '器' | '令' | '照' | '德';
+type PromptPreviewMode = 'markdown' | 'plain';
 
-const SIMPLE_PROMPT_TEMPLATES = BUILTIN_SIMPLE_PROMPT_TEMPLATES as BuiltinSimplePromptTemplate[];
-const PROMPT_VARIABLES = [
-  '{{userName}}',
-  '{{agentName}}',
-  '{{agentId}}',
-  '{{cwd}}',
-  '{{workspace}}',
-  '{{currentDate}}',
-  '{{currentDateTime}}',
-  '{{userProfile}}',
-  '{{personality}}',
-  '{{pinnedMemory}}',
-  '{{memory}}',
-  '{{skills}}',
-  '{{appendSystemPrompt}}',
-  '{{mood}}',
-  '{{hanakoHome}}',
-  '{{mcpPluginDataDir}}',
-  '{{mcpConfigPath}}',
-];
-const PROMPT_VARIABLE_COPY_TEXT = PROMPT_VARIABLES.join('\n');
-const PROMPT_VARIABLE_HINT = `支持变量：${PROMPT_VARIABLES.join('、')}。`;
+type PromptModule = {
+  key: PromptModuleKey;
+  content: string;
+};
 
-function createId(prefix: string) {
-  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-}
+const MODULE_ORDER: PromptModuleKey[] = ['核', '形', '时', '忆', '器', '令', '照', '德'];
+const MODULE_HINTS: Record<PromptModuleKey, string> = {
+  核: '根本原则与核心文本',
+  形: 'Hana 的身份、人格与关系设定',
+  时: '当前时间、工作目录、运行环境',
+  忆: '用户档案、置顶记忆、召回记忆',
+  器: '可用技能',
+  令: '当前会话追加规则',
+  照: '内照与 mood',
+  德: '行动约束、确认边界、验证与交付方式',
+};
 
 function normalizeDraft(value: unknown): PromptComposerConfig {
   const normalized = normalizePromptComposerConfig(value) as PromptComposerConfig;
-  return { ...normalized, mode: 'simple' };
+  const raw = value && typeof value === 'object' ? value as Partial<PromptComposerConfig> : {};
+  const rawOrigin = raw.origin && typeof raw.origin === 'object' ? raw.origin as Partial<PromptOriginConfig> : {};
+  const rootExists = hasOwn(rawOrigin, 'root');
+  const moodExists = hasOwn(rawOrigin, 'mood');
+  const conductExists = hasOwn(rawOrigin, 'conduct');
+  const conductText = conductExists ? String(rawOrigin.conduct ?? '') : DEFAULT_ORIGIN_CONDUCT_PROMPT;
+  return {
+    ...normalized,
+    enabled: true,
+    mode: 'origin',
+    simpleContent: '',
+    simplePresets: [],
+    origin: {
+      ...normalized.origin,
+      root: rootExists ? String(rawOrigin.root ?? '') : DEFAULT_ORIGIN_ROOT_PROMPT,
+      mood: moodExists ? String(rawOrigin.mood ?? '') : DEFAULT_ORIGIN_MOOD_PROMPT,
+      conduct: conductText,
+      anchor: '',
+    },
+  };
 }
 
 function hasOwn(value: object | undefined, key: string) {
   return !!value && Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function trimText(value: unknown) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function displayOriginRoot(origin: PromptOriginConfig) {
+  return origin.root;
+}
+
+function displayOriginMood(origin: PromptOriginConfig) {
+  return origin.mood;
+}
+
+function displayOriginConduct(origin: PromptOriginConfig) {
+  return origin.conduct;
+}
+
+function summarizeContent(content: string) {
+  const line = content.replace(/\s+/g, ' ').trim();
+  if (!line) return '';
+  return line.length > 96 ? `${line.slice(0, 96)}…` : line;
+}
+
+function isEditableModuleKey(key: PromptModuleKey) {
+  return key === '核' || key === '照' || key === '德';
+}
+
+function getEditableModuleContent(key: PromptModuleKey, origin: PromptOriginConfig) {
+  if (key === '核') return displayOriginRoot(origin);
+  if (key === '照') return displayOriginMood(origin);
+  if (key === '德') return displayOriginConduct(origin);
+  return '';
+}
+
+function compactModuleTemplate(key: PromptModuleKey, content: string) {
+  const body = content.trim();
+  return body ? `# ${key}\n\n${body}` : '';
+}
+
+function getReadonlyModuleTemplate(key: PromptModuleKey) {
+  if (key === '形') return compactModuleTemplate(key, '{{originPersonality}}');
+  if (key === '时') return compactModuleTemplate(key, ['{{workspace}}', '当前时日：{{currentDateTime}}'].join('\n'));
+  if (key === '忆') return compactModuleTemplate(key, ['用户档案：', '{{userProfile}}', '', '置顶记忆：', '{{pinnedMemory}}'].join('\n'));
+  if (key === '器') return compactModuleTemplate(key, '{{skills}}');
+  if (key === '令') return compactModuleTemplate(key, '{{appendSystemPrompt}}');
+  return '';
+}
+
+function formatErrorMessage(err: unknown, fallback: string) {
+  return err instanceof Error ? err.message : fallback;
 }
 
 export function PromptTab() {
@@ -138,79 +205,53 @@ export function PromptTab() {
   const [sourceLoading, setSourceLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [preview, setPreview] = useState<SystemPromptPreview | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewMode, setPreviewMode] = useState<PromptPreviewMode>('markdown');
+  const [previewRuntimeFoundation, setPreviewRuntimeFoundation] = useState(false);
+  const [moduleDialogKey, setModuleDialogKey] = useState<PromptModuleKey | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const [previewRawMode, setPreviewRawMode] = useState(false);
   const autosaveTimerRef = useRef<number | null>(null);
+  const previewTimerRef = useRef<number | null>(null);
+  const migrationKeyRef = useRef<string | null>(null);
 
-  const copyPromptVariables = async () => {
-    try {
-      await navigator.clipboard.writeText(PROMPT_VARIABLE_COPY_TEXT);
-      showToast('已复制变量列表', 'success');
-    } catch (err: any) {
-      showToast(`复制失败: ${err?.message || err}`, 'error');
+  const fallbackModules = useMemo(() => {
+    const modules: PromptModule[] = [
+      { key: '核', content: displayOriginRoot(draft.origin) },
+      { key: '形', content: getReadonlyModuleTemplate('形') },
+      { key: '时', content: getReadonlyModuleTemplate('时') },
+      { key: '忆', content: getReadonlyModuleTemplate('忆') },
+      { key: '器', content: getReadonlyModuleTemplate('器') },
+      { key: '令', content: getReadonlyModuleTemplate('令') },
+    ];
+    if (draft.origin.includeMood === true) modules.push({ key: '照', content: displayOriginMood(draft.origin) });
+    modules.push({ key: '德', content: displayOriginConduct(draft.origin) });
+    return modules;
+  }, [draft.origin]);
+  const visibleModules = useMemo(() => {
+    const modulesByKey = new Map<PromptModuleKey, PromptModule>();
+    for (const module of fallbackModules) {
+      modulesByKey.set(module.key, module);
     }
-  };
+    return MODULE_ORDER
+      .map(key => modulesByKey.get(key))
+      .filter((module): module is PromptModule => !!module);
+  }, [fallbackModules]);
+  const activeModule = moduleDialogKey
+    ? visibleModules.find(module => module.key === moduleDialogKey) || fallbackModules.find(module => module.key === moduleDialogKey) || null
+    : null;
 
-  const renderVariableHint = (suffix?: string) => (
-    <div className={styles['prompt-variable-hint-row']}>
-      <span className={`${styles['settings-form-hint']} ${styles['prompt-variable-hint-text']}`}>
-        {PROMPT_VARIABLE_HINT}
-        {suffix}
-        {saving ? ' 正在保存…' : ''}
-      </span>
-      <button type="button" className={styles['prompt-variable-copy-btn']} onClick={copyPromptVariables}>复制</button>
-    </div>
-  );
-
-  useEffect(() => {
-    setDraft(normalizeDraft(settingsConfig?.promptComposer));
-  }, [settingsConfig?.promptComposer]);
-
-  useEffect(() => () => {
-    if (autosaveTimerRef.current) window.clearTimeout(autosaveTimerRef.current);
+  const saveDraft = useCallback(async (nextDraft: PromptComposerConfig, options: { silent?: boolean } = {}) => {
+    setSaving(true);
+    try {
+      await autoSaveConfig({ promptComposer: nextDraft }, options);
+    } finally {
+      setSaving(false);
+    }
   }, []);
 
-  useEffect(() => {
-    if (!agentId) return;
-    const ac = new AbortController();
-    setSourceLoading(true);
-    hanaFetch(`/api/agents/${agentId}/prompt-composer-source`, { signal: ac.signal })
-      .then(res => res.json())
-      .then(data => {
-        if (ac.signal.aborted) return;
-        if (data.error) throw new Error(data.error);
-        setSource({
-          tools: Array.isArray(data.tools) ? data.tools : [],
-        });
-      })
-      .catch((err) => {
-        if (!ac.signal.aborted) showToast(`加载提示词源失败: ${err.message}`, 'error');
-      })
-      .finally(() => {
-        if (!ac.signal.aborted) setSourceLoading(false);
-      });
-    return () => ac.abort();
-  }, [agentId, showToast]);
-
-  const previewHtml = useMemo(
-    () => preview?.markdown ? renderMarkdownPreview(preview.markdown) : '',
-    [preview?.markdown]
-  );
-  const previewRawText = preview?.content || preview?.markdown || '';
-  const activeBuiltinSimpleTemplate = useMemo(
-    () => SIMPLE_PROMPT_TEMPLATES.find(template => template.id === draft.activeSimplePresetId) || null,
-    [draft.activeSimplePresetId]
-  );
-  const activeCustomSimplePreset = useMemo(
-    () => draft.simplePresets.find(preset => preset.id === draft.activeSimplePresetId) || null,
-    [draft.activeSimplePresetId, draft.simplePresets]
-  );
-  const activeSimplePresetDescription = activeBuiltinSimpleTemplate?.description
-    || (activeCustomSimplePreset ? '自定义模板，可直接编辑并自动保存。' : '');
-
-  const updateDraft = (patch: Partial<PromptComposerConfig>, options: { enableComposer?: boolean; autosave?: boolean } = {}) => {
-    const nextDraft = normalizeDraft({ ...draft, ...patch, ...(options.enableComposer ? { enabled: true } : {}) });
+  const updateDraft = (patch: Partial<PromptComposerConfig>, options: { autosave?: boolean } = {}) => {
+    const nextDraft = normalizeDraft({ ...draft, ...patch, enabled: true, mode: 'origin' });
     setDraft(nextDraft);
     if (options.autosave !== false) {
       if (autosaveTimerRef.current) window.clearTimeout(autosaveTimerRef.current);
@@ -220,135 +261,50 @@ export function PromptTab() {
     }
   };
 
-  const saveDraft = async (nextDraft: PromptComposerConfig = draft, options: { silent?: boolean } = {}) => {
-    setSaving(true);
-    try {
-      await autoSaveConfig({ promptComposer: nextDraft }, options);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const setComposerEnabled = (enabled: boolean) => {
-    const nextDraft = normalizeDraft({ ...draft, enabled });
-    setDraft(nextDraft);
-    void saveDraft(nextDraft);
-  };
-
-  const updateSimpleContent = (content: string) => {
-    if (!activeCustomSimplePreset) {
-      updateDraft({ simpleContent: content, mode: 'simple' }, { enableComposer: true });
-      return;
-    }
+  const updateOrigin = (patch: Partial<PromptOriginConfig>, options: { autosave?: boolean } = {}) => {
     updateDraft({
-      activeSimplePresetId: activeCustomSimplePreset.id,
-      simpleContent: content,
-      simplePresets: draft.simplePresets.map(preset => preset.id === activeCustomSimplePreset.id ? { ...preset, content } : preset),
-      mode: 'simple',
-    }, { enableComposer: true });
+      origin: {
+        ...draft.origin,
+        ...patch,
+      },
+    }, { autosave: options.autosave });
   };
 
-  const selectSimplePreset = (id: string) => {
-    const builtin = SIMPLE_PROMPT_TEMPLATES.find(template => template.id === id);
-    const custom = draft.simplePresets.find(preset => preset.id === id);
-    const content = builtin?.content || custom?.content || draft.simpleContent;
-    const nextDraft = normalizeDraft({
-      ...draft,
-      enabled: true,
-      mode: 'simple',
-      activeSimplePresetId: id,
-      simpleContent: content,
-    });
-    setDraft(nextDraft);
-    void saveDraft(nextDraft);
-  };
-
-  const createSimplePreset = (baseContent = draft.simpleContent, baseName = '自定义模板') => {
-    const id = createId('template');
-    const usedNames = new Set(draft.simplePresets.map(preset => preset.name));
-    let index = draft.simplePresets.length + 1;
-    let name = baseName === '自定义模板' ? `自定义模板 ${index}` : baseName;
-    while (usedNames.has(name)) {
-      index += 1;
-      name = `${baseName} ${index}`;
-    }
-    const nextPreset = { id, name, content: baseContent || '# 角色\n\n在这里写入你的 system.content 模板。' };
-    const nextDraft = normalizeDraft({
-      ...draft,
-      enabled: true,
-      mode: 'simple',
-      activeSimplePresetId: id,
-      simpleContent: nextPreset.content,
-      simplePresets: [...draft.simplePresets, nextPreset],
-    });
-    setDraft(nextDraft);
-    void saveDraft(nextDraft);
-  };
-
-  const duplicateActiveSimplePreset = () => {
-    const name = activeBuiltinSimpleTemplate
-      ? `${activeBuiltinSimpleTemplate.name} 副本`
-      : activeCustomSimplePreset
-        ? `${activeCustomSimplePreset.name} 副本`
-        : '自定义模板';
-    createSimplePreset(draft.simpleContent, name);
-  };
-
-  const updateSimplePresetName = (name: string) => {
-    if (!activeCustomSimplePreset) return;
-    updateDraft({
-      simplePresets: draft.simplePresets.map(preset => preset.id === activeCustomSimplePreset.id ? { ...preset, name } : preset),
-    }, { enableComposer: true });
-  };
-
-  const deleteActiveSimplePreset = () => {
-    if (!activeCustomSimplePreset) {
-      showToast('内置模板不能删除，可以先复制为自定义模板再编辑', 'error');
-      return;
-    }
-    const simplePresets = draft.simplePresets.filter(preset => preset.id !== activeCustomSimplePreset.id);
-    const fallback = simplePresets[0] || SIMPLE_PROMPT_TEMPLATES[0];
-    const nextDraft = normalizeDraft({
-      ...draft,
-      activeSimplePresetId: fallback.id,
-      simpleContent: fallback.content,
-      simplePresets,
-    });
-    setDraft(nextDraft);
-    void saveDraft(nextDraft);
-  };
-
-  const openSystemPromptPreview = async () => {
+  const refreshSystemPromptPreview = useCallback(async (
+    nextDraft: PromptComposerConfig,
+    options: { open?: boolean; silent?: boolean } = {},
+  ) => {
     if (!agentId) return;
     setPreviewLoading(true);
-    setPreviewError(null);
+    if (!options.silent) setPreviewError(null);
     try {
       const { homeFolder } = useSettingsStore.getState();
       const res = await hanaFetch(`/api/agents/${agentId}/system-prompt-preview`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          promptComposer: draft,
+          promptComposer: normalizeDraft(nextDraft),
           cwd: typeof homeFolder === 'string' ? homeFolder : (typeof settingsConfig?.last_cwd === 'string' ? settingsConfig.last_cwd : undefined),
           memoryEnabled: settingsConfig?.memory?.enabled !== false,
+          includeRuntimeFoundation: previewRuntimeFoundation,
         }),
         timeout: 60_000,
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      setPreviewRawMode(false);
       setPreview({
         markdown: typeof data.markdown === 'string' ? data.markdown : '',
         content: typeof data.content === 'string' ? data.content : '',
         cwd: typeof data.cwd === 'string' ? data.cwd : undefined,
         model: data.model || null,
       });
-    } catch (err: any) {
-      setPreviewError(err?.message || '加载完整预览失败');
+      if (options.open) setPreviewOpen(true);
+    } catch (err: unknown) {
+      if (!options.silent) setPreviewError(formatErrorMessage(err, '加载完整提示词失败'));
     } finally {
       setPreviewLoading(false);
     }
-  };
+  }, [agentId, previewRuntimeFoundation, settingsConfig?.last_cwd, settingsConfig?.memory?.enabled]);
 
   const getToolOverride = (name: string) => draft.toolOverrides.find(tool => tool.name === name);
 
@@ -388,7 +344,8 @@ export function PromptTab() {
   const resetToolDescription = (name: string) => {
     const existing = getToolOverride(name);
     if (!existing) return;
-    const { description: _description, ...rest } = existing;
+    const rest = { ...existing };
+    delete rest.description;
     if (rest.parameters.length === 0 && rest.enabled !== false) {
       setAndSaveDraft({ ...draft, toolOverrides: draft.toolOverrides.filter(tool => tool.name !== name) });
       return;
@@ -407,171 +364,305 @@ export function PromptTab() {
     updateToolOverride(name, { parameters });
   };
 
+  const resetModule = (key: PromptModuleKey) => {
+    if (key === '核') {
+      updateOrigin({ root: DEFAULT_ORIGIN_ROOT_PROMPT });
+    }
+    if (key === '照') {
+      updateOrigin({ mood: DEFAULT_ORIGIN_MOOD_PROMPT });
+    }
+    if (key === '德') {
+      updateOrigin({ conduct: DEFAULT_ORIGIN_CONDUCT_PROMPT, anchor: '' });
+    }
+  };
+
+  const openModuleDialog = (module: PromptModule) => {
+    setModuleDialogKey(module.key);
+  };
+
+  const renderModuleDialogBody = (module: PromptModule) => {
+    if (!isEditableModuleKey(module.key)) {
+      return (
+        <div className={styles['prompt-preview-body']}>
+          <pre className={styles['prompt-preview-raw']}>{module.content}</pre>
+        </div>
+      );
+    }
+    const editorValue = getEditableModuleContent(module.key, draft.origin);
+
+    return (
+      <div className={styles['prompt-dao-editor-body']}>
+        {module.key === '照' && (
+          <div className={styles['prompt-dao-editor-option']}>
+            <div>
+              <strong>外显内照</strong>
+              <span>开启后在回复前显示一小段 mood；它只是一瞬气象，不替代事实、工具和行动。</span>
+            </div>
+            <Toggle on={draft.origin.includeMood === true} onChange={(enabled) => updateOrigin({ includeMood: enabled })} />
+          </div>
+        )}
+        <textarea
+          className={`${styles['settings-textarea']} ${styles['prompt-dao-editor-textarea']}`}
+          aria-label={`${module.key}内容`}
+          value={editorValue}
+          onChange={(event) => {
+            const nextValue = event.target.value;
+            if (module.key === '核') updateOrigin({ root: nextValue });
+            if (module.key === '照') updateOrigin({ mood: nextValue });
+            if (module.key === '德') updateOrigin({ conduct: nextValue, anchor: '' });
+          }}
+          spellCheck={false}
+          autoFocus
+        />
+      </div>
+    );
+  };
+
+  const renderCompletePreviewBody = () => {
+    const rawText = preview?.content || preview?.markdown || '';
+    if (previewMode === 'plain') {
+      return <pre className={styles['prompt-preview-raw']}>{rawText}</pre>;
+    }
+    return (
+      <div
+        className={styles['prompt-preview-markdown']}
+        dangerouslySetInnerHTML={{ __html: renderMarkdown(preview?.markdown || rawText) }}
+      />
+    );
+  };
+
+  useEffect(() => {
+    setDraft(normalizeDraft(settingsConfig?.promptComposer));
+  }, [settingsConfig?.promptComposer]);
+
+  useEffect(() => {
+    const rawConfig = settingsConfig?.promptComposer as Partial<PromptComposerConfig> | undefined;
+    const rawOrigin = rawConfig?.origin;
+    if (!rawConfig || !rawOrigin) return;
+    const hasLegacySimpleSource = !!trimText(rawConfig.simpleContent)
+      || (Array.isArray(rawConfig.simplePresets) && rawConfig.simplePresets.length > 0);
+    if (!hasLegacySimpleSource) return;
+
+    const migrationKey = JSON.stringify({
+      root: rawOrigin.root || '',
+      mood: rawOrigin.mood || '',
+      conduct: rawOrigin.conduct || '',
+      anchor: rawOrigin.anchor || '',
+      simpleContent: rawConfig.simpleContent || '',
+      simplePresets: rawConfig.simplePresets || [],
+    });
+    if (migrationKeyRef.current === migrationKey) return;
+    migrationKeyRef.current = migrationKey;
+    void saveDraft(draft, { silent: true });
+  }, [draft, saveDraft, settingsConfig?.promptComposer]);
+
+  useEffect(() => () => {
+    if (autosaveTimerRef.current) window.clearTimeout(autosaveTimerRef.current);
+    if (previewTimerRef.current) window.clearTimeout(previewTimerRef.current);
+  }, []);
+
+  useEffect(() => {
+    if (!agentId) return;
+    const ac = new AbortController();
+    setSourceLoading(true);
+    hanaFetch(`/api/agents/${agentId}/prompt-composer-source`, { signal: ac.signal })
+      .then(res => res.json())
+      .then(data => {
+        if (ac.signal.aborted) return;
+        if (data.error) throw new Error(data.error);
+        setSource({
+          tools: Array.isArray(data.tools) ? data.tools : [],
+        });
+      })
+      .catch((err) => {
+        if (!ac.signal.aborted) showToast(`加载提示词来源失败: ${err.message}`, 'error');
+      })
+      .finally(() => {
+        if (!ac.signal.aborted) setSourceLoading(false);
+      });
+    return () => ac.abort();
+  }, [agentId, showToast]);
+
+  useEffect(() => {
+    if (!agentId) return;
+    if (previewTimerRef.current) window.clearTimeout(previewTimerRef.current);
+    previewTimerRef.current = window.setTimeout(() => {
+      void refreshSystemPromptPreview(draft, { silent: true });
+    }, 700);
+    return () => {
+      if (previewTimerRef.current) window.clearTimeout(previewTimerRef.current);
+    };
+  }, [agentId, draft, refreshSystemPromptPreview, settingsConfig?.last_cwd, settingsConfig?.memory?.enabled, previewRuntimeFoundation]);
+
   return (
     <div className={`${styles['settings-tab-content']} ${styles['active']}`} data-tab="prompt">
-      <SettingsSection title="Agent 性能调优入口">
-        <SettingsRow
-          label="调整 system.content 和 tools 描述"
-          hint="直接编辑一份完整 system.content 模板。保存后新会话生效，点击“完整预览”可查看实际发送给模型的系统提示词。"
-          control={null}
-        />
-      </SettingsSection>
-
-      <SettingsSection
-        title="system.content"
-        context={<button type="button" className={styles['settings-save-btn-sm']} disabled={previewLoading} onClick={() => void openSystemPromptPreview()}>{previewLoading ? '生成预览中…' : '完整预览'}</button>}
-      >
-        <SettingsRow
-          label="启用自定义 system.content"
-          hint="关闭时完全使用 OpenHanako 默认 system.content；开启后使用下方模板生成 system.content。工具描述覆盖不受这个开关影响。"
-          control={<Toggle on={draft.enabled} onChange={setComposerEnabled} />}
-        />
+      <SettingsSection>
+        <div className={styles['prompt-dao-hero']}>
+          <div>
+            <h2>提示词</h2>
+            <p>模块里保留可编辑模板变量；展开后的真实内容在完整提示词里查看。</p>
+          </div>
+          <button
+            type="button"
+            className={styles['settings-save-btn-sm']}
+            disabled={previewLoading}
+            onClick={() => void refreshSystemPromptPreview(draft, { open: true })}
+          >
+            {previewLoading ? '生成中…' : '查看完整提示词'}
+          </button>
+        </div>
         {previewError && <div className={styles['prompt-preview-error']}>{previewError}</div>}
       </SettingsSection>
 
-      <SettingsSection title="system.content 模板">
-        <SettingsSection.Note>下面内容会作为完整 system.content。Skills、时间、工作空间、记忆、MOOD 和会话追加规则都通过变量插入；不写变量就不会注入。</SettingsSection.Note>
-        <div className={styles['prompt-simple-card']}>
-          <div className={styles['prompt-template-toolbar']}>
-            <div className={styles['prompt-template-picker']}>
-              <label className={styles['settings-form-hint']}>当前模板</label>
-              <select
-                className={styles['settings-input']}
-                value={draft.activeSimplePresetId}
-                onChange={(event) => selectSimplePreset(event.target.value)}
-              >
-                <optgroup label="内置模板">
-                  {SIMPLE_PROMPT_TEMPLATES.map(template => (
-                    <option key={template.id} value={template.id}>{template.name}</option>
-                  ))}
-                </optgroup>
-                {draft.simplePresets.length > 0 && (
-                  <optgroup label="自定义模板">
-                    {draft.simplePresets.map(preset => (
-                      <option key={preset.id} value={preset.id}>{preset.name}</option>
-                    ))}
-                  </optgroup>
-                )}
-              </select>
-            </div>
-            <div className={styles['prompt-template-actions']}>
-              <button type="button" className={styles['settings-save-btn-sm']} onClick={() => createSimplePreset('# 角色\n\n在这里写入你的 system.content 模板。', '自定义模板')}>新建模板</button>
-              <button type="button" className={styles['settings-save-btn-sm']} onClick={duplicateActiveSimplePreset}>复制当前</button>
-              <button type="button" className={styles['prompt-danger-btn']} onClick={deleteActiveSimplePreset} disabled={!activeCustomSimplePreset}>删除自定义</button>
-            </div>
-          </div>
-          {activeCustomSimplePreset && (
-            <div className={styles['prompt-template-name-row']}>
-              <label className={styles['settings-form-hint']}>模板名称</label>
-              <input
-                className={styles['settings-input']}
-                value={activeCustomSimplePreset.name}
-                onChange={(event) => updateSimplePresetName(event.target.value)}
-              />
-            </div>
-          )}
-          {activeSimplePresetDescription && (
-            <div className={styles['prompt-template-description']}>{activeSimplePresetDescription}</div>
-          )}
-          <textarea
-            className={`${styles['settings-textarea']} ${styles['prompt-textarea']} ${activeBuiltinSimpleTemplate ? styles['prompt-readonly-textarea'] : ''}`}
-            value={draft.simpleContent}
-            onChange={(event) => updateSimpleContent(event.target.value)}
-            readOnly={!!activeBuiltinSimpleTemplate}
-            spellCheck={false}
-          />
-          {renderVariableHint(activeBuiltinSimpleTemplate ? '内置模板只读，可复制为自定义模板后编辑。' : '自动保存后新建会话生效。')}
-        </div>
-      </SettingsSection>
+      <div className={styles['prompt-dao-chain']}>
+        {visibleModules.map((module) => (
+          <article
+            key={module.key}
+            className={`${styles['prompt-dao-module']} ${module.key === '核' || module.key === '德' ? styles['prompt-dao-module-primary'] : ''}`}
+          >
+            <button
+              type="button"
+              className={styles['prompt-dao-module-summary']}
+              onClick={() => openModuleDialog(module)}
+              aria-label={`${isEditableModuleKey(module.key) ? '编辑' : '查看'} ${module.key}`}
+            >
+              <span className={styles['prompt-dao-glyph']}>{module.key}</span>
+              <span className={styles['prompt-dao-module-copy']}>
+                <span className={styles['prompt-dao-module-title']}>{MODULE_HINTS[module.key]}</span>
+                <em>{summarizeContent(module.content)}</em>
+              </span>
+              <span className={styles['prompt-dao-module-state']}>
+                {isEditableModuleKey(module.key) ? (saving ? '保存中' : '编辑') : '查看'}
+              </span>
+            </button>
+          </article>
+        ))}
+      </div>
 
-      <SettingsSection title="工具描述覆盖">
-        {sourceLoading && <span className={styles['settings-form-hint']}>正在加载当前工具 schema…</span>}
-        <SettingsSection.Note>覆盖 tools 数组里每个工具的 description，以及 parameters.properties 中的 description。保存后新建会话生效。</SettingsSection.Note>
-        <div className={styles['prompt-editor-list']}>
-          {source.tools.map(tool => {
-            const override = getToolOverride(tool.name);
-            const toolDescription = override && hasOwn(override, 'description') ? (override.description || '') : tool.description;
-            const toolEnabled = tool.enabled !== false && (!override || override.enabled !== false);
-            return (
-              <details className={`${styles['prompt-editor-card']}${!toolEnabled ? ` ${styles['prompt-tool-disabled']}` : ''}`} key={tool.name} data-tool-enabled={toolEnabled ? '' : 'false'}>
-                <summary className={styles['prompt-editor-header']}>
-                  <strong>{tool.name}</strong>
-                  <div className={styles['prompt-tool-actions']}>
-                    <Toggle on={toolEnabled} onChange={(v) => updateToolEnabled(tool.name, v)} />
-                    <button type="button" className={`${styles['settings-save-btn-sm']} ${styles['prompt-header-action']}`} onClick={(event) => {
-                      event.preventDefault();
-                      resetToolDescription(tool.name);
-                    }} disabled={!override || !hasOwn(override, 'description')}>恢复工具描述</button>
-                  </div>
-                </summary>
-                <textarea
-                  className={`${styles['settings-textarea']} ${styles['prompt-route-textarea']}`}
-                  value={toolDescription}
-                  onChange={(event) => updateToolDescription(tool.name, event.target.value)}
-                  spellCheck={false}
-                />
-                {tool.parameters.map(param => {
-                  const paramOverride = override?.parameters.find(item => item.path === param.path);
-                  const paramDescription = paramOverride ? paramOverride.description : param.description;
-                  return (
-                    <div className={styles['prompt-editor-card']} key={param.path}>
-                      <div className={styles['prompt-editor-header']}>
-                        <code className={styles['prompt-id']}>{param.path}</code>
-                        <button type="button" className={`${styles['settings-save-btn-sm']} ${styles['prompt-header-action']}`} onClick={() => resetToolParameter(tool.name, param.path)} disabled={!paramOverride}>恢复参数描述</button>
-                      </div>
-                      <textarea
-                        className={`${styles['settings-textarea']} ${styles['prompt-route-textarea']}`}
-                        value={paramDescription}
-                        onChange={(event) => updateToolParameter(tool.name, param.path, event.target.value)}
-                        spellCheck={false}
-                      />
+      <SettingsSection title="高级">
+        <details className={styles['prompt-tools-panel']}>
+          <summary className={styles['prompt-tools-summary']}>
+            <span>工具描述覆盖</span>
+            <span>{sourceLoading ? '正在加载…' : `${source.tools.length} 个工具`}</span>
+          </summary>
+          <SettingsSection.Note>这里调整工具清单里的说明，不混入完整提示词正文。</SettingsSection.Note>
+          <div className={styles['prompt-editor-list']}>
+            {source.tools.map(tool => {
+              const override = getToolOverride(tool.name);
+              const toolDescription = override && hasOwn(override, 'description') ? (override.description || '') : tool.description;
+              const toolEnabled = tool.enabled !== false && (!override || override.enabled !== false);
+              return (
+                <details className={`${styles['prompt-editor-card']}${!toolEnabled ? ` ${styles['prompt-tool-disabled']}` : ''}`} key={tool.name} data-tool-enabled={toolEnabled ? '' : 'false'}>
+                  <summary className={styles['prompt-editor-header']}>
+                    <strong>{tool.name}</strong>
+                    <div className={styles['prompt-tool-actions']}>
+                      <Toggle on={toolEnabled} onChange={(v) => updateToolEnabled(tool.name, v)} />
+                      <button type="button" className={`${styles['settings-save-btn-sm']} ${styles['prompt-header-action']}`} onClick={(event) => {
+                        event.preventDefault();
+                        resetToolDescription(tool.name);
+                      }} disabled={!override || !hasOwn(override, 'description')}>恢复工具描述</button>
                     </div>
-                  );
-                })}
-              </details>
-            );
-          })}
-        </div>
+                  </summary>
+                  <textarea
+                    className={`${styles['settings-textarea']} ${styles['prompt-route-textarea']}`}
+                    value={toolDescription}
+                    onChange={(event) => updateToolDescription(tool.name, event.target.value)}
+                    spellCheck={false}
+                  />
+                  {tool.parameters.map(param => {
+                    const paramOverride = override?.parameters.find(item => item.path === param.path);
+                    const paramDescription = paramOverride ? paramOverride.description : param.description;
+                    return (
+                      <div className={styles['prompt-editor-card']} key={param.path}>
+                        <div className={styles['prompt-editor-header']}>
+                          <code className={styles['prompt-id']}>{param.path}</code>
+                          <button type="button" className={`${styles['settings-save-btn-sm']} ${styles['prompt-header-action']}`} onClick={() => resetToolParameter(tool.name, param.path)} disabled={!paramOverride}>恢复参数描述</button>
+                        </div>
+                        <textarea
+                          className={`${styles['settings-textarea']} ${styles['prompt-route-textarea']}`}
+                          value={paramDescription}
+                          onChange={(event) => updateToolParameter(tool.name, param.path, event.target.value)}
+                          spellCheck={false}
+                        />
+                      </div>
+                    );
+                  })}
+                </details>
+              );
+            })}
+          </div>
+        </details>
       </SettingsSection>
 
-      {preview && createPortal(
+      {previewOpen && preview && createPortal(
         <div
           className={styles['prompt-preview-backdrop']}
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setPreview(null);
+            if (event.target === event.currentTarget) setPreviewOpen(false);
           }}
         >
-          <div className={styles['prompt-preview-dialog']} role="dialog" aria-modal="true" aria-label="系统提示词完整预览">
+          <div className={styles['prompt-preview-dialog']} role="dialog" aria-modal="true" aria-label="完整提示词">
             <div className={styles['prompt-preview-header']}>
               <div>
-                <h3>系统提示词完整预览</h3>
+                <h3>完整提示词</h3>
+                <span>{previewRuntimeFoundation ? '含运行底座' : '仅提示词正文'}</span>
               </div>
               <div className={styles['prompt-preview-actions']}>
                 <button
                   type="button"
-                  className={`${styles['prompt-preview-mode-toggle']} ${previewRawMode ? styles['prompt-preview-mode-toggle-active'] : ''}`}
-                  onClick={() => setPreviewRawMode(value => !value)}
+                  className={`${styles['prompt-preview-mode-toggle']} ${previewRuntimeFoundation ? styles['prompt-preview-mode-toggle-active'] : ''}`}
+                  aria-pressed={previewRuntimeFoundation}
+                  onClick={() => setPreviewRuntimeFoundation((enabled) => !enabled)}
                 >
-                  {previewRawMode ? 'Markdown 预览' : '原文'}
+                  运行底座
                 </button>
-                <button type="button" className={styles['prompt-preview-close']} onClick={() => setPreview(null)}>✕</button>
+                {(['markdown', 'plain'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    className={`${styles['prompt-preview-mode-toggle']} ${previewMode === mode ? styles['prompt-preview-mode-toggle-active'] : ''}`}
+                    aria-pressed={previewMode === mode}
+                    onClick={() => setPreviewMode(mode)}
+                  >
+                    {mode === 'markdown' ? 'Markdown' : '纯文本'}
+                  </button>
+                ))}
+                <button type="button" className={styles['prompt-preview-close']} onClick={() => setPreviewOpen(false)}>×</button>
               </div>
             </div>
             <div className={styles['prompt-preview-body']}>
-              {previewRawMode ? (
-                <pre className={styles['prompt-preview-raw']}>{previewRawText}</pre>
-              ) : (
-                <div
-                  className={`preview-markdown ${styles['prompt-preview-markdown']}`}
-                  dangerouslySetInnerHTML={{ __html: previewHtml }}
-                />
-              )}
+              {renderCompletePreviewBody()}
             </div>
           </div>
         </div>,
         document.body,
       )}
 
+      {activeModule && createPortal(
+        <div
+          className={styles['prompt-preview-backdrop']}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setModuleDialogKey(null);
+          }}
+        >
+          <div className={`${styles['prompt-preview-dialog']} ${styles['prompt-dao-editor-dialog']}`} role="dialog" aria-modal="true" aria-label={`${activeModule.key} ${MODULE_HINTS[activeModule.key]}`}>
+            <div className={styles['prompt-preview-header']}>
+              <div>
+                <h3>{activeModule.key} · {MODULE_HINTS[activeModule.key]}</h3>
+                <span>{isEditableModuleKey(activeModule.key) ? '可编辑模块' : '来自完整提示词预览，只读'}</span>
+              </div>
+              <div className={styles['prompt-preview-actions']}>
+                {isEditableModuleKey(activeModule.key) && (
+                  <button type="button" className={styles['settings-save-btn-sm']} onClick={() => resetModule(activeModule.key)}>恢复默认</button>
+                )}
+                <button type="button" className={styles['prompt-preview-close']} onClick={() => setModuleDialogKey(null)}>×</button>
+              </div>
+            </div>
+            {renderModuleDialogBody(activeModule)}
+          </div>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }

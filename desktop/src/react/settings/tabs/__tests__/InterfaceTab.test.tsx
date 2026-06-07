@@ -13,6 +13,18 @@ type AppearanceGlobals = typeof globalThis & {
   setPaperTexture?: (enabled: boolean) => void;
 };
 
+function makeStorage(): Storage {
+  let data: Record<string, string> = {};
+  return {
+    get length() { return Object.keys(data).length; },
+    clear: vi.fn(() => { data = {}; }),
+    getItem: vi.fn((key: string) => data[key] ?? null),
+    key: vi.fn((index: number) => Object.keys(data)[index] ?? null),
+    removeItem: vi.fn((key: string) => { delete data[key]; }),
+    setItem: vi.fn((key: string, value: string) => { data[key] = String(value); }),
+  };
+}
+
 function setAppearanceGlobals() {
   (globalThis as AppearanceGlobals).setTheme = vi.fn((theme: string) => {
     localStorage.setItem('hana-theme', theme);
@@ -43,6 +55,12 @@ describe('InterfaceTab appearance state', () => {
   beforeEach(() => {
     cleanup();
     vi.clearAllMocks();
+    const storage = makeStorage();
+    vi.stubGlobal('localStorage', storage);
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: storage,
+    });
     localStorage.clear();
     document.body.className = '';
     document.documentElement.setAttribute('data-theme', registry.DEFAULT_THEME);

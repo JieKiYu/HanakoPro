@@ -38,12 +38,42 @@ function getInitialCwd(): string {
   } catch { return ''; }
 }
 
+function getInitialFocusId(): string {
+  try {
+    const params = new URLSearchParams(location.search);
+    return params.get('focusId') || '';
+  } catch { return ''; }
+}
+
+function getInitialPlatformName(): string {
+  try {
+    const attr = document.documentElement.getAttribute('data-platform');
+    if (attr) return attr;
+  } catch {}
+  try {
+    return /mac/i.test(navigator.platform || '') ? 'darwin' : '';
+  } catch { return ''; }
+}
+
 export function TerminalApp() {
   const [tabs, setTabs] = useState<TabInfo[]>([]);
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [serverInfo, setServerInfo] = useState<{ port: string; token: string } | null>(null);
+  const [platformName, setPlatformName] = useState(getInitialPlatformName);
   const initRef = useRef(false);
   const eventsWsRef = useRef<WebSocket | null>(null);
+  const isMac = platformName === 'darwin';
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const next = String(await window.platform?.getPlatform?.() ?? '');
+        if (!cancelled && next) setPlatformName(next);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   /** 从 server 推送的会话 meta 合并 / 新增 tab（幂等，依 id） */
   const adoptServerSession = useCallback((meta: {
@@ -133,6 +163,7 @@ export function TerminalApp() {
 
       // 1) 拉现存 PTY 列表，适配为 tab（这里能看到 AI 在后台建的会话）
       let existingCount = 0;
+      const initialFocusId = getInitialFocusId();
       try {
         const res = await fetch(`http://127.0.0.1:${port}/api/terminal/list`, {
           headers: { 'Authorization': `Bearer ${token}` },
@@ -142,8 +173,10 @@ export function TerminalApp() {
         existingCount = items.length;
         for (const item of items) adoptServerSession(item);
         if (items.length > 0) {
-          // 默认选中最后一个活着的（常是 AI 刚创建的）
-          const last = items.slice().reverse().find((x: { alive?: boolean }) => x.alive) ?? items[items.length - 1];
+          // focusId 来自对话卡片 / 顶栏按钮；没有时选中最后一个活着的（常是 AI 刚创建的）。
+          const last = initialFocusId
+            ? items.find((x: { id?: string }) => x.id === initialFocusId)
+            : (items.slice().reverse().find((x: { alive?: boolean }) => x.alive) ?? items[items.length - 1]);
           if (last) {
             // 默认 activeKey 会被后续从 tabs[] 推出；这里不接取 key，交给 React 状态同步后补上
             setTimeout(() => {
@@ -182,7 +215,7 @@ export function TerminalApp() {
       }
 
       // 3) 如果 server 那边完全没有 PTY，才自动开第一个（避免项目中途打开窗口又多出一个空 tab）
-      if (existingCount === 0) {
+      if (existingCount === 0 && !initialFocusId) {
         void createTab(getInitialCwd(), { port, token });
       }
     })();
@@ -259,9 +292,10 @@ export function TerminalApp() {
     }
     return out;
   })();
+  const hasActiveTab = visibleTabs.some(t => t.key === activeKey);
 
   return (
-    <div className={s.app}>
+    <div className={`${s.app}${isMac ? ` ${s.appMac}` : ''}`}>
       <div className={s.tabbar}>
         <div className={s.tabs}>
           {visibleTabs.map(t => (
@@ -282,7 +316,7 @@ export function TerminalApp() {
             </div>
           ))}
         </div>
-        <div className={s.windowControls}>
+        <div className={`${s.windowControls}${isMac ? ` ${s.windowControlsMac}` : ''}`}>
           <button
             className={s.iconBtn}
             onClick={() => createTab(getInitialCwd())}
@@ -291,20 +325,24 @@ export function TerminalApp() {
           >
             +
           </button>
-          <button
-            className={s.iconBtn}
-            onClick={() => window.platform?.windowMinimize?.()}
-            title="最小化终端窗口"
-          >
-            −
-          </button>
-          <button
-            className={`${s.iconBtn} ${s.closeBtn}`}
-            onClick={() => window.platform?.windowClose?.()}
-            title="关闭终端窗口"
-          >
-            ×
-          </button>
+          {!isMac && (
+            <>
+              <button
+                className={s.iconBtn}
+                onClick={() => window.platform?.windowMinimize?.()}
+                title="最小化终端窗口"
+              >
+                −
+              </button>
+              <button
+                className={`${s.iconBtn} ${s.closeBtn}`}
+                onClick={() => window.platform?.windowClose?.()}
+                title="关闭终端窗口"
+              >
+                ×
+              </button>
+            </>
+          )}
         </div>
       </div>
       <div className={s.body}>
@@ -328,7 +366,7 @@ export function TerminalApp() {
             )}
           </div>
         ))}
-        {tabs.length === 0 && (
+        {(visibleTabs.length === 0 || !hasActiveTab) && (
           <div className={s.empty}>没有打开的终端。点击 + 新建一个。</div>
         )}
       </div>

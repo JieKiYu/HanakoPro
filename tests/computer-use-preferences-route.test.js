@@ -127,6 +127,39 @@ describe("Computer Use preference routes", () => {
     expect(engine.computerHost.requestPermissions).toHaveBeenCalledWith({}, "mock");
   });
 
+  it("opens the missing macOS privacy pane after requesting permissions", async () => {
+    const spawnImpl = vi.fn(() => ({ unref: vi.fn() }));
+    const engine = makeEngine();
+    engine.computerHost.requestPermissions = vi.fn(async () => ({
+      providerId: "macos:cua",
+      available: true,
+      permissions: [
+        { name: "Accessibility", granted: false },
+        { name: "Screen Recording", granted: true },
+      ],
+    }));
+    const app = makeApp(engine, { platform: "darwin", spawnImpl });
+
+    const res = await app.request("/api/preferences/computer-use/request-permissions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ providerId: "macos:cua" }),
+    });
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.nextMissingPermission).toBe("accessibility");
+    expect(body.systemSettings).toMatchObject({
+      opened: true,
+      kind: "accessibility",
+    });
+    expect(spawnImpl).toHaveBeenCalledWith(
+      "open",
+      ["x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"],
+      expect.objectContaining({ detached: true }),
+    );
+  });
+
   it("keeps Computer Use unavailable on Linux even if stored settings were enabled", async () => {
     const engine = makeEngine();
     const app = makeApp(engine, { platform: "linux" });

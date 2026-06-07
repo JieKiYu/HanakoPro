@@ -1,14 +1,35 @@
+import fs from "fs";
+import os from "os";
 import path from "path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
+  computerUseHelperAppExecutablePath,
+  computerUseHelperAppName,
+  createComputerUseHelperAppBundle,
   computerUseHelperOutputDir,
   patchCuaDriverAppStateSource,
+  patchCuaDriverCheckPermissionsToolSource,
   patchCuaDriverClickToolSource,
+  patchCuaDriverPermissionsSource,
   resolveComputerUseHelperBuildArch,
   shouldBuildComputerUseHelper,
   swiftBuildScratchPath,
   swiftArchForNodeArch,
 } from "../scripts/build-computer-use-helper.mjs";
+
+const tempDirs = [];
+
+function makeTempDir() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hana-computer-use-helper-test-"));
+  tempDirs.push(dir);
+  return dir;
+}
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 describe("Computer Use helper build script", () => {
   it("skips the Swift helper build outside macOS", () => {
@@ -41,6 +62,23 @@ describe("Computer Use helper build script", () => {
       osName: "mac",
       arch: "arm64",
     })).toBe(path.join("/repo", "dist-computer-use", "mac-arm64"));
+  });
+
+  it("creates a dedicated Computer Use app bundle for macOS TCC grants", () => {
+    const dir = makeTempDir();
+    const source = path.join(dir, "source-helper");
+    fs.writeFileSync(source, "#!/bin/sh\n");
+    fs.chmodSync(source, 0o755);
+
+    const app = createComputerUseHelperAppBundle({ outputDir: dir, sourceBinary: source });
+    const executable = computerUseHelperAppExecutablePath(dir);
+    const info = fs.readFileSync(path.join(dir, computerUseHelperAppName(), "Contents", "Info.plist"), "utf8");
+
+    expect(app.executable).toBe(executable);
+    expect(fs.existsSync(executable)).toBe(true);
+    expect(fs.statSync(executable).mode & 0o111).not.toBe(0);
+    expect(info).toContain("<string>com.hanakopro.computer-use</string>");
+    expect(info).toContain("<key>LSUIElement</key>");
   });
 
   it("keeps SwiftPM checkouts in the ignored cache directory instead of the source tree", () => {
@@ -129,5 +167,37 @@ describe("Computer Use helper build script", () => {
     expect(patched).toContain('"show_default_ui"');
     expect(patched).toContain('"show_default_ui": "AXShowDefaultUI"');
     expect(patchCuaDriverClickToolSource(patched)).toBe(patched);
+  });
+
+  it("patches Cua permissions so read-only status checks avoid ScreenCaptureKit probes", () => {
+    const permissionsSource = `public enum Permissions {
+    /// Accurate TCC status for both grants.
+
+    /// Accessibility uses \`AXIsProcessTrusted()\` — reliable.
+    public static func currentStatus() async -> PermissionsStatus {
+        async let screen = probeScreenRecording()
+        return await PermissionsStatus(
+            accessibility: AXIsProcessTrusted(),
+            screenRecording: screen
+        )
+    }
+`;
+    const toolSource = `                Report TCC permission status for Accessibility and Screen Recording.
+                By default also raises the system permission dialogs for any missing
+                grants — Apple's request APIs are no-ops when the grant is already
+                active, so this is safe to call repeatedly. Pass {"prompt": false}
+                for a purely read-only status check.
+            let status = await Permissions.currentStatus()
+`;
+
+    const patchedPermissions = patchCuaDriverPermissionsSource(permissionsSource);
+    const patchedTool = patchCuaDriverCheckPermissionsToolSource(toolSource);
+
+    expect(patchedPermissions).toContain("preflightStatus");
+    expect(patchedPermissions).toContain("CGPreflightScreenCaptureAccess()");
+    expect(patchedTool).toContain("Permissions.preflightStatus()");
+    expect(patchedTool).toContain("avoids ScreenCaptureKit probes");
+    expect(patchCuaDriverPermissionsSource(patchedPermissions)).toBe(patchedPermissions);
+    expect(patchCuaDriverCheckPermissionsToolSource(patchedTool)).toBe(patchedTool);
   });
 });

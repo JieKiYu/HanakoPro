@@ -715,6 +715,45 @@
     line-height: var(--editor-markdown-line-height, 1.65);
 }
 
+.prompt-preview-markdown h1,
+.prompt-preview-markdown h2,
+.prompt-preview-markdown h3,
+.prompt-preview-markdown h4,
+.prompt-preview-markdown h5,
+.prompt-preview-markdown h6 {
+    margin: 1em 0 0.45em;
+    color: var(--text);
+    line-height: 1.28;
+    font-weight: 700;
+}
+
+.prompt-preview-markdown h1 {
+    font-size: 1.34rem;
+}
+
+.prompt-preview-markdown h2 {
+    font-size: 1.12rem;
+}
+
+.prompt-preview-markdown h3 {
+    font-size: 1rem;
+}
+
+.prompt-preview-markdown h4,
+.prompt-preview-markdown h5,
+.prompt-preview-markdown h6 {
+    font-size: 0.92rem;
+}
+
+.prompt-preview-markdown p,
+.prompt-preview-markdown ul,
+.prompt-preview-markdown ol,
+.prompt-preview-markdown blockquote,
+.prompt-preview-markdown pre {
+    margin-top: 0;
+    margin-bottom: 0.85em;
+}
+
 .prompt-preview-markdown pre {
     overflow: auto;
     padding: 12px;
@@ -759,6 +798,279 @@
     color: var(--text-muted);
     font-size: 0.78rem;
     line-height: 1.55;
+}
+
+.prompt-dao-hero {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-md);
+    padding: var(--space-sm) var(--space-md);
+}
+
+.prompt-dao-hero h2 {
+    margin: 0 0 4px;
+    color: var(--text);
+    font-size: 1.1rem;
+}
+
+.prompt-dao-hero p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    line-height: 1.55;
+}
+
+.prompt-dao-chain {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin: var(--space-md) 0;
+}
+
+.prompt-dao-chain::before {
+    content: "";
+    position: absolute;
+    top: 26px;
+    bottom: 26px;
+    left: 33px;
+    width: 2px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 24%, var(--border));
+}
+
+.prompt-dao-module {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card, 10px);
+    background: color-mix(in srgb, var(--bg-card) 90%, transparent);
+    overflow: hidden;
+}
+
+.prompt-dao-module-primary {
+    border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+
+.prompt-dao-module-summary {
+    display: grid;
+    grid-template-columns: 50px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    min-height: 70px;
+    padding: 10px 14px 10px 12px;
+    border: 0;
+    color: inherit;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.prompt-dao-module-summary:hover {
+    background: color-mix(in srgb, var(--bg-card) 72%, var(--border));
+}
+
+.prompt-dao-module-summary:disabled {
+    cursor: default;
+}
+
+.prompt-dao-module-summary:disabled:hover {
+    background: transparent;
+}
+
+.prompt-dao-glyph {
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+    border-radius: 50%;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent-light) 78%, var(--bg-card));
+    font-family: var(--font-serif);
+    font-size: 1.28rem;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.prompt-dao-module-primary .prompt-dao-glyph {
+    color: white;
+    background: color-mix(in srgb, var(--accent) 78%, #5d4935);
+    border-color: color-mix(in srgb, var(--accent) 70%, var(--border));
+}
+
+.prompt-dao-module-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.prompt-dao-module-title {
+    color: var(--text);
+    font-size: 0.82rem;
+    font-weight: 600;
+    line-height: 1.35;
+}
+
+.prompt-dao-module-copy em {
+    color: var(--text-light);
+    font-size: 0.7rem;
+    font-style: normal;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.prompt-dao-module-state {
+    min-width: 48px;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    text-align: right;
+}
+
+.prompt-dao-module-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 0 14px 14px 74px;
+}
+
+.prompt-dao-textarea {
+    min-height: 180px;
+    resize: vertical;
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+    font-size: 0.76rem;
+    line-height: 1.58;
+}
+
+.prompt-dao-textarea-root {
+    min-height: 260px;
+}
+
+.prompt-dao-readonly {
+    max-height: 360px;
+    margin: 0;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card, 10px);
+    color: var(--text);
+    background: color-mix(in srgb, var(--bg-card) 76%, var(--border));
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+    font-size: 0.74rem;
+    line-height: 1.55;
+}
+
+.prompt-dao-module-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.prompt-dao-editor-dialog {
+    width: min(980px, calc(100vw - 56px));
+    height: min(720px, calc(100vh - 96px));
+}
+
+.prompt-dao-editor-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px;
+}
+
+.prompt-dao-editor-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card, 10px);
+    background: color-mix(in srgb, var(--bg-card) 88%, transparent);
+}
+
+.prompt-dao-editor-option div {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.prompt-dao-editor-option strong {
+    color: var(--text);
+    font-size: 0.82rem;
+}
+
+.prompt-dao-editor-option span {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    line-height: 1.45;
+}
+
+.settings-textarea.prompt-dao-editor-textarea {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+    resize: none;
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+    font-size: 0.84rem;
+    line-height: 1.65;
+}
+
+.prompt-tools-panel {
+    border-top: 1px solid var(--border);
+}
+
+.prompt-tools-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+    min-height: 44px;
+    padding: 0 var(--space-md);
+    color: var(--text);
+    cursor: pointer;
+}
+
+.prompt-tools-summary span:last-child {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+}
+
+@media (max-width: 720px) {
+    .prompt-dao-hero {
+        flex-direction: column;
+    }
+
+    .prompt-dao-chain::before {
+        left: 33px;
+    }
+
+    .prompt-dao-module-summary {
+        grid-template-columns: 50px minmax(0, 1fr);
+    }
+
+    .prompt-dao-module-state {
+        grid-column: 2;
+        text-align: left;
+    }
+
+    .prompt-dao-module-body {
+        padding-left: 14px;
+    }
 }
 
 .prompt-simple-card {
@@ -3206,6 +3518,32 @@
     color: #3A6B85;
 }
 
+/* 墨白：Guizang 经典纸墨 */
+.theme-card[data-theme="mo-bai"] {
+    background: #F1EFEA;
+}
+
+.theme-card[data-theme="mo-bai"] .theme-card-name {
+    color: #18181A;
+}
+
+.theme-card[data-theme="mo-bai"] .theme-card-mode {
+    color: #2F5061;
+}
+
+/* 靛瓷：深靛蓝 + 瓷白 */
+.theme-card[data-theme="indigo-porcelain"] {
+    background: #F1F3F5;
+}
+
+.theme-card[data-theme="indigo-porcelain"] .theme-card-name {
+    color: #0A1F3D;
+}
+
+.theme-card[data-theme="indigo-porcelain"] .theme-card-mode {
+    color: #0E5A8F;
+}
+
 /* 草香：Butter 青草绿 */
 .theme-card[data-theme="grass-aroma"] {
     background: #F5F8F3;
@@ -4719,6 +5057,16 @@ a.about-link:hover {
     margin-bottom: var(--space-md);
 }
 
+.pv-models-alert {
+    margin: 0 0 var(--space-sm);
+    padding: 7px 9px;
+    border: 1px solid rgba(var(--accent-rgb), 0.2);
+    background: rgba(var(--accent-rgb), 0.07);
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    line-height: 1.45;
+}
+
 /* ── 添加模型行 ── */
 .pv-models-action-row {
     display: flex;
@@ -4745,10 +5093,23 @@ a.about-link:hover {
 
 .pv-fetch-btn-inline:hover { color: var(--accent); border-color: var(--accent); }
 
+.pv-fetch-btn-inline:disabled {
+    cursor: progress;
+    opacity: 0.72;
+}
+
+.pv-fetch-btn-inline.spinning {
+    color: var(--accent);
+    border-color: rgba(var(--accent-rgb), 0.45);
+}
+
+.pv-fetch-btn-inline.spinning svg {
+    animation: hana-spin 0.8s linear infinite;
+}
+
 .pv-fetch-hint {
     font-size: 0.72rem;
     padding: 4px 0;
-    animation: hana-hint-fade 2.5s ease forwards;
 }
 .pv-fetch-hint.ok  { color: #3a7d44; }
 .pv-fetch-hint.fail { color: #b44040; }
@@ -5151,62 +5512,47 @@ a.about-link:hover {
     margin: 0;
 }
 
-.memory-guide-video {
+.memory-guide-layers {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.memory-guide-layer {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: 9px;
+    padding: 10px 11px;
+    border: 1px solid color-mix(in srgb, var(--accent) 14%, var(--overlay-light));
+    border-radius: var(--radius-card, 10px);
+    background: color-mix(in srgb, var(--bg-card) 88%, var(--accent-light) 12%);
+}
+
+.memory-guide-layer-name {
+    display: inline-flex;
     align-items: center;
-    gap: 12px;
-    min-height: 0;
-    padding: 13px 15px;
-    border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--overlay-light));
-    border-radius: var(--radius-card, 12px);
-    color: var(--text);
-    text-align: left;
-    background:
-        linear-gradient(135deg, color-mix(in srgb, var(--accent) 13%, var(--bg-card)), var(--bg-card)),
-        var(--bg-card);
-    box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 55%, transparent);
-    cursor: pointer;
-    transition: transform var(--duration-fast) var(--ease-out), border-color var(--duration-fast), box-shadow var(--duration-fast), background var(--duration-fast);
-}
-
-.memory-guide-video:hover {
-    transform: translateY(-1px);
-    border-color: color-mix(in srgb, var(--accent) 42%, var(--overlay-light));
-    background:
-        linear-gradient(135deg, color-mix(in srgb, var(--accent) 18%, var(--bg-card)), var(--bg-card)),
-        var(--bg-card);
-    box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 14%, transparent);
-}
-
-.memory-guide-video-label {
-    width: fit-content;
-    padding: 3px 8px;
+    justify-content: center;
+    min-width: 28px;
+    height: 24px;
+    padding: 0 7px;
     border-radius: 999px;
     color: var(--accent);
-    background: color-mix(in srgb, var(--accent-light) 82%, transparent);
-    font-size: 0.72rem;
-    font-weight: 700;
+    background: color-mix(in srgb, var(--accent-light) 84%, transparent);
+    font-size: 0.76rem;
+    font-weight: 800;
 }
 
-.memory-guide-video-title {
-    color: var(--text);
-    font-size: 0.9rem;
-    font-weight: 700;
-    line-height: 1.45;
+.memory-guide-layer-text {
+    color: var(--text-light);
+    font-size: 0.78rem;
+    line-height: 1.55;
     min-width: 0;
 }
 
-.memory-guide-video-action {
-    color: var(--accent);
-    font-size: 0.78rem;
-    font-weight: 700;
-}
-
 @media (max-width: 720px) {
-    .memory-guide-video {
+    .memory-guide-layers {
         grid-template-columns: 1fr;
-        align-items: flex-start;
     }
 }
 

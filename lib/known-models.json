@@ -854,6 +854,7 @@
       "maxOutput": 128000,
       "image": true,
       "reasoning": true,
+      "xhigh": true,
       "visionCapabilities": {
         "grounding": true,
         "boxes": true,
@@ -2982,8 +2983,6 @@
       "name": "MiMo V2.5 Pro",
       "context": 1048576,
       "maxOutput": 131072,
-      "image": true,
-      "video": true,
       "reasoning": true
     },
     "mimo-v2.5": {
@@ -6419,7 +6418,8 @@
       "context": 400000,
       "maxOutput": 128000,
       "image": true,
-      "reasoning": true
+      "reasoning": true,
+      "xhigh": true
     }
   },
   "volcengine-coding": {

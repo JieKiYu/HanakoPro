@@ -1,9 +1,12 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
+import { execFileSync } from "child_process";
 import { COMPUTER_USE_ERRORS, computerUseError } from "../errors.js";
 import { createCommandRunner } from "./command-runner.js";
 
+const HANA_COMPUTER_USE_APP_NAME = "Hanako Computer Use.app";
+const HANA_COMPUTER_USE_APP_STAMP = ".hanako-computer-use-source.json";
 const HANA_CURSOR_BLOOM_COLOR = "#537D96";
 const HANA_CURSOR_GRADIENT_COLORS = Object.freeze(["#FFFDF8", "#8FAABD", "#2F4A56"]);
 const HANA_CUA_CURSOR_STYLE = Object.freeze({
@@ -25,13 +28,15 @@ const HANA_CURSOR_MOTION = Object.freeze({
 });
 const MACOS_CUA_ALLOWED_ACTIONS = [
   "click_element",
+  "click_point",
+  "double_click",
   "type_text",
   "press_key",
   "scroll",
+  "drag",
   "perform_secondary_action",
   "stop",
 ];
-const MACOS_CUA_DISABLED_PIXEL_ACTIONS = new Set(["click_point", "double_click", "drag"]);
 
 function expandHome(filePath, homeDir = os.homedir()) {
   if (!filePath || !filePath.startsWith("~/")) return filePath;
@@ -40,6 +45,30 @@ function expandHome(filePath, homeDir = os.homedir()) {
 
 function helperPath(root) {
   return path.join(root, "hana-computer-use-helper");
+}
+
+function helperAppPath(root) {
+  return path.join(root, HANA_COMPUTER_USE_APP_NAME, "Contents", "MacOS", "hana-computer-use-helper");
+}
+
+function helperAppBundlePath(root) {
+  return path.join(root, HANA_COMPUTER_USE_APP_NAME);
+}
+
+function helperAppBundlePathFromCommand(command) {
+  const value = String(command || "");
+  if (path.basename(value) !== "hana-computer-use-helper") return null;
+  const macosDir = path.dirname(value);
+  const contentsDir = path.dirname(macosDir);
+  const appDir = path.dirname(contentsDir);
+  if (path.basename(macosDir) !== "MacOS") return null;
+  if (path.basename(contentsDir) !== "Contents") return null;
+  if (path.basename(appDir) !== HANA_COMPUTER_USE_APP_NAME) return null;
+  return appDir;
+}
+
+function defaultInstalledComputerUseRoot(homeDir = os.homedir()) {
+  return path.join(homeDir, "Library", "Application Support", "HanakoPro", "ComputerUse");
 }
 
 function defaultHanaComputerUseSocketPath(homeDir = os.homedir()) {
@@ -62,19 +91,110 @@ function bundledHelperCandidates({ env, hanaRoot, cwd, arch }) {
   if (cwd) {
     roots.push(path.resolve(cwd, "dist-computer-use", `mac-${arch}`));
   }
-  return [...new Set(roots.filter(Boolean))].map(helperPath);
+  return [...new Set(roots.filter(Boolean))].flatMap((root) => [
+    helperAppPath(root),
+    helperPath(root),
+  ]);
+}
+
+function fileStamp(filePath, existsSync = fs.existsSync, statSync = fs.statSync) {
+  if (!existsSync(filePath)) return null;
+  try {
+    const stat = statSync(filePath);
+    return { size: stat.size, mtimeMs: Math.round(stat.mtimeMs) };
+  } catch {
+    return null;
+  }
+}
+
+function readInstalledComputerUseStamp(stampPath, fsImpl = fs) {
+  try {
+    return JSON.parse(fsImpl.readFileSync(stampPath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function writeInstalledComputerUseStamp(stampPath, stamp, fsImpl = fs) {
+  try {
+    fsImpl.writeFileSync(stampPath, JSON.stringify(stamp, null, 2));
+  } catch {
+    // The helper can still run if LaunchServices registration succeeds but the
+    // optional stamp write fails, so keep this fail-open.
+  }
+}
+
+function registerComputerUseApp(appPath, execFileSyncImpl = execFileSync) {
+  const lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+  try {
+    execFileSyncImpl(lsregister, ["-f", appPath], { stdio: "ignore" });
+  } catch {
+    // Registration is a best-effort hint for System Settings display. Running
+    // the app executable is still what ultimately creates the TCC prompt.
+  }
+}
+
+function materializeComputerUseApp({
+  sourceRoot,
+  installRoot,
+  existsSync = fs.existsSync,
+  fsImpl = fs,
+  execFileSyncImpl = execFileSync,
+} = {}) {
+  if (!sourceRoot || !installRoot) return null;
+  const sourceApp = helperAppBundlePath(sourceRoot);
+  const sourceHelper = helperAppPath(sourceRoot);
+  if (!existsSync(sourceApp) || !existsSync(sourceHelper)) return null;
+
+  const installApp = helperAppBundlePath(installRoot);
+  const installHelper = helperAppPath(installRoot);
+  const stampPath = path.join(installRoot, HANA_COMPUTER_USE_APP_STAMP);
+  const sourceStamp = {
+    sourceApp,
+    helper: fileStamp(sourceHelper, existsSync, fsImpl.statSync.bind(fsImpl)),
+    info: fileStamp(path.join(sourceApp, "Contents", "Info.plist"), existsSync, fsImpl.statSync.bind(fsImpl)),
+  };
+  const installedStamp = readInstalledComputerUseStamp(stampPath, fsImpl);
+  const needsCopy = !existsSync(installHelper)
+    || JSON.stringify(installedStamp) !== JSON.stringify(sourceStamp);
+
+  if (needsCopy) {
+    fsImpl.mkdirSync(installRoot, { recursive: true });
+    fsImpl.rmSync(installApp, { recursive: true, force: true });
+    fsImpl.cpSync(sourceApp, installApp, { recursive: true, preserveTimestamps: true });
+    fsImpl.chmodSync(installHelper, 0o755);
+    writeInstalledComputerUseStamp(stampPath, sourceStamp, fsImpl);
+  }
+  registerComputerUseApp(installApp, execFileSyncImpl);
+  return installHelper;
 }
 
 export function resolveCuaDriverCommand({
   env = process.env,
   homeDir = os.homedir(),
   existsSync = fs.existsSync,
+  fsImpl = fs,
+  execFileSyncImpl = execFileSync,
   hanaRoot = env.HANA_ROOT,
   cwd = process.cwd(),
   arch = process.arch,
 } = {}) {
+  const packagedRoot = hanaRoot ? path.resolve(hanaRoot, "..", "computer-use", "macos") : null;
+  const installedRoot = env.HANA_COMPUTER_USE_APP_INSTALL_ROOT
+    ? expandHome(env.HANA_COMPUTER_USE_APP_INSTALL_ROOT, homeDir)
+    : defaultInstalledComputerUseRoot(homeDir);
+  const installedHelper = env.HANA_COMPUTER_USE_HELPER_PATH
+    ? null
+    : materializeComputerUseApp({
+      sourceRoot: packagedRoot,
+      installRoot: installedRoot,
+      existsSync,
+      fsImpl,
+      execFileSyncImpl,
+    });
   const candidates = [
     env.HANA_COMPUTER_USE_HELPER_PATH,
+    installedHelper,
     ...bundledHelperCandidates({ env, hanaRoot, cwd, arch }),
     env.HANA_CUA_DRIVER_PATH,
     "~/.local/bin/cua-driver",
@@ -442,6 +562,25 @@ function rejectDisabledPixelAction(action = {}) {
   );
 }
 
+function requireActionNumber(action = {}, key) {
+  const number = Number(action[key]);
+  if (!Number.isFinite(number)) {
+    throw computerUseError(
+      COMPUTER_USE_ERRORS.TARGET_NOT_FOUND,
+      `Computer action requires a numeric ${key}: ${action.type}`,
+      { action: action.type || null, field: key },
+    );
+  }
+  return number;
+}
+
+function requireActionPoint(action = {}, xKey = "x", yKey = "y") {
+  return {
+    x: requireActionNumber(action, xKey),
+    y: requireActionNumber(action, yKey),
+  };
+}
+
 function advertisedActions(snapshotElement = {}) {
   return Array.isArray(snapshotElement?.actions)
     ? snapshotElement.actions.map(String).filter(Boolean)
@@ -508,6 +647,7 @@ export function createMacosCuaProvider({
         motion: cursorMotion && typeof cursorMotion === "object" ? { ...cursorMotion } : {},
       }
     : null;
+  const helperAppBundle = helperAppBundlePathFromCommand(command);
 
   function runEnv(baseEnv) {
     return {
@@ -516,6 +656,35 @@ export function createMacosCuaProvider({
       ...(hanaCursorRuntimeConfig
         ? { [HANA_AGENT_CURSOR_CONFIG_ENV]: JSON.stringify(hanaCursorRuntimeConfig) }
         : {}),
+    };
+  }
+
+  function daemonLaunchCommand(env) {
+    if (!helperAppBundle) {
+      return {
+        command,
+        args: ["serve", "--socket", socketPath],
+        options: {
+          env,
+          detached: true,
+          stdio: "ignore",
+        },
+      };
+    }
+    const openArgs = ["-n", "-g", "-j"];
+    for (const key of [HANA_AGENT_SOCKET_PATH_ENV, HANA_AGENT_CURSOR_CONFIG_ENV]) {
+      const value = env?.[key];
+      if (value) openArgs.push("--env", `${key}=${value}`);
+    }
+    openArgs.push(helperAppBundle, "--args", "serve", "--socket", socketPath);
+    return {
+      command: "/usr/bin/open",
+      args: openArgs,
+      options: {
+        env,
+        detached: true,
+        stdio: "ignore",
+      },
     };
   }
 
@@ -573,11 +742,9 @@ export function createMacosCuaProvider({
             { providerId, command },
           );
         }
-        runner.spawn(command, ["serve", "--socket", socketPath], {
-          env: runEnv(process.env),
-          detached: true,
-          stdio: "ignore",
-        });
+        const env = runEnv(process.env);
+        const launch = daemonLaunchCommand(env);
+        runner.spawn(launch.command, launch.args, launch.options);
         const deadline = Date.now() + daemonStartupTimeoutMs;
         while (Date.now() < deadline) {
           if (await isDaemonRunning()) return;
@@ -642,10 +809,10 @@ export function createMacosCuaProvider({
       screenshot: true,
       accessibilityTree: true,
       elementActions: true,
-      elementDoubleClick: false,
+      elementDoubleClick: true,
       backgroundControl: "full",
-      pointClick: "unsupported",
-      drag: "unsupported",
+      pointClick: "allowed",
+      drag: "allowed",
       textInput: "semantic",
       keyboardInput: "pidScoped",
       requiresForegroundForInput: false,
@@ -657,13 +824,33 @@ export function createMacosCuaProvider({
       if (platform !== "darwin") {
         return { providerId, available: false, reason: "unsupported-platform", platform };
       }
+      let daemon = "";
+      let daemonAvailable = false;
+      let daemonReason = null;
+      let daemonStderr = "";
+      let daemonStartError = null;
       try {
+        if (shouldAutoStartDaemon) {
+          try {
+            await ensureDaemonRunning();
+          } catch (err) {
+            daemonStartError = err;
+          }
+        }
         const status = await runner.run(command, ["status", "--socket", socketPath], {
           timeoutMs: 5000,
           env: runEnv(process.env),
         });
-        if (status.exitCode !== 0) {
-          return { providerId, available: false, reason: "daemon-unavailable", stderr: status.stderr || "" };
+        if (status.exitCode === 0) {
+          daemonAvailable = true;
+          daemon = status.stdout.trim();
+        } else {
+          daemonReason = "daemon-unavailable";
+          daemonStderr = status.stderr || "";
+        }
+        if (daemonStartError && !daemonAvailable) {
+          daemonReason = "daemon-start-failed";
+          daemonStderr = daemonStartError?.message || String(daemonStartError);
         }
         let permissions = [];
         try {
@@ -672,7 +859,15 @@ export function createMacosCuaProvider({
         } catch (err) {
           permissions = [{ name: "accessibility", granted: false }, { name: "screen-recording", granted: false }];
         }
-        return { providerId, available: true, command, daemon: status.stdout.trim(), permissions };
+        return {
+          providerId,
+          available: true,
+          command,
+          daemon,
+          daemonAvailable,
+          ...(daemonReason ? { daemonReason, daemonStderr } : {}),
+          permissions,
+        };
       } catch (err) {
         return {
           providerId,
@@ -685,6 +880,9 @@ export function createMacosCuaProvider({
 
     async requestPermissions() {
       ensureDarwin();
+      if (shouldAutoStartDaemon) {
+        await ensureDaemonRunning();
+      }
       const perms = await runTool("check_permissions", { prompt: true });
       return { providerId, available: true, permissions: normalizePermissions(perms) };
     },
@@ -769,9 +967,6 @@ export function createMacosCuaProvider({
       if (!pid || !windowId) {
         throw computerUseError(COMPUTER_USE_ERRORS.TARGET_NOT_FOUND, "Cua lease is missing native pid/windowId.", { leaseId: lease.leaseId });
       }
-      if (MACOS_CUA_DISABLED_PIXEL_ACTIONS.has(action.type)) {
-        rejectDisabledPixelAction(action);
-      }
 
       if (action.type === "click_element") {
         const semanticAction = semanticClickActionForElement(action.snapshotElement);
@@ -784,6 +979,17 @@ export function createMacosCuaProvider({
           })) || { ok: true };
         }
         return getStructured(await runTool("click", { pid, window_id: windowId, element_index: requireElementIndex(action) })) || { ok: true };
+      }
+      if (action.type === "click_point") {
+        const point = requireActionPoint(action);
+        return getStructured(await runTool("click", { pid, window_id: windowId, x: point.x, y: point.y })) || { ok: true };
+      }
+      if (action.type === "double_click") {
+        if (action.elementId) {
+          return getStructured(await runTool("double_click", { pid, window_id: windowId, element_index: requireElementIndex(action) })) || { ok: true };
+        }
+        const point = requireActionPoint(action);
+        return getStructured(await runTool("double_click", { pid, window_id: windowId, x: point.x, y: point.y })) || { ok: true };
       }
       if (action.type === "perform_secondary_action") {
         return getStructured(await runTool("right_click", { pid, window_id: windowId, element_index: requireElementIndex(action) })) || { ok: true };
@@ -806,6 +1012,18 @@ export function createMacosCuaProvider({
           payload.element_index = requireElementIndex(action);
         }
         return getStructured(await runTool("scroll", payload)) || { ok: true };
+      }
+      if (action.type === "drag") {
+        const from = requireActionPoint(action, "fromX", "fromY");
+        const to = requireActionPoint(action, "toX", "toY");
+        return getStructured(await runTool("drag", {
+          pid,
+          window_id: windowId,
+          from_x: from.x,
+          from_y: from.y,
+          to_x: to.x,
+          to_y: to.y,
+        })) || { ok: true };
       }
       throw computerUseError(COMPUTER_USE_ERRORS.CAPABILITY_UNSUPPORTED, `Unsupported Cua action: ${action.type}`, { action: action.type });
     },

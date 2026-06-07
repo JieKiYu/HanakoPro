@@ -24,11 +24,18 @@ import {
   resumeSessionStream,
 } from "../session-stream-store.js";
 import { AppError } from "../../shared/errors.js";
+import { isAbortLikeError, isAbortLikeMessage } from "../../shared/abort-errors.js";
 import { resolveContextConfig } from "../../core/context-compressor.js";
+import { MANUAL_CONTEXT_COMPRESSION_THRESHOLD } from "../../shared/context-compression.js";
 import { errorBus } from "../../shared/error-bus.js";
 import { waitTimingDetails } from "../../lib/tools/wait-contract.js";
 import { MAX_CHAT_IMAGE_BASE64_CHARS, isAllowedChatImageMime, isChatImageBase64WithinLimit } from "../../shared/image-mime.js";
 import { isAllowedChatVideoMime, isChatVideoBase64WithinLimit } from "../../shared/video-mime.js";
+import {
+  extractImageBlocks,
+  persistNativeGeneratedImageFileSync,
+  sessionFileContentBlock,
+} from "../../lib/session-files/native-generated-image-file.js";
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
@@ -228,9 +235,10 @@ export function toCompactionLifecycleWsMessage(event, sessionPath, getSessionByP
     reason: event.reason ?? null,
     aborted: event.aborted ?? false,
     willRetry: event.willRetry ?? false,
-    tokens: usage?.tokens ?? null,
-    contextWindow: usage?.contextWindow ?? null,
-    percent: usage?.percent ?? null,
+    tokens: event.tokens ?? usage?.tokens ?? null,
+    contextWindow: event.contextWindow ?? usage?.contextWindow ?? null,
+    percent: event.percent ?? usage?.percent ?? null,
+    compressionAvailable: event.compressionAvailable,
   };
 }
 
@@ -401,7 +409,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       const agentId = engine.agentIdFromSessionPath?.(sessionPath) || engine.currentAgentId;
       const agent = engine.getAgent?.(agentId);
       const ctxConfig = resolveContextConfig(agent?._config);
-      if (ctxConfig.enabled && pct != null && (pct / 100) >= ctxConfig.threshold) {
+      if (ctxConfig.enabled && pct != null && (pct / 100) >= MANUAL_CONTEXT_COMPRESSION_THRESHOLD) {
         compressionAvailable = true;
       }
     } catch {}
@@ -570,6 +578,31 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
     broadcastContextUsage(sessionPath);
   }
 
+  function emitNativeGeneratedImageBlocks(sessionPath, ss, message) {
+    if (!ss || !sessionPath || !message || message.role !== "assistant") return;
+    const images = extractImageBlocks(message.content);
+    if (images.length === 0) return;
+    ss.hasOutput = true;
+    for (const image of images) {
+      try {
+        const file = persistNativeGeneratedImageFileSync({
+          hanakoHome: engine.hanakoHome,
+          sessionPath,
+          base64: image.data,
+          mimeType: image.mimeType,
+          registerSessionFile: engine.registerSessionFile?.bind(engine),
+        });
+        const block = sessionFileContentBlock(file);
+        if (block) {
+          emitStreamEvent(sessionPath, ss, { type: "content_block", block });
+        }
+      } catch (err) {
+        const messageText = err instanceof Error ? err.message : String(err);
+        debugLog()?.log("ws", `native image persistence failed: ${messageText}`);
+      }
+    }
+  }
+
   // 单订阅：事件只写入一次，再按需广播到所有连接中的客户端。
   hub.subscribe((event, sessionPath) => {
     // Non-session-scoped events: handle before session resolution
@@ -591,6 +624,11 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
     );
     if (compactionMessage) {
       broadcast(compactionMessage);
+      return;
+    }
+
+    if (event.type === "session_goal") {
+      broadcast({ type: "session_goal", goal: event.goal || null, sessionPath });
       return;
     }
 
@@ -651,8 +689,6 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
         lastEmitAt: shouldEmit ? Date.now() : (previous.lastEmitAt || 0),
       };
       ss.fileWritePreviews.set(preview.key, nextState);
-      // eslint-disable-next-line no-console
-      console.log("[hana-debug] fwp probe contentLen=", content.length, "lastEmittedLen=", previous.lastEmittedLen, "growth=", growth, "elapsed=", elapsed, "shouldEmit=", shouldEmit, "isEnd=", isEnd);
       if (!shouldEmit) return true;
       emitStreamEvent(sessionPath, ss, {
         type: "file_write_prepare",
@@ -726,11 +762,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       } else if (sub === "toolcall_start" || sub === "toolcall_delta" || sub === "toolcall_end") {
         ss.hasToolCall = true;
         ss.hasToolCallThisProviderTurn = true;
-        // eslint-disable-next-line no-console
-        console.log("[hana-debug] message_update toolcall event:", sub, "name=", assistantToolCallFromEvent(event.assistantMessageEvent)?.name || "(none)");
-        const handled = emitFileWritePrepare(event.assistantMessageEvent);
-        // eslint-disable-next-line no-console
-        console.log("[hana-debug] emitFileWritePrepare handled=", handled);
+        emitFileWritePrepare(event.assistantMessageEvent);
       } else if (sub === "error") {
         ss.hasError = true;
         broadcast({ type: "error", message: event.assistantMessageEvent.error || "Unknown error", sessionPath });
@@ -741,11 +773,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
         ss.hasToolCall = true;
         ss.hasToolCallThisProviderTurn = true;
       }
-      // eslint-disable-next-line no-console
-      console.log("[hana-debug] top-level toolcall event:", event.type, "name=", assistantToolCallFromEvent(event)?.name || "(none)");
-      const handled = emitFileWritePrepare(event);
-      // eslint-disable-next-line no-console
-      console.log("[hana-debug] emitFileWritePrepare(top) handled=", handled);
+      emitFileWritePrepare(event);
     } else if (event.type === "tool_execution_start") {
       if (!ss) return;
       ss.hasToolCall = true;
@@ -1007,10 +1035,18 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
     } else if (event.type === "message_end") {
       // Provider 级别错误（超时、连接断开等）通过 message_end 传递，不经过 message_update
       if (!ss) return;
-      if (event.message?.stopReason === "error") {
+      const abortedMessage = event.message?.stopReason === "aborted"
+        || isAbortLikeMessage(event.message?.errorMessage);
+      if (abortedMessage) {
+        ss.isAborted = true;
+        finishStreamingState(ss);
+        broadcastStreamingStopped(sessionPath, ss, { aborted: true, reason: "abort" });
+      } else if (event.message?.stopReason === "error") {
         ss.hasError = true;
         broadcast({ type: "error", message: event.message.errorMessage || "Unknown error", sessionPath });
         finishErroredStream(sessionPath, ss);
+      } else {
+        emitNativeGeneratedImageBlocks(sessionPath, ss, event.message);
       }
     } else if (event.type === "turn_end") {
       if (!ss) return;
@@ -1323,9 +1359,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
                   displayMessage: msg.displayMessage,
                 });
               } catch (err) {
-                const isUserAbort = err.name === 'AbortError'
-                  || (err.message === 'This operation was aborted')
-                  || (err.type === 'aborted');
+                const isUserAbort = isAbortLikeError(err);
                 if (!isUserAbort) {
                   const errMessage = err.message === "session_busy"
                     ? t("error.stillStreaming", { name: engine.agentName })
@@ -1337,9 +1371,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
           })().catch((err) => {
             const appErr = AppError.wrap(err);
             errorBus.report(appErr, { context: { wsMessageType: msg.type } });
-            const isUserAbort = appErr.name === 'AbortError'
-              || appErr.message === 'This operation was aborted'
-              || appErr.type === 'aborted';
+            const isUserAbort = isAbortLikeError(appErr) || isAbortLikeError(appErr.cause);
             if (!isUserAbort) {
               wsSend(ws, { type: 'error', message: appErr.message || 'Unknown error', error: appErr.toJSON(), sessionPath: msg.sessionPath });
             }

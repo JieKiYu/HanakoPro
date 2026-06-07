@@ -1,0 +1,59 @@
+/*
+ * Hana Theme: 墨白
+ * Guizang classic ink/paper palette adapted for long-form chat.
+ */
+
+[data-theme="mo-bai"] {
+    /* Paper */
+    --bg:           #F1EFEA;
+    --bg-card:      #FAF8F2;
+    --bg-glass:     rgba(250, 248, 242, 0.93);
+    --sidebar-bg:   #E8E5DE;
+
+    /* Ink */
+    --text:         #18181A;
+    --text-light:   #46433F;
+    --text-muted:   #706C65;
+    --hana-text:    #0F1113;
+
+    /* Main accent */
+    --accent:       #18181A;
+    --accent-hover: #0A0A0B;
+    --accent-light: rgba(10, 10, 11, 0.06);
+    --accent-rgb:   10, 10, 11;
+    --link:         #2F5061;
+    --link-hover:   #1E3947;
+    --link-rgb:     47, 80, 97;
+
+    /* Structure */
+    --border:       rgba(10, 10, 11, 0.16);
+    --shadow:       rgba(10, 10, 11, 0.08);
+
+    /* State colors */
+    --green:        #4E6B50;
+    --green-rgb:    78, 107, 80;
+    --coral:        #9A4E3F;
+    --coral-rgb:    154, 78, 63;
+    --danger:       #7B302B;
+    --danger-rgb:   123, 48, 43;
+
+    /* Notes and chat */
+    --jian-note-bg:     #F7F1E4;
+    --jian-note-border: rgba(10, 10, 11, 0.12);
+    --mood-text:    #3F3A34;
+    --mood-bg:      rgba(10, 10, 11, 0.04);
+    --mood-border:  rgba(10, 10, 11, 0.18);
+    --tool-bg:      rgba(10, 10, 11, 0.04);
+    --tool-text:    #46433F;
+    --user-bg:      rgba(10, 10, 11, 0.045);
+    --drop-overlay-bg: rgba(241, 239, 234, 0.86);
+    --attach-bg:    rgba(10, 10, 11, 0.045);
+
+    /* Overlays */
+    --overlay-subtle: rgba(10, 10, 11, 0.03);
+    --overlay-light:  rgba(10, 10, 11, 0.05);
+    --overlay-medium: rgba(10, 10, 11, 0.08);
+    --overlay-strong: rgba(10, 10, 11, 0.16);
+
+    --select-arrow: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23706C65' fill='none' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+}

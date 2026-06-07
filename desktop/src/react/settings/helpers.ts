@@ -178,5 +178,5 @@ export const VALID_THEMES = [
   _ids[0],                    // warm-paper
   _ids[1],                    // midnight
   registry.AUTO_OPTION.id,    // auto (第 3 位，保持原顺序)
-  ..._ids.slice(2),           // high-contrast, grass-aroma, contemplation, absolutely, delve, deep-think, new-warm-paper
+  ..._ids.slice(2),           // high-contrast and the remaining registry themes
 ];

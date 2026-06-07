@@ -1,5 +1,5 @@
 /**
- * patch-pi-sdk.cjs — Pi SDK 只读验证
+ * patch-pi-sdk.cjs — Pi SDK 版本验证与幂等兼容补丁
  *
  * 历史上这个脚本会在 postinstall 阶段修改
  * node_modules/@mariozechner/pi-coding-agent/dist/core/sdk.js，
@@ -7,10 +7,14 @@
  *
  * Pi SDK 0.68+ 已把 createAgentSession({ tools }) 改成工具名 allowlist，
  * Hana 现在通过 lib/pi-sdk 适配层把本地 Tool[] 转为 customTools + names。
- * 因此这个脚本只验证版本、SDK 结构和生产 import 边界，不再写 node_modules。
+ *
+ * 当前仍需要一个很窄的 SDK 运行时补丁：pi-ai 0.70.5 的
+ * openai-responses stream processor 会忽略 Responses API 原生
+ * image_generation_call，导致上游已生成/计费的图片没有进入 assistant
+ * message。这里在精确版本与源码结构校验后幂等补丁该分支。
  *
  * 文件名（patch-pi-sdk）保留是为了不动 package.json 的 postinstall 钩子，
- * 避免触发 npm install cache 重算。实际职责已是只读验证（log 前缀 verify-pi-sdk）。
+ * 避免触发 npm install cache 重算。log 前缀继续沿用 verify-pi-sdk。
  */
 
 const fs = require("fs");
@@ -31,6 +35,79 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
+function patchResponsesImageGeneration() {
+  const file = path.join(piAiRoot, "dist", "providers", "openai-responses-shared.js");
+  let src = fs.readFileSync(file, "utf8");
+  const marker = "Hana compat: preserve native Responses image_generation_call results";
+  if (src.includes(marker)) {
+    console.log("[verify-pi-sdk] responses image_generation_call compat already applied");
+    return;
+  }
+
+  const addedBranchNeedle = `            else if (item.type === "function_call") {
+                currentItem = item;
+                currentBlock = {
+                    type: "toolCall",
+                    id: \`\${item.call_id}|\${item.id}\`,
+                    name: item.name,
+                    arguments: {},
+                    partialJson: item.arguments || "",
+                };
+                output.content.push(currentBlock);
+                stream.push({ type: "toolcall_start", contentIndex: blockIndex(), partial: output });
+            }`;
+  const addedBranchPatch = `${addedBranchNeedle}
+            else if (item.type === "image_generation_call") {
+                // ${marker}.
+                currentItem = item;
+                currentBlock = null;
+            }`;
+
+  const doneBranchNeedle = `            else if (item.type === "function_call") {
+                const args = currentBlock?.type === "toolCall" && currentBlock.partialJson
+                    ? parseStreamingJson(currentBlock.partialJson)
+                    : parseStreamingJson(item.arguments || "{}");
+                let toolCall;
+                if (currentBlock?.type === "toolCall") {
+                    // Finalize in-place and strip the scratch buffer so replay only
+                    // carries parsed arguments.
+                    currentBlock.arguments = args;
+                    delete currentBlock.partialJson;
+                    toolCall = currentBlock;
+                }
+                else {
+                    toolCall = {
+                        type: "toolCall",
+                        id: \`\${item.call_id}|\${item.id}\`,
+                        name: item.name,
+                        arguments: args,
+                    };
+                }
+                currentBlock = null;
+                stream.push({ type: "toolcall_end", contentIndex: blockIndex(), toolCall, partial: output });
+            }`;
+  const doneBranchPatch = `${doneBranchNeedle}
+            else if (item.type === "image_generation_call") {
+                const data = typeof item.result === "string" ? item.result.trim() : "";
+                if (data) {
+                    output.content.push({ type: "image", data, mimeType: "image/png" });
+                }
+                currentBlock = null;
+            }`;
+
+  if (!src.includes(addedBranchNeedle)) {
+    fail("openai-responses-shared.js add-item hook marker not found");
+  }
+  if (!src.includes(doneBranchNeedle)) {
+    fail("openai-responses-shared.js done-item hook marker not found");
+  }
+
+  src = src.replace(addedBranchNeedle, addedBranchPatch);
+  src = src.replace(doneBranchNeedle, doneBranchPatch);
+  fs.writeFileSync(file, src);
+  console.log("[verify-pi-sdk] patched responses image_generation_call compat");
+}
+
 if (!fs.existsSync(sdkRoot)) {
   console.log("[verify-pi-sdk] SDK not installed, skipping");
   process.exit(0);
@@ -48,6 +125,8 @@ const piAiPkg = readJson(path.join(piAiRoot, "package.json"));
 if (!verifiedPiAiVersions.has(piAiPkg.version)) {
   fail(`pi-ai version ${piAiPkg.version} is not verified. Verified versions: ${[...verifiedPiAiVersions].join(", ")}`);
 }
+
+patchResponsesImageGeneration();
 
 const sdkIndex = fs.readFileSync(path.join(sdkRoot, "dist", "index.js"), "utf8");
 const expectedExportMarkers = [

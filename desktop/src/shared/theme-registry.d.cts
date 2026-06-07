@@ -9,6 +9,8 @@ export type ThemeId =
   | 'warm-paper'
   | 'midnight'
   | 'high-contrast'
+  | 'mo-bai'
+  | 'indigo-porcelain'
   | 'grass-aroma'
   | 'contemplation'
   | 'absolutely'

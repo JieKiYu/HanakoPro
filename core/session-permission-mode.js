@@ -14,6 +14,7 @@ const INFORMATION_TOOLS = new Set([
   "web_search",
   "web_fetch",
   "current_status",
+  "session_goal",
   "search_memory",
   "recall_experience",
   // 共享终端只读类

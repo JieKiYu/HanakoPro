@@ -3,12 +3,15 @@ import { useSettingsStore } from '../../store';
 import { t, autoSaveConfig, savePins } from '../../helpers';
 import { PinItem } from './AgentPins';
 import { SettingsSection } from '../../components/SettingsSection';
+import { SettingsRow } from '../../components/SettingsRow';
 import { buildPinnedMemoryMarkdown, mergePinnedMemories, parsePinnedMemoryMarkdown } from './pinned-memory-markdown';
 import styles from '../../Settings.module.css';
 
-export function MemorySection({ hasUtilityModel, memoryEnabled, isViewingOther, currentPins }: {
-  hasUtilityModel: boolean;
+export function MemorySection({ hasMemoryModel, memoryEnabled, memoryUse, memoryGenerate, isViewingOther, currentPins }: {
+  hasMemoryModel: boolean;
   memoryEnabled: boolean;
+  memoryUse: boolean;
+  memoryGenerate: boolean;
   isViewingOther: boolean;
   currentPins: string[];
 }) {
@@ -129,22 +132,55 @@ export function MemorySection({ hasUtilityModel, memoryEnabled, isViewingOther, 
         {t('settings.pins.export')}
       </button>
       <button
-        className={`hana-toggle${hasUtilityModel && memoryEnabled ? ' on' : ''}${!hasUtilityModel ? ' disabled' : ''}`}
-        onClick={() => hasUtilityModel && autoSaveConfig({ memory: { enabled: !memoryEnabled } })}
-        disabled={!hasUtilityModel}
-        title={!hasUtilityModel ? t('settings.memory.needsUtilityModel') : undefined}
+        className={`hana-toggle${hasMemoryModel && memoryEnabled ? ' on' : ''}${!hasMemoryModel ? ' disabled' : ''}`}
+        onClick={() => hasMemoryModel && autoSaveConfig({ memory: { enabled: !memoryEnabled } })}
+        disabled={!hasMemoryModel}
+        title={!hasMemoryModel ? t('settings.memory.needsUtilityModel') : undefined}
       />
     </div>
   );
 
+  const switchButton = (on: boolean, label: string, onClick: () => void, disabled = false) => (
+    <button
+      type="button"
+      className={`hana-toggle${on ? ' on' : ''}`}
+      role="switch"
+      aria-label={label}
+      aria-checked={on}
+      disabled={disabled}
+      onClick={onClick}
+    />
+  );
+
+  const memoryControlsDisabled = !hasMemoryModel || !memoryEnabled;
+
   return (
     <SettingsSection title={t('settings.memory.sectionTitle')} context={memoryHeaderContext}>
-      <div style={{ padding: 'var(--space-sm) var(--space-md)' }}>
-        {!hasUtilityModel && (
-          <p className={styles['settings-inline-note']} style={{ opacity: 0.6, marginTop: 0, marginBottom: 'var(--space-md)' }}>{t('settings.memory.needsUtilityModel')}</p>
+      {!hasMemoryModel && (
+        <SettingsSection.Note>{t('settings.memory.needsUtilityModel')}</SettingsSection.Note>
+      )}
+      <SettingsRow
+        label={t('settings.memory.useTitle')}
+        hint={t('settings.memory.useHint')}
+        control={switchButton(
+          memoryUse,
+          t('settings.memory.useTitle'),
+          () => autoSaveConfig({ memory: { use: !memoryUse } }),
+          memoryControlsDisabled,
         )}
-
-        <div className={!hasUtilityModel || !memoryEnabled ? 'settings-disabled' : ''}>
+      />
+      <SettingsRow
+        label={t('settings.memory.generateTitle')}
+        hint={t('settings.memory.generateHint')}
+        control={switchButton(
+          memoryGenerate,
+          t('settings.memory.generateTitle'),
+          () => autoSaveConfig({ memory: { generate: !memoryGenerate } }),
+          memoryControlsDisabled,
+        )}
+      />
+      <div style={{ padding: 'var(--space-sm) var(--space-md)', borderTop: '1px solid var(--border)' }}>
+        <div className={!hasMemoryModel || !memoryEnabled ? 'settings-disabled' : ''}>
           <div className={styles['settings-subsection']}>
             <div className={styles['settings-subsection-header']}>
               <h3 className={styles['settings-subsection-title']}>{t('settings.pins.title')}</h3>

@@ -111,10 +111,12 @@ Merge these conversation summaries into a single coherent condensation. Eliminat
 ...`,
 });
 
+export const MANUAL_CONTEXT_COMPRESSION_THRESHOLD = 0.7;
+
 /** 默认上下文压缩配置 */
 export const DEFAULT_CONTEXT_COMPRESSION = Object.freeze({
   enabled: false,
-  threshold: 0.7,
+  threshold: 0.8,
   recentTurnsProtected: 5,
   mode: "rolling-summary",
   customPrompt: "",

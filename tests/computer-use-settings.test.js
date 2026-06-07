@@ -21,6 +21,7 @@ describe("Computer Use settings", () => {
     });
     expect(settings.enabled).toBe(false);
     expect(settings.allow_windows_input_injection).toBe(false);
+    expect(settings.require_app_approval).toBe(false);
     expect(settings.app_approvals).toHaveLength(1);
   });
 
@@ -28,6 +29,12 @@ describe("Computer Use settings", () => {
     expect(normalizeComputerUseSettings({}).enabled).toBe(false);
     expect(normalizeComputerUseSettings({ enabled: "true" }).enabled).toBe(false);
     expect(normalizeComputerUseSettings({ enabled: true }).enabled).toBe(true);
+  });
+
+  it("keeps per-app approval opt-in", () => {
+    expect(normalizeComputerUseSettings({}).require_app_approval).toBe(false);
+    expect(normalizeComputerUseSettings({ require_app_approval: "true" }).require_app_approval).toBe(false);
+    expect(normalizeComputerUseSettings({ require_app_approval: true }).require_app_approval).toBe(true);
   });
 
   it("approves and revokes apps by provider/app id", () => {

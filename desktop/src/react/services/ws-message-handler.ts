@@ -120,9 +120,15 @@ function applyCompactionLifecycle(msg: any): void {
 
   useStore.getState().removeCompactingSession(sp);
   const existingWindow = useStore.getState().contextBySession[sp]?.window ?? null;
+  const existingCompressionAvailable = useStore.getState().contextBySession[sp]?.compressionAvailable;
   const window = msg.contextWindow ?? existingWindow;
   updateKeyed('contextBySession', sp,
-    { tokens: msg.tokens ?? null, window, percent: msg.percent ?? null },
+    {
+      tokens: msg.tokens ?? null,
+      window,
+      percent: msg.percent ?? null,
+      compressionAvailable: msg.compressionAvailable ?? existingCompressionAvailable,
+    },
     (_s, d) => ({ contextTokens: d.tokens, contextWindow: d.window, contextPercent: d.percent }),
   );
 }
@@ -524,6 +530,17 @@ export function handleServerMessage(msg: any): void {
             mode: msg.permissionMode || msg.mode,
           },
         }));
+      }
+      break;
+    }
+
+    case 'session_goal': {
+      const sp = msg.sessionPath;
+      const goal = msg.goal || null;
+      if (sp) {
+        useStore.getState().setSessionGoalForPath(sp, goal);
+      } else {
+        useStore.getState().setPendingSessionGoal(goal);
       }
       break;
     }

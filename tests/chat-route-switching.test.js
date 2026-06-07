@@ -1,3 +1,6 @@
+import fs from "fs";
+import os from "os";
+import path from "path";
 import { describe, expect, it, vi } from "vitest";
 import { createChatRoute } from "../server/routes/chat.js";
 
@@ -48,7 +51,143 @@ describe("chat route model switch guard", () => {
   });
 });
 
+describe("chat route session goal events", () => {
+  it("broadcasts session goal changes with the session path", () => {
+    let createHandlers;
+    let subscriber;
+    const upgradeWebSocket = vi.fn((factory) => {
+      createHandlers = factory;
+      return () => new Response(null);
+    });
+    const hub = {
+      subscribe: vi.fn((cb) => {
+        subscriber = cb;
+      }),
+      send: vi.fn(async () => {}),
+    };
+    const engine = {
+      agentName: "Hana",
+      abortAllStreaming: vi.fn(async () => {}),
+      getSessionByPath: vi.fn(() => null),
+      isSessionStreaming: vi.fn(() => false),
+      isSessionSwitching: vi.fn(() => false),
+      steerSession: vi.fn(() => false),
+      slashDispatcher: null,
+    };
+
+    createChatRoute(engine, hub, { upgradeWebSocket });
+    const handlers = createHandlers({});
+    const ws = {
+      readyState: 1,
+      send: vi.fn(),
+    };
+
+    handlers.onOpen({}, ws);
+    subscriber({
+      type: "session_goal",
+      goal: { objective: "finish smoke test", status: "complete" },
+    }, "/tmp/session.jsonl");
+
+    const sent = ws.send.mock.calls.map(([raw]) => JSON.parse(raw));
+    expect(sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "session_goal",
+        sessionPath: "/tmp/session.jsonl",
+        goal: expect.objectContaining({
+          objective: "finish smoke test",
+          status: "complete",
+        }),
+      }),
+    ]));
+  });
+});
+
 describe("chat route streaming error lifecycle", () => {
+  it("emits native Responses generated images as managed file content blocks", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hana-chat-native-image-"));
+    try {
+      let createHandlers;
+      let subscriber;
+      const upgradeWebSocket = vi.fn((factory) => {
+        createHandlers = factory;
+        return () => new Response(null);
+      });
+      const hub = {
+        subscribe: vi.fn((cb) => {
+          subscriber = cb;
+        }),
+        send: vi.fn(async () => {}),
+      };
+      const sessionPath = path.join(tmpDir, "agents", "hana", "sessions", "main.jsonl");
+      fs.mkdirSync(path.dirname(sessionPath), { recursive: true });
+      fs.writeFileSync(sessionPath, "", "utf-8");
+      const engine = {
+        hanakoHome: tmpDir,
+        agentName: "Hana",
+        abortAllStreaming: vi.fn(async () => {}),
+        getSessionByPath: vi.fn(() => null),
+        isSessionStreaming: vi.fn(() => false),
+        isSessionSwitching: vi.fn(() => false),
+        steerSession: vi.fn(() => false),
+        registerSessionFile: vi.fn(({ sessionPath: sp, filePath, label, origin, storageKind }) => ({
+          id: "sf_native_image",
+          sessionPath: sp,
+          filePath,
+          label,
+          filename: label,
+          ext: path.extname(filePath).slice(1),
+          mime: "image/png",
+          kind: "image",
+          size: fs.statSync(filePath).size,
+          origin,
+          storageKind,
+          status: "available",
+        })),
+        slashDispatcher: null,
+      };
+
+      createChatRoute(engine, hub, { upgradeWebSocket });
+      const handlers = createHandlers({});
+      const ws = {
+        readyState: 1,
+        send: vi.fn(),
+      };
+
+      const fakeB64 = Buffer.from("native-image-bytes").toString("base64");
+      handlers.onOpen({}, ws);
+      subscriber({ type: "session_status", isStreaming: true }, sessionPath);
+      subscriber({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [{ type: "image", data: fakeB64, mimeType: "image/png" }],
+          stopReason: "stop",
+        },
+      }, sessionPath);
+      subscriber({ type: "turn_end" }, sessionPath);
+
+      const sent = ws.send.mock.calls.map(([raw]) => JSON.parse(raw));
+      const blockMsg = sent.find(msg => msg.type === "content_block" && msg.block?.type === "file");
+      expect(blockMsg?.block).toMatchObject({
+        fileId: "sf_native_image",
+        label: expect.stringMatching(/^generated-image-[a-f0-9]{16}\.png$/),
+        ext: "png",
+        mime: "image/png",
+        kind: "image",
+        storageKind: "managed_cache",
+      });
+      expect(fs.existsSync(blockMsg.block.filePath)).toBe(true);
+      expect(fs.readFileSync(blockMsg.block.filePath).toString("base64")).toBe(fakeB64);
+      expect(engine.registerSessionFile).toHaveBeenCalledWith(expect.objectContaining({
+        sessionPath,
+        origin: "native_image_generation",
+        storageKind: "managed_cache",
+      }));
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it("closes streaming status when a provider message_end error arrives", () => {
     let createHandlers;
     let subscriber;
@@ -86,15 +225,68 @@ describe("chat route streaming error lifecycle", () => {
       type: "message_end",
       message: {
         stopReason: "error",
-        errorMessage: "signal is aborted without reason",
+        errorMessage: "upstream exploded",
       },
     }, "/tmp/session.jsonl");
 
     const sent = ws.send.mock.calls.map(([raw]) => JSON.parse(raw));
     expect(sent).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: "error", message: "signal is aborted without reason", sessionPath: "/tmp/session.jsonl" }),
+      expect.objectContaining({ type: "error", message: "upstream exploded", sessionPath: "/tmp/session.jsonl" }),
       expect.objectContaining({ type: "turn_end", sessionPath: "/tmp/session.jsonl" }),
       expect.objectContaining({ type: "status", isStreaming: false, sessionPath: "/tmp/session.jsonl" }),
+    ]));
+  });
+
+  it("treats abort-like provider message_end as cancellation, not a model error", () => {
+    let createHandlers;
+    let subscriber;
+    const upgradeWebSocket = vi.fn((factory) => {
+      createHandlers = factory;
+      return () => new Response(null);
+    });
+    const hub = {
+      subscribe: vi.fn((cb) => {
+        subscriber = cb;
+      }),
+      send: vi.fn(async () => {}),
+    };
+    const engine = {
+      agentName: "Hana",
+      abortAllStreaming: vi.fn(async () => {}),
+      getSessionByPath: vi.fn(() => null),
+      isSessionStreaming: vi.fn(() => false),
+      isSessionSwitching: vi.fn(() => false),
+      steerSession: vi.fn(() => false),
+      slashDispatcher: null,
+    };
+
+    createChatRoute(engine, hub, { upgradeWebSocket });
+    const handlers = createHandlers({});
+    const ws = {
+      readyState: 1,
+      send: vi.fn(),
+    };
+
+    handlers.onOpen({}, ws);
+    subscriber({ type: "session_status", isStreaming: true }, "/tmp/session.jsonl");
+    subscriber({
+      type: "message_end",
+      message: {
+        stopReason: "error",
+        errorMessage: "signal is aborted without reason",
+      },
+    }, "/tmp/session.jsonl");
+
+    const sent = ws.send.mock.calls.map(([raw]) => JSON.parse(raw));
+    expect(sent.some(msg => msg.type === "error" && msg.message === "signal is aborted without reason")).toBe(false);
+    expect(sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "status",
+        isStreaming: false,
+        aborted: true,
+        reason: "abort",
+        sessionPath: "/tmp/session.jsonl",
+      }),
     ]));
   });
 

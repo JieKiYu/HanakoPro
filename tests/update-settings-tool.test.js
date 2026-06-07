@@ -326,21 +326,23 @@ describe("update-settings-tool", () => {
     });
   });
 
-  describe("theme options 包含 new-warm-paper（此前遗漏，本次补齐）", () => {
-    it("search 'theme' 结果中 options 包含 new-warm-paper", async () => {
+  describe("theme options 跟随 theme registry", () => {
+    it("search 'theme' 结果中 options 包含 new-warm-paper 和新增主题", async () => {
       const { tool } = buildTool();
       const result = await tool.execute("c9", { action: "search", query: "theme" });
       const text = result.content[0].text;
       expect(text).toContain("new-warm-paper");
+      expect(text).toContain("mo-bai");
+      expect(text).toContain("indigo-porcelain");
       expect(text).not.toContain("claude-design");
     });
 
-    it("search 'theme' 结果中 options 包含全部 11 个选项（10 主题 + auto）", async () => {
+    it("search 'theme' 结果中 options 包含全部 13 个选项（12 主题 + auto）", async () => {
       const { tool } = buildTool();
       const result = await tool.execute("c10", { action: "search", query: "theme" });
       const text = result.content[0].text;
       // 验证原有主题 + 高对比暗色 + auto 均存在
-      for (const id of ["warm-paper", "midnight", "high-contrast", "grass-aroma", "contemplation", "absolutely", "delve", "deep-think", "new-warm-paper", "midnight-contrast", "auto"]) {
+      for (const id of ["warm-paper", "midnight", "high-contrast", "mo-bai", "indigo-porcelain", "grass-aroma", "contemplation", "absolutely", "delve", "deep-think", "new-warm-paper", "midnight-contrast", "auto"]) {
         expect(text).toContain(id);
       }
     });

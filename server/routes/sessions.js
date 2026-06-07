@@ -17,7 +17,7 @@ import {
 } from "../../lib/subagent-executor-metadata.js";
 import {
   extractTextContent,
-  loadSessionHistoryMessages,
+  loadSessionHistoryEntries,
   loadLatestAssistantSummaryFromSessionFile,
   isValidSessionPath,
   isActiveSessionPath,
@@ -31,6 +31,7 @@ import { TODO_STATE_CUSTOM_TYPE } from "../../lib/tools/todo-constants.js";
 import { mergeWorkspaceHistory } from "../../shared/workspace-history.js";
 import { computeContextUsageSnapshot } from "../../core/context-usage-estimator.js";
 import { resolveContextConfig } from "../../core/context-compressor.js";
+import { MANUAL_CONTEXT_COMPRESSION_THRESHOLD } from "../../shared/context-compression.js";
 import {
   deleteSessionFileSidecarSync,
   moveSessionFileSidecarSync,
@@ -87,6 +88,125 @@ function getWritableSessionManager(engine, sessionPath) {
 
 const TODO_COMPLETE_MESSAGE =
   "[Hana Todo] The user marked the current todo list as completed and removed it from the session UI. Treat every item in that list as completed. Create a new todo list only if new work needs tracking.";
+
+const HANA_COMPRESS_FORK_MARKER = "hana-compress-fork-marker";
+
+function compactionLabelFromReason(reason) {
+  if (reason === "compress-fork") return "上下文已压缩";
+  if (typeof reason === "string" && reason.startsWith("model-switch")) return "切换模型前已压缩上下文";
+  return "上下文已自动压缩";
+}
+
+function visibleMessagesAndCompactionsFromEntries(entries) {
+  const messages = [];
+  const blocks = [];
+  const compactions = [];
+  const hiddenEntryIds = new Set();
+
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    if (entry?.type !== "custom" || entry.customType !== HANA_COMPRESS_FORK_MARKER) continue;
+    const ids = entry.data?.hiddenEntryIds;
+    if (!Array.isArray(ids)) continue;
+    for (const id of ids) {
+      if (id) hiddenEntryIds.add(String(id));
+    }
+  }
+
+  let globalIdx = 0;
+  let lastVisibleMessageId = null;
+
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    const normalizedEntry = entry?.type
+      ? entry
+      : (entry?.role ? { type: "message", message: entry, id: entry.id, timestamp: entry.timestamp } : entry);
+
+    if (normalizedEntry?.type === "compaction") {
+      compactions.push({
+        id: normalizedEntry.id || `compaction-${compactions.length}`,
+        afterMessageId: lastVisibleMessageId,
+        label: compactionLabelFromReason(normalizedEntry.details?.reason),
+        timestamp: normalizedEntry.timestamp || null,
+      });
+      continue;
+    }
+
+    if (normalizedEntry?.type === "custom" && normalizedEntry.customType === HANA_COMPRESS_FORK_MARKER) {
+      compactions.push({
+        id: normalizedEntry.id || `compress-fork-${compactions.length}`,
+        afterMessageId: lastVisibleMessageId,
+        label: normalizedEntry.data?.label || compactionLabelFromReason("compress-fork"),
+        timestamp: normalizedEntry.timestamp || null,
+      });
+      continue;
+    }
+
+    if (normalizedEntry?.type !== "message" || !normalizedEntry.message) continue;
+    if (hiddenEntryIds.has(String(normalizedEntry.id || ""))) continue;
+
+    const m = { ...normalizedEntry.message };
+    if (normalizedEntry.id) m.id = normalizedEntry.id;
+    if (normalizedEntry.timestamp) m.timestamp = normalizedEntry.timestamp;
+
+    if (m.role === "user") {
+      const { text, images } = extractTextContent(m.content);
+      if (text || images.length) {
+        const id = String(globalIdx);
+        messages.push({
+          id,
+          ...(m.id ? { entryId: m.id } : {}),
+          role: "user",
+          content: text,
+          images: images.length ? images : undefined,
+          ...(m.timestamp ? { timestamp: m.timestamp } : {}),
+        });
+        lastVisibleMessageId = id;
+        globalIdx++;
+      }
+    } else if (m.role === "assistant") {
+      const { text, thinking, hasThinking, toolUses, images } = extractTextContent(m.content, { stripThink: true });
+      if (text || toolUses.length || images.length) {
+        const id = String(globalIdx);
+        messages.push({
+          id,
+          ...(m.id ? { entryId: m.id } : {}),
+          role: "assistant",
+          content: text,
+          thinking: thinking || undefined,
+          hasThinking: hasThinking || undefined,
+          toolCalls: toolUses.length ? toolUses : undefined,
+          images: images.length ? images : undefined,
+          ...(m.timestamp ? { timestamp: m.timestamp } : {}),
+        });
+        lastVisibleMessageId = id;
+        globalIdx++;
+      }
+    } else if (m.role === "toolResult") {
+      const extracted = extractBlocks(m.toolName, m.details, m);
+      for (const b of extracted) {
+        blocks.push({ ...b, afterIndex: messages.length - 1 });
+      }
+      // 将 toolResult.details 回填到对应的 assistant toolCall（用于 diff 卡片等持久化展示）
+      if (m.details && messages.length > 0) {
+        const lastMsg = messages[messages.length - 1];
+        if (lastMsg.role === "assistant" && lastMsg.toolCalls) {
+          const matchIdx = lastMsg.toolCalls.findIndex(
+            tc => tc.name === m.toolName && !tc.details
+          );
+          if (matchIdx >= 0) {
+            lastMsg.toolCalls[matchIdx] = {
+              ...lastMsg.toolCalls[matchIdx],
+              details: m.details,
+              done: true,
+              success: !m.isError,
+            };
+          }
+        }
+      }
+    }
+  }
+
+  return { messages, blocks, compactions };
+}
 
 export function createSessionsRoute(engine) {
   const route = new Hono();
@@ -483,75 +603,19 @@ export function createSessionsRoute(engine) {
       if (queryPath && !isValidSessionPath(queryPath, engine.agentsDir)) {
         return c.json({ error: "Invalid session path" }, 403);
       }
-      const sourceMessages = await loadSessionHistoryMessages(engine, queryPath);
+      const sourceEntries = await loadSessionHistoryEntries(engine, queryPath);
 
       // 分页参数
       const beforeId = c.req.query("before") != null ? Number(c.req.query("before")) : null;
       const limit = Math.min(Number(c.req.query("limit")) || 50, 200);
 
-      // 提取可显示的消息（user/assistant 文本 + 文件/artifact 工具结果）
-      // 每条消息带稳定 id（原始 sourceMessages 索引）
-      const allMessages = [];
-      const blocks = [];
-      let globalIdx = 0;
-
-      for (const m of sourceMessages) {
-        if (m.role === "user") {
-          const { text, images } = extractTextContent(m.content);
-          if (text || images.length) {
-            allMessages.push({
-              id: String(globalIdx),
-              ...(m.id ? { entryId: m.id } : {}),
-              role: "user",
-              content: text,
-              images: images.length ? images : undefined,
-              ...(m.timestamp ? { timestamp: m.timestamp } : {}),
-            });
-            globalIdx++;
-          }
-        } else if (m.role === "assistant") {
-          const { text, thinking, toolUses } = extractTextContent(m.content, { stripThink: true });
-          if (text || toolUses.length) {
-            allMessages.push({
-              id: String(globalIdx),
-              ...(m.id ? { entryId: m.id } : {}),
-              role: "assistant",
-              content: text,
-              thinking: thinking || undefined,
-              toolCalls: toolUses.length ? toolUses : undefined,
-              ...(m.timestamp ? { timestamp: m.timestamp } : {}),
-            });
-            globalIdx++;
-          }
-        } else if (m.role === "toolResult") {
-          const extracted = extractBlocks(m.toolName, m.details, m);
-          for (const b of extracted) {
-            blocks.push({ ...b, afterIndex: allMessages.length - 1 });
-          }
-          // 将 toolResult.details 回填到对应的 assistant toolCall（用于 diff 卡片等持久化展示）
-          if (m.details && allMessages.length > 0) {
-            const lastMsg = allMessages[allMessages.length - 1];
-            if (lastMsg.role === "assistant" && lastMsg.toolCalls) {
-              const matchIdx = lastMsg.toolCalls.findIndex(
-                tc => tc.name === m.toolName && !tc.details
-              );
-              if (matchIdx >= 0) {
-                lastMsg.toolCalls[matchIdx] = {
-                  ...lastMsg.toolCalls[matchIdx],
-                  details: m.details,
-                  done: true,
-                  success: !m.isError,
-                };
-              }
-            }
-          }
-        }
-      }
+      const { messages: allMessages, blocks, compactions } = visibleMessagesAndCompactionsFromEntries(sourceEntries);
 
       // 分页：before 参数指定游标，否则默认返回最后 limit 条
       let messages;
       let hasMore = false;
       let slicedBlocks = blocks;
+      let slicedCompactions = compactions;
 
       const total = allMessages.length;
       // all=1 强制全量返回（流式恢复等特殊场景）
@@ -570,6 +634,11 @@ export function createSessionsRoute(engine) {
         slicedBlocks = blocks
           .filter(b => b.afterIndex >= startIdx && b.afterIndex < endIdx)
           .map(b => ({ ...b, afterIndex: b.afterIndex - startIdx }));
+        const visibleMessageIds = new Set(messages.map(m => m.id));
+        slicedCompactions = compactions.filter(compaction => (
+          (compaction.afterMessageId === null && startIdx === 0)
+          || visibleMessageIds.has(compaction.afterMessageId)
+        ));
       }
 
       // 修正 subagent blocks 的状态：优先从 deferred store 读终态，其次从 session 文件推断
@@ -633,7 +702,7 @@ export function createSessionsRoute(engine) {
       // 只在当前分支路径上找最新合法快照。避免从抛弃的分支取到错误状态。
       const todos = await loadLatestTodosFromSessionFile(queryPath);
 
-      return c.json({ messages, blocks: slicedBlocks, todos, hasMore, sessionFiles });
+      return c.json({ messages, blocks: slicedBlocks, compactions: slicedCompactions, todos, hasMore, sessionFiles });
     } catch (err) {
       return c.json({ error: err.message }, 500);
     }
@@ -822,6 +891,7 @@ export function createSessionsRoute(engine) {
         permissionMode: engine.permissionMode,
         accessMode: engine.accessMode,
         thinkingLevel: engine.getSessionThinkingLevel?.(newSessionPath) || engine.getThinkingLevel?.() || "auto",
+        goal: engine.getSessionGoal?.(newSessionPath) || null,
         memoryModelUnavailableReason: engine.memoryModelUnavailableReason || null,
       });
     } catch (err) {
@@ -878,6 +948,7 @@ export function createSessionsRoute(engine) {
         permissionMode: engine.permissionMode,
         accessMode: engine.accessMode,
         thinkingLevel: engine.getSessionThinkingLevel?.(sessionPath) || engine.getThinkingLevel?.() || "auto",
+        goal: engine.getSessionGoal?.(sessionPath) || null,
         memoryModelUnavailableReason: engine.memoryModelUnavailableReason || null,
         cwd: engine.cwd,
         workspaceFolders: engine.getSessionWorkspaceFolders?.(sessionPath) || [],
@@ -915,6 +986,17 @@ export function createSessionsRoute(engine) {
   route.get("/browser/session-states", async (c) => {
     const bm = BrowserManager.instance();
     return c.json(bm.getBrowserSessionStates());
+  });
+
+  // 显示/恢复指定 session 的浏览器
+  route.post("/browser/show-session", async (c) => {
+    const body = await safeJson(c);
+    const { sessionPath } = body;
+    if (!sessionPath) return c.json({ error: "missing sessionPath" });
+    const bm = BrowserManager.instance();
+    await bm.resumeForSession(sessionPath);
+    await bm.show(sessionPath);
+    return c.json({ ok: true, sessions: bm.getBrowserSessionStates() });
   });
 
   // 关闭指定 session 的浏览器
@@ -1155,7 +1237,7 @@ export function createSessionsRoute(engine) {
       let compressionAvailable = false;
       try {
         const ctxConfig = resolveContextConfig(switchedAgent?._config);
-        compressionAvailable = !!(ctxConfig.enabled && contextUsage.percent != null && (contextUsage.percent / 100) >= ctxConfig.threshold);
+        compressionAvailable = !!(ctxConfig.enabled && contextUsage.percent != null && (contextUsage.percent / 100) >= MANUAL_CONTEXT_COMPRESSION_THRESHOLD);
       } catch {}
 
       return c.json({
@@ -1169,6 +1251,7 @@ export function createSessionsRoute(engine) {
         permissionMode: engine.permissionMode,
         accessMode: engine.accessMode,
         thinkingLevel: engine.getSessionThinkingLevel?.(result.sessionPath) || engine.getThinkingLevel?.() || "auto",
+        goal: engine.getSessionGoal?.(result.sessionPath) || null,
         memoryModelUnavailableReason: engine.memoryModelUnavailableReason || null,
         messageCount: newSession?.messages?.length || 0,
         contextUsage: {

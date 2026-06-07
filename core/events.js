@@ -33,6 +33,7 @@ export class MoodParser {
     this.buffer = "";
     this._justEndedMood = false;
     this._currentTag = null; // 当前打开的标签名
+    this._capturedMood = false;
   }
 
   /**
@@ -59,6 +60,7 @@ export class MoodParser {
       emit({ type: "mood_end" });
       this.inMood = false;
       this._currentTag = null;
+      this._capturedMood = true;
     }
   }
 
@@ -67,6 +69,7 @@ export class MoodParser {
     this.buffer = "";
     this._justEndedMood = false;
     this._currentTag = null;
+    this._capturedMood = false;
   }
 
   _trailingPrefixLen(buffer, target) {
@@ -77,13 +80,25 @@ export class MoodParser {
    * 在 buffer 中查找最早出现的开始标签
    * @returns {{ tag: string, idx: number, openTag: string } | null}
    */
+  _isBacktickQuotedOpenTag(idx, openTag) {
+    const before = this.buffer[idx - 1];
+    const after = this.buffer[idx + openTag.length];
+    return before === "`" || after === "`";
+  }
+
   _findOpenTag() {
     let best = null;
     for (const tag of TAGS) {
       const openTag = `<${tag}>`;
-      const idx = this.buffer.indexOf(openTag);
-      if (idx !== -1 && (best === null || idx < best.idx)) {
-        best = { tag, idx, openTag };
+      let searchFrom = 0;
+      while (searchFrom < this.buffer.length) {
+        const idx = this.buffer.indexOf(openTag, searchFrom);
+        if (idx === -1) break;
+        if (!this._isBacktickQuotedOpenTag(idx, openTag) && (best === null || idx < best.idx)) {
+          best = { tag, idx, openTag };
+          break;
+        }
+        searchFrom = idx + openTag.length;
       }
     }
     return best;
@@ -112,6 +127,11 @@ export class MoodParser {
       }
 
       if (!this.inMood) {
+        if (this._capturedMood) {
+          emit({ type: "text", data: this.buffer });
+          this.buffer = "";
+          break;
+        }
         // 寻找任意开始标签
         const found = this._findOpenTag();
         if (found) {
@@ -142,6 +162,7 @@ export class MoodParser {
           if (content) emit({ type: "mood_text", data: content });
           emit({ type: "mood_end" });
           this.inMood = false;
+          this._capturedMood = true;
           this._justEndedMood = true;
           this.buffer = this.buffer.slice(idx + closeTag.length);
           this._currentTag = null;

@@ -32,7 +32,7 @@ export function stripThinkTags(raw) {
 /**
  * 从 Pi SDK 的 content 块数组中提取纯文本 + thinking + tool_use 调用
  * content 可能是 string 或 [{type: "text", text: "..."}, {type: "thinking", thinking: "..."}, ...]
- * 返回 { text, thinking, toolUses, images }
+ * 返回 { text, thinking, toolUses, images, hasThinking? }
  */
 export function extractTextContent(content, { stripThink = false } = {}) {
   if (typeof content === "string") {
@@ -51,6 +51,7 @@ export function extractTextContent(content, { stripThink = false } = {}) {
     .filter(block => block.type === "image" && (block.data || block.source?.data))
     .map(block => ({ data: block.data || block.source.data, mimeType: block.mimeType || block.source?.media_type || "image/png" }));
   const { text, thinkContent } = stripThink ? stripThinkTags(rawText) : { text: rawText, thinkContent: "" };
+  const hasThinking = Boolean(thinkContent) || content.some(block => block.type === "thinking");
   const thinking = [
     thinkContent,
     ...content
@@ -69,7 +70,7 @@ export function extractTextContent(content, { stripThink = false } = {}) {
       }
       return { name: block.name, args: Object.keys(args).length ? args : undefined };
     });
-  return { text, thinking, toolUses, images };
+  return { text, thinking, hasThinking, toolUses, images };
 }
 
 /**
@@ -78,20 +79,31 @@ export function extractTextContent(content, { stripThink = false } = {}) {
  * 读文件失败时再退回内存态，避免历史接口直接空白。
  */
 export async function loadSessionHistoryMessages(engine, explicitPath) {
+  const entries = await loadSessionHistoryEntries(engine, explicitPath);
+  if (entries.length > 0) return messagesFromBranchEntries(entries);
+  return [];
+}
+
+/**
+ * 读取当前分支上的原始 session entries。
+ *
+ * 与 loadSessionHistoryMessages 不同，这里保留 compaction/custom 等非消息 entry，
+ * 供 UI 展示压缩边界、标签等元信息。LLM 上下文仍由 SessionManager 自己构建。
+ */
+export async function loadSessionHistoryEntries(engine, explicitPath) {
   const sessionPath = explicitPath;
   if (!sessionPath) return [];
 
   const liveSession = engine?.getSessionByPath?.(sessionPath);
   const liveManager = liveSession?.sessionManager;
   if (liveManager && typeof liveManager.getBranch === "function") {
-    return messagesFromBranchEntries(liveManager.getBranch());
+    return liveManager.getBranch();
   }
 
   try {
     if (await looksLikePiSessionFile(sessionPath)) {
       const manager = SessionManager.open(sessionPath, path.dirname(sessionPath));
-      const messages = messagesFromBranchEntries(manager.getBranch());
-      return messages;
+      return manager.getBranch();
     }
   } catch {
     // 旧文件或损坏文件继续走兼容读取，不让历史页直接空白。
@@ -99,24 +111,21 @@ export async function loadSessionHistoryMessages(engine, explicitPath) {
 
   try {
     const raw = await fs.readFile(sessionPath, "utf-8");
-    const messages = [];
+    const entries = [];
 
     for (const line of raw.split("\n")) {
       if (!line.trim()) continue;
       try {
         const entry = JSON.parse(line);
-        if (entry.type === "message" && entry.message) {
-          const message = { ...entry.message };
-          if (entry.id) message.id = entry.id;
-          if (entry.timestamp) message.timestamp = entry.timestamp;
-          messages.push(message);
+        if (entry?.type) {
+          entries.push(entry);
         }
       } catch {
         // 跳过损坏行
       }
     }
 
-    if (messages.length > 0) return messages;
+    if (entries.length > 0) return entries;
   } catch {
     // 文件读取失败
   }

@@ -179,6 +179,20 @@ describe('streamBufferManager.ensureMessage 自愈', () => {
     expect(textBlock && 'html' in textBlock ? textBlock.html : '').toContain('<strong>');
   });
 
+  it('ignores reused finished auxiliary vision progress events', () => {
+    streamBufferManager.handle({
+      type: 'vision_progress',
+      sessionPath: PATH,
+      phase: 'done',
+      requestId: 'vision-reused-1',
+      response: 'cached image note',
+      reused: true,
+    });
+
+    expect(getItems()).toHaveLength(1);
+    expect(getAssistantMessage()).toBeNull();
+  });
+
   it('initSession 覆盖同 path 后，后续 tool 事件仍绑定回原 assistant 消息', () => {
     streamBufferManager.handle({ type: 'text_delta', sessionPath: PATH, delta: 'first' });
     expect(getItems().length).toBe(2);

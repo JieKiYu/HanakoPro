@@ -102,6 +102,18 @@ describe("extractTextContent", () => {
     const result = extractTextContent(content);
     expect(result.text).toBe("answer");
     expect(result.thinking).toBe("my thoughts");
+    expect(result.hasThinking).toBe(true);
+  });
+
+  it("content block 数组保留空 thinking block 的存在标记", () => {
+    const content = [
+      { type: "thinking", thinking: "", thinkingSignature: "{\"encrypted_content\":\"...\"}" },
+      { type: "text", text: "answer" },
+    ];
+    const result = extractTextContent(content);
+    expect(result.text).toBe("answer");
+    expect(result.thinking).toBe("");
+    expect(result.hasThinking).toBe(true);
   });
 
   it("content block 数组提取 tool_use block", () => {

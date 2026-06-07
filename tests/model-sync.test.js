@@ -101,6 +101,12 @@ const KNOWN_MODELS = {
     "MiniMax-M2.7": { name: "MiniMax M2.7", context: 204800, maxOutput: 131072, reasoning: true },
   },
   mimo: {
+    "mimo-v2.5-pro": {
+      name: "MiMo V2.5 Pro",
+      context: 1048576,
+      maxOutput: 131072,
+      reasoning: true,
+    },
     "mimo-v2.5": {
       name: "MiMo V2.5",
       context: 1048576,
@@ -135,6 +141,22 @@ vi.mock("../shared/known-models.js", () => ({
     if (GENERIC_MODEL_FALLBACKS[modelId]) return GENERIC_MODEL_FALLBACKS[modelId];
     if (bare && GENERIC_MODEL_FALLBACKS[bare]) return GENERIC_MODEL_FALLBACKS[bare];
     return null;
+  },
+  inferKnownModelType(provider, modelEntry) {
+    if (modelEntry && typeof modelEntry === "object" && typeof modelEntry.type === "string" && modelEntry.type.trim()) {
+      return modelEntry.type.trim();
+    }
+    const id = typeof modelEntry === "object" ? modelEntry.id : modelEntry;
+    const known = provider && id ? KNOWN_MODELS[provider]?.[id] || GENERIC_MODEL_FALLBACKS[id] : null;
+    if (typeof known?.type === "string" && known.type.trim()) return known.type.trim();
+    const names = [
+      typeof id === "string" ? id : "",
+      typeof modelEntry === "object" ? modelEntry.name : "",
+      known?.name || "",
+    ].filter(Boolean);
+    return names.some(value => /(^|[^a-z0-9])image([^a-z0-9]|$)|seedream|(^|[^a-z0-9])dall[-_ ]?e([^a-z0-9]|$)|(^|[^a-z0-9])imagen([^a-z0-9]|$)|(^|[^a-z0-9])flux([^a-z0-9]|$)/i.test(value))
+      ? "image"
+      : "chat";
   },
 }));
 
@@ -440,6 +462,44 @@ describe("syncModels", () => {
     expect(model.headers).toEqual({ "User-Agent": "KimiCLI/1.5" });
   });
 
+  it("keeps Acui OpenAI-compatible model definitions valid for the Pi model registry", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      acui: {
+        base_url: "https://api.acui.shop/v1",
+        api: "openai-responses",
+        api_key: "sk-test",
+        models: [{ id: "gpt-5.5", reasoning: true, image: true }],
+      },
+    };
+
+    syncModels(providers, { modelsJsonPath });
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    const model = result.providers.acui.models[0];
+    expect(model.id).toBe("gpt-5.5");
+    expect(model.headers).toBeUndefined();
+  });
+
+  it("keeps Acui-compatible custom provider model definitions free of null headers", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      "custom-acui": {
+        base_url: "https://api.acui.shop/v1",
+        api: "openai-completions",
+        api_key: "sk-test",
+        models: ["custom-model"],
+      },
+    };
+
+    syncModels(providers, { modelsJsonPath });
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    expect(result.providers["custom-acui"].models[0].headers).toBeUndefined();
+  });
+
   it("marks Anthropic-compatible reasoning models with anthropic thinking format", async () => {
     const syncModels = await loadSync();
 
@@ -675,6 +735,38 @@ describe("syncModels", () => {
       thinkingFormat: "qwen-chat-template",
       reasoningProfile: "mimo-openai",
     });
+  });
+
+  it("projects MiMo V2.5 Pro as text-only so auxiliary vision can handle images", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      mimo: {
+        base_url: "https://api.xiaomimimo.com/v1",
+        api: "openai-completions",
+        api_key: "sk-test",
+        models: ["mimo-v2.5-pro"],
+      },
+    };
+
+    syncModels(providers, { modelsJsonPath });
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    const model = result.providers.mimo.models[0];
+    expect(model).toMatchObject({
+      id: "mimo-v2.5-pro",
+      name: "MiMo V2.5 Pro",
+      input: ["text"],
+      contextWindow: 1048576,
+      maxTokens: 131072,
+      reasoning: true,
+    });
+    expect(model.compat).toMatchObject({
+      supportsDeveloperRole: false,
+      thinkingFormat: "qwen-chat-template",
+      reasoningProfile: "mimo-openai",
+    });
+    expect(model.compat).not.toHaveProperty("hanaVideoInput");
   });
 
   it("projects Xiaomi Token Plan MiMo models with MiMo thinking compat", async () => {

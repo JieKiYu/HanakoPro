@@ -45,21 +45,21 @@ describe('theme-registry', () => {
   });
 
   describe('THEMES 完整性', () => {
-    it('恰好 10 条', () => {
-      expect(Object.keys(reg.THEMES)).toHaveLength(10);
+    it('恰好 12 条', () => {
+      expect(Object.keys(reg.THEMES)).toHaveLength(12);
     });
 
     it('包含所有已知主题 id', () => {
       expect(Object.keys(reg.THEMES).sort()).toEqual([
         'absolutely', 'contemplation', 'deep-think',
-        'delve', 'grass-aroma', 'high-contrast', 'midnight', 'midnight-contrast',
-        'new-warm-paper', 'warm-paper',
+        'delve', 'grass-aroma', 'high-contrast', 'indigo-porcelain',
+        'midnight', 'midnight-contrast', 'mo-bai', 'new-warm-paper', 'warm-paper',
       ]);
     });
 
     it.each(['warm-paper', 'midnight', 'high-contrast', 'grass-aroma',
-             'contemplation', 'absolutely', 'delve', 'deep-think', 'new-warm-paper',
-             'midnight-contrast'])(
+             'mo-bai', 'indigo-porcelain', 'contemplation', 'absolutely',
+             'delve', 'deep-think', 'new-warm-paper', 'midnight-contrast'])(
       '"%s" 每条都有完整字段',
       (id) => {
         const t = reg.THEMES[id];
@@ -155,9 +155,9 @@ describe('theme-registry', () => {
       expect(reg.getThemeIds().sort()).toEqual(Object.keys(reg.THEMES).sort());
     });
 
-    it('getAllUIOptions 含 10 个主题 + auto', () => {
+    it('getAllUIOptions 含 12 个主题 + auto', () => {
       const opts = reg.getAllUIOptions();
-      expect(opts).toHaveLength(11);
+      expect(opts).toHaveLength(13);
       expect(opts.map(o => o.id).sort()).toContain('auto');
       expect(opts.map(o => o.id).sort()).toContain('warm-paper');
       opts.forEach(o => {
@@ -165,6 +165,14 @@ describe('theme-registry', () => {
         expect(o).toHaveProperty('i18nName');
         expect(o).toHaveProperty('i18nMode');
       });
+    });
+
+    it('墨白 / 靛瓷 排在素白之后、草香之前', () => {
+      const ids = reg.getThemeIds();
+      expect(ids.slice(ids.indexOf('high-contrast') + 1, ids.indexOf('grass-aroma'))).toEqual([
+        'mo-bai',
+        'indigo-porcelain',
+      ]);
     });
 
     it('getAllUIOptions 最后一项是 auto（UI 顺序约束）', () => {

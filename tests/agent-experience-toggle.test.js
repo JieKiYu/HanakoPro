@@ -48,6 +48,8 @@ function makeAgent({ experienceEnabled }) {
   agent._notifyTool = makeTool("notify");
   agent._stopTaskTool = makeTool("stop_task");
   agent._checkDeferredTool = makeTool("check_pending_tasks");
+  agent._currentStatusTool = makeTool("current_status");
+  agent._sessionGoalTool = makeTool("session_goal");
 
   return { agent, root };
 }

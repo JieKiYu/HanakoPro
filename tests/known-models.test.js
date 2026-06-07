@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { lookupKnown } from "../shared/known-models.js";
+import { inferKnownModelType, lookupKnown } from "../shared/known-models.js";
 
 describe("known-models dictionary", () => {
   it("treats missing model ids as unknown instead of throwing", () => {
@@ -31,6 +31,7 @@ describe("known-models dictionary", () => {
       maxOutput: 128000,
       image: true,
       reasoning: true,
+      xhigh: true,
     });
   });
 
@@ -43,6 +44,13 @@ describe("known-models dictionary", () => {
       name: "GPT Image 2",
       type: "image",
     });
+  });
+
+  it("infers image generation model types from common image model families", () => {
+    expect(inferKnownModelType("custom", "foo-image-v1")).toBe("image");
+    expect(inferKnownModelType("volcengine", "doubao-seedream-4-0-250828")).toBe("image");
+    expect(inferKnownModelType("custom", { id: "seedream-5", name: "Seedream 5" })).toBe("image");
+    expect(inferKnownModelType("custom", { id: "foo-image-v1", type: "chat" })).toBe("chat");
   });
 
   it("declares recent frontier and agent model metadata by provider", () => {
@@ -131,8 +139,6 @@ describe("known-models dictionary", () => {
       name: "MiMo V2.5 Pro",
       context: 1048576,
       maxOutput: 131072,
-      image: true,
-      video: true,
       reasoning: true,
     });
     expect(lookupKnown("mimo", "mimo-v2.5")).toEqual({
@@ -172,6 +178,7 @@ describe("known-models dictionary", () => {
     });
     expect(lookupKnown("unknown-provider", "gpt-5.5")).toMatchObject({
       context: 1050000,
+      xhigh: true,
     });
   });
 

@@ -24,6 +24,7 @@ vi.mock('../../settings/helpers', () => ({
   t: (key: string) => key,
   API_FORMAT_OPTIONS: [
     { value: 'openai-completions', label: 'OpenAI Compatible' },
+    { value: 'openai-responses', label: 'OpenAI Responses' },
   ],
 }));
 
@@ -115,5 +116,39 @@ describe('ApiKeyCredentials', () => {
       api: 'openai-completions',
       api_key: 'saved-groq-key',
     });
+  });
+
+  it('auto-saves an edited api key on blur without requiring connection verification', async () => {
+    const onRefresh = vi.fn(async () => {});
+    const { container } = render(
+      <ApiKeyCredentials
+        providerId="acui"
+        summary={providerSummary({
+          display_name: 'ACUI',
+          base_url: 'https://api.acui.shop',
+          api: 'openai-responses',
+          api_key: '',
+          has_credentials: false,
+        })}
+        onRefresh={onRefresh}
+      />,
+    );
+
+    const keyInput = container.querySelector('input[type="password"]') as HTMLInputElement;
+    fireEvent.change(keyInput, { target: { value: 'sk-acui-test' } });
+    fireEvent.blur(keyInput);
+
+    await waitFor(() => expect(mocks.hanaFetch).toHaveBeenCalledWith(
+      '/api/config',
+      expect.objectContaining({ method: 'PUT' }),
+    ));
+    expect(mocks.hanaFetch).not.toHaveBeenCalledWith('/api/providers/test', expect.anything());
+    const [, options] = mocks.hanaFetch.mock.calls[0];
+    expect(JSON.parse(String((options as RequestInit).body))).toEqual({
+      providers: {
+        acui: { api_key: 'sk-acui-test' },
+      },
+    });
+    expect(onRefresh).toHaveBeenCalledTimes(1);
   });
 });

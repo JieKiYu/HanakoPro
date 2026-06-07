@@ -4,6 +4,7 @@ import path from "path";
 import { callText as defaultCallText } from "./llm-client.js";
 import { modelSupportsImage } from "./message-sanitizer.js";
 import { getVisionCapabilities } from "../shared/model-capabilities.js";
+import { createAbortError } from "../shared/abort-errors.js";
 
 export const VISION_CONTEXT_START = "<vision-context>";
 export const VISION_CONTEXT_END = "</vision-context>";
@@ -52,10 +53,7 @@ function visionOutputLimit(model) {
 }
 
 function abortError() {
-  const err = new Error("This operation was aborted");
-  err.name = "AbortError";
-  err.type = "aborted";
-  return err;
+  return createAbortError();
 }
 
 function throwIfAborted(signal) {
@@ -530,20 +528,6 @@ export class VisionBridge {
 
       const existing = this._lookupNote(sessionPath, key);
       if (existing?.note) {
-        const requestId = createVisionRequestId(this._now(), i);
-        emitVisionProgress(emitProgress, {
-          phase: "done",
-          requestId,
-          imageIndex: i + 1,
-          imageCount: resources.length,
-          resourceLabel: resource?.label || key,
-          model: compactModelRef(config.model),
-          targetModel: compactModelRef(targetModel),
-          question: visionQuestionForDisplay(request, !!visionCapabilities),
-          response: existing.note,
-          elapsedMs: 0,
-          reused: true,
-        });
         notes.push({
           key,
           label: resource?.label || key,

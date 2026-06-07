@@ -1,12 +1,19 @@
 .container {
-  display: inline-block;
+  display: block;
+  width: var(--chat-code-block-width, 100%);
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   margin: var(--space-sm) 0;
   border-radius: var(--radius-chat-card);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04);
+  scrollbar-color: rgba(var(--accent-rgb), 0.38) transparent;
 }
 .iframe {
   display: block;
+  max-width: none;
   border: none;
   transition: opacity var(--duration-fast) ease, width var(--duration-fast) ease, height var(--duration-fast) ease;
 }

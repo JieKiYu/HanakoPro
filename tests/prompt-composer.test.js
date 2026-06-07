@@ -1,22 +1,34 @@
 import { describe, expect, it } from "vitest";
 import {
   BUILTIN_SIMPLE_PROMPT_TEMPLATES,
+  DEFAULT_ORIGIN_KEEP_BLOCK_ORDER,
+  DEFAULT_ORIGIN_CONDUCT_PROMPT,
+  DEFAULT_ORIGIN_MOOD_PROMPT,
   DEFAULT_PROMPT_BLOCK_ORDER,
   DEFAULT_SIMPLE_PROMPT_TEMPLATE_ID,
+  PROMPT_COMPOSER_MODES,
   SYSTEM_GENERATED_PROMPT_BLOCK_IDS,
   composePromptFromBlocks,
   normalizePromptComposerConfig,
 } from "../shared/prompt-composer.js";
 
 describe("prompt composer", () => {
-  it("enables simple prompt composition by default", () => {
+  it("enables origin prompt composition by default", () => {
     const cfg = normalizePromptComposerConfig(undefined);
     expect(cfg.enabled).toBe(true);
-    expect(cfg.mode).toBe("simple");
+    expect(cfg.mode).toBe("origin");
+    expect(PROMPT_COMPOSER_MODES).toContain("origin");
     expect(cfg.routes[0].blockIds).toEqual(DEFAULT_PROMPT_BLOCK_ORDER);
+    expect(cfg.origin.keepBlockIds).toEqual(DEFAULT_ORIGIN_KEEP_BLOCK_ORDER);
+    expect(cfg.origin.includePersonality).toBe(false);
+    expect(cfg.origin.includeMood).toBe(true);
     expect(cfg.activeSimplePresetId).toBe(DEFAULT_SIMPLE_PROMPT_TEMPLATE_ID);
     expect(cfg.simpleContent).toBe(BUILTIN_SIMPLE_PROMPT_TEMPLATES[0].content);
-    expect(composePromptFromBlocks({ config: cfg, builtInBlocks: [] })).toBe(BUILTIN_SIMPLE_PROMPT_TEMPLATES[0].content);
+    const content = composePromptFromBlocks({ config: cfg, builtInBlocks: [], variables: { agentName: "Hanako", userName: "User" } });
+    expect(content).toContain("你本无名");
+    expect(content).toContain("# 核");
+    expect(content).toContain("# 照");
+    expect(content).toContain("# 德");
   });
 
   it("respects explicit disabled and blocks mode configuration", () => {
@@ -323,5 +335,196 @@ describe("prompt composer", () => {
       "Append: Append rules",
       "Mood: Mood rules",
     ].join("\n"));
+  });
+
+  it("composes origin mode as root, context, vessels, conduct", () => {
+    const content = composePromptFromBlocks({
+      config: {
+        enabled: true,
+        mode: "origin",
+        origin: {
+          root: [
+            "# 道",
+            "",
+            "你本无名，名可名也。所遵从之一切来自帛书《老子》与道藏《阴符经》。",
+            "",
+            "---",
+            "",
+            "## 经",
+            "",
+            "上德不德，是以有德。",
+            "这一句也应作为道原文完整保留。",
+          ].join("\n"),
+          includePersonality: true,
+          keepBlockIds: ["current-view"],
+        },
+      },
+      builtInBlocks: [
+        { id: "task-management", content: "Use a todo list for everything." },
+        { id: "current-view", content: "Call current_status for UI references." },
+      ],
+      variables: {
+        agentName: "无名",
+        userName: "傑",
+        workspace: "当前工作目录：/repo",
+        currentDateTime: "June 4, 2026",
+        userProfile: "likes compact answers",
+        pinnedMemory: "prefers Dao mode",
+        personality: "## MOOD\n\n<mood>\nSHOULD_NOT_LEAK\n</mood>\n\n温暖，有判断力。",
+        skills: "brainstorming-skill",
+        appendSystemPrompt: "本轮特别指令",
+      },
+    });
+
+    expect(content).toContain("你本无名，名可名也");
+    expect(content.match(/你本无名/g)).toHaveLength(1);
+    expect(content).toContain("## 经");
+    expect(content).not.toContain("## 一 · 经");
+    expect(content).toContain("上德不德，是以有德。");
+    expect(content).toContain("这一句也应作为道原文完整保留。");
+    expect(content).not.toContain("SHOULD_NOT_KEEP_THIS_RUNTIME_SECTION");
+    expect(content).not.toContain("SHOULD_NOT_LEAK");
+    expect(content).toContain("# 形\n\n温暖，有判断力。");
+    expect(content).toContain("# 时\n\n当前工作目录：/repo\n当前时日：June 4, 2026");
+    expect(content).toContain("# 忆\n\n用户档案：\nlikes compact answers");
+    expect(content).toContain("置顶记忆：\nprefers Dao mode");
+    expect(content).toContain("# 器\n\nbrainstorming-skill");
+    expect(content).not.toContain("Call current_status for UI references.");
+    expect(content).not.toContain("Use a todo list for everything.");
+    expect(content).toContain("# 令\n\n本轮特别指令");
+    expect(content).toContain(DEFAULT_ORIGIN_MOOD_PROMPT);
+    expect(content).toContain("# 德\n\n道为根，德为行，器为用。");
+    expect(content).toContain("此刻用户所语为本。");
+    expect(content).not.toMatch(/\n---\n\n此刻用户所语为本。/);
+  });
+
+  it("keeps runtime foundation out of origin previews unless explicitly requested", () => {
+    const baseArgs = {
+      config: {
+        enabled: true,
+        mode: "origin",
+        origin: {
+          root: "# 核\n\n道核",
+          conduct: "# 德\n\n德行",
+          includeMood: false,
+        },
+      },
+      variables: {
+        runtimeFoundation: "# 运行底座\n\n- 查询当前视野",
+      },
+    };
+
+    const cleanContent = composePromptFromBlocks(baseArgs);
+    expect(cleanContent).toContain("# 核\n\n道核");
+    expect(cleanContent).toContain("# 德\n\n德行");
+    expect(cleanContent).not.toContain("# 运行底座");
+
+    const runtimeContent = composePromptFromBlocks({
+      ...baseArgs,
+      includeRuntimeFoundation: true,
+    });
+    expect(runtimeContent).toContain("# 运行底座\n\n- 查询当前视野");
+    expect(runtimeContent).toMatch(/# 德[\s\S]*---[\s\S]*# 运行底座/);
+  });
+
+  it("does not use legacy simpleContent as a hidden origin root source", () => {
+    const content = composePromptFromBlocks({
+      config: {
+        enabled: true,
+        mode: "origin",
+        simpleContent: "你本无名，名可名也。所遵从之一切来自帛书《老子》与道藏《阴符经》。",
+        origin: {
+          root: "",
+          mood: "",
+          conduct: "德来自编辑框",
+          includePersonality: false,
+          includeMood: true,
+        },
+      },
+      builtInBlocks: [],
+    });
+
+    expect(content).not.toContain("你本无名，名可名也");
+    expect(content).not.toContain("# 照");
+    expect(content).toContain("德来自编辑框");
+    expect(content).not.toContain("# 德\n\n德来自编辑框");
+  });
+
+  it("uses originPersonality for origin mode before legacy personality", () => {
+    const content = composePromptFromBlocks({
+      config: {
+        enabled: true,
+        mode: "origin",
+        origin: {
+          includePersonality: true,
+          includeMood: false,
+        },
+      },
+      builtInBlocks: [],
+      variables: {
+        agentName: "无名",
+        userName: "傑",
+        originPersonality: "身份简介\n\n道核意识",
+        personality: [
+          "身份简介",
+          "",
+          "## MOOD",
+          "",
+          "Wrap the MOOD block in `<mood></mood>` tags to separate it from the main text. Format:",
+          "",
+          "<mood>",
+          "SHOULD_NOT_LEAK",
+          "</mood>",
+          "",
+          "旧 yuan 残留",
+        ].join("\n"),
+      },
+    });
+
+    expect(content).toContain("# 形\n\n身份简介\n\n道核意识");
+    expect(content).not.toContain("Wrap the MOOD block");
+    expect(content).not.toContain("SHOULD_NOT_LEAK");
+    expect(content).not.toContain("旧 yuan 残留");
+  });
+
+  it("supports custom origin root, conduct, and mood without hidden anchor append", () => {
+    const normalized = normalizePromptComposerConfig({
+      enabled: true,
+      mode: "origin",
+      origin: {
+        root: "Root for {{agentName}}",
+        mood: "Mood for {{agentName}}",
+        conduct: "Conduct for {{userName}}",
+        anchor: "Anchor",
+        includePersonality: false,
+        includeMood: true,
+        keepBlockIds: [],
+      },
+    });
+
+    expect(normalized.mode).toBe("origin");
+    expect(normalized.origin.keepBlockIds).toEqual(DEFAULT_ORIGIN_KEEP_BLOCK_ORDER);
+    const content = composePromptFromBlocks({
+      config: normalized,
+      builtInBlocks: [],
+      variables: {
+        agentName: "Hanako",
+        userName: "User",
+        personality: "Hidden personality",
+      },
+    });
+
+    expect(content).toContain("Root for Hanako");
+    expect(content).not.toContain("Hidden personality");
+    expect(content).toContain("Mood for Hanako");
+    expect(content).toContain("Conduct for User");
+    expect(content).not.toContain("Anchor");
+    expect(content).not.toContain("# 照\n\nMood for Hanako");
+    expect(content).not.toContain("# 德\n\nConduct for User");
+  });
+
+  it("merges the default origin anchor into the default conduct text", () => {
+    expect(DEFAULT_ORIGIN_CONDUCT_PROMPT).toContain("此刻用户所语为本。");
+    expect(DEFAULT_ORIGIN_CONDUCT_PROMPT).toContain("道法自然。");
   });
 });

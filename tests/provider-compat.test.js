@@ -597,6 +597,146 @@ describe("normalizeProviderPayload — DeepSeek Anthropic 模式", () => {
   });
 });
 
+describe("normalizeProviderContextMessages — assistant native image replay", () => {
+  it("发送给 provider 前剥离 assistant 原生生图 base64 和 Responses replay 签名", () => {
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "生成头像" }] },
+      {
+        role: "assistant",
+        api: "openai-responses",
+        provider: "k+",
+        model: "gpt-5.5",
+        responseId: "resp_img",
+        content: [
+          { type: "thinking", thinking: "", thinkingSignature: "{\"id\":\"rs_1\"}" },
+          { type: "text", text: "生成好了。", textSignature: "{\"v\":1,\"id\":\"msg_1\"}" },
+          { type: "image", data: "PNG_BASE64", mimeType: "image/png" },
+        ],
+      },
+      { role: "user", content: [{ type: "text", text: "继续聊" }] },
+    ];
+
+    const result = normalizeProviderContextMessages(messages, {
+      id: "gpt-5.5",
+      provider: "k+",
+      api: "openai-responses",
+      input: ["text", "image"],
+    });
+
+    expect(result).not.toBe(messages);
+    expect(result[0]).toBe(messages[0]);
+    expect(result[2]).toBe(messages[2]);
+    expect(result[1]).not.toHaveProperty("responseId");
+    expect(result[1].content).toEqual([
+      { type: "text", text: "生成好了。\n\n[生成图片已省略：图片文件已保存到本次对话，不会把图片二进制重放进模型上下文]" },
+    ]);
+  });
+});
+
+describe("normalizeProviderPayload — OpenAI Responses replay", () => {
+  const responsesModel = {
+    id: "gpt-5.5",
+    provider: "k+",
+    api: "openai-responses",
+    input: ["text", "image"],
+    reasoning: true,
+  };
+
+  it("剥离没有 tool call 配对的 Responses reasoning replay", () => {
+    const reasoningItem = {
+      id: "rs_image_turn",
+      type: "reasoning",
+      encrypted_content: "opaque",
+      summary: [],
+    };
+    const payload = {
+      model: "gpt-5.5",
+      input: [
+        { role: "user", content: [{ type: "input_text", text: "生成头像" }] },
+        reasoningItem,
+        {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "生成好了。", annotations: [] }],
+          status: "completed",
+          id: "msg_img_done",
+        },
+        { role: "user", content: [{ type: "input_text", text: "继续聊" }] },
+      ],
+    };
+
+    const result = normalizeProviderPayload(payload, responsesModel, { mode: "chat" });
+
+    expect(result).not.toBe(payload);
+    expect(result.input).toEqual([
+      payload.input[0],
+      payload.input[2],
+      payload.input[3],
+    ]);
+    expect(payload.input).toContain(reasoningItem);
+  });
+
+  it("保留 function_call replay 前的 Responses reasoning item", () => {
+    const reasoningItem = { id: "rs_tool_turn", type: "reasoning", encrypted_content: "opaque" };
+    const payload = {
+      model: "gpt-5.5",
+      input: [
+        { role: "user", content: [{ type: "input_text", text: "查一下" }] },
+        reasoningItem,
+        {
+          type: "function_call",
+          id: "fc_1",
+          call_id: "call_1",
+          name: "read",
+          arguments: "{}",
+        },
+        { type: "function_call_output", call_id: "call_1", output: "ok" },
+        { role: "user", content: [{ type: "input_text", text: "继续" }] },
+      ],
+    };
+
+    const result = normalizeProviderPayload(payload, responsesModel, { mode: "chat" });
+
+    expect(result).toBe(payload);
+    expect(result.input).toContain(reasoningItem);
+  });
+
+  it("不影响其他 provider-specific payload 兼容层", () => {
+    const payload = {
+      model: "kimi-k2.6",
+      input: [
+        { role: "user", content: [{ type: "input_text", text: "hi" }] },
+        { type: "reasoning", encrypted_content: "opaque" },
+        { type: "message", role: "assistant", content: [{ type: "output_text", text: "ok" }] },
+        { role: "user", content: [{ type: "input_text", text: "continue" }] },
+      ],
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image_url", image_url: { url: "data:video/mp4;base64,AAAA" } },
+          ],
+        },
+      ],
+    };
+
+    const result = normalizeProviderPayload(payload, {
+      id: "kimi-k2.6",
+      provider: "moonshot",
+      api: "openai-completions",
+      input: ["text", "image"],
+      compat: { hanaVideoInput: true },
+      baseUrl: "https://api.moonshot.cn/v1",
+    }, { mode: "chat" });
+
+    expect(result.input.some(item => item.type === "reasoning")).toBe(true);
+    expect(result.messages[0].content[0]).toEqual({
+      type: "video_url",
+      video_url: { url: "data:video/mp4;base64,AAAA" },
+    });
+  });
+});
+
 describe("normalizeProviderContextMessages — DeepSeek Anthropic replay", () => {
   const deepseekAnthropicModel = {
     id: "deepseek-v4-pro",

@@ -24,11 +24,15 @@ function writeFile(root, relativePath, content = "") {
   fs.writeFileSync(filePath, content);
 }
 
-function writeServerRuntimeSentinels(nodeModulesDir) {
+function writeServerRuntimeSentinels(nodeModulesDir, opts = {}) {
+  const platform = opts.platform || process.platform;
+  const arch = opts.arch || process.arch;
   writeFile(nodeModulesDir, "ws/package.json", JSON.stringify({ name: "ws" }));
   writeFile(nodeModulesDir, "qrcode/package.json", JSON.stringify({ name: "qrcode" }));
   writeFile(nodeModulesDir, "better-sqlite3/package.json", JSON.stringify({ name: "better-sqlite3" }));
   writeFile(nodeModulesDir, "better-sqlite3/build/Release/better_sqlite3.node", "native");
+  writeFile(nodeModulesDir, "node-pty/package.json", JSON.stringify({ name: "node-pty" }));
+  writeFile(nodeModulesDir, `node-pty/prebuilds/${platform}-${arch}/spawn-helper`, "helper");
 }
 
 afterEach(() => {
@@ -41,13 +45,17 @@ describe("fix-modules bundled server dependencies", () => {
   it("rebuilds packaged server node_modules even when a stale target directory already exists", () => {
     const tmp = makeTempDir();
     const serverDir = path.join(tmp, "resources", "server");
-    const serverBuildModules = path.join(tmp, "dist-server", "win-x64", "node_modules");
+    const serverBuildModules = path.join(tmp, "dist-server", "mac-arm64", "node_modules");
     const staleModules = path.join(serverDir, "node_modules");
 
     writeFile(staleModules, "stale-only/package.json", JSON.stringify({ name: "stale-only" }));
-    writeServerRuntimeSentinels(serverBuildModules);
+    writeServerRuntimeSentinels(serverBuildModules, { platform: "darwin", arch: "arm64" });
 
-    copyBundledServerNodeModules(serverDir, serverBuildModules, { log: () => {} });
+    copyBundledServerNodeModules(serverDir, serverBuildModules, {
+      platform: "darwin",
+      arch: "arm64",
+      log: () => {},
+    });
 
     expect(fs.existsSync(path.join(staleModules, "stale-only", "package.json"))).toBe(false);
     expect(fs.existsSync(path.join(staleModules, "ws", "package.json"))).toBe(true);
@@ -60,6 +68,45 @@ describe("fix-modules bundled server dependencies", () => {
       "Release",
       "better_sqlite3.node",
     ))).toBe(true);
+    expect(fs.existsSync(path.join(
+      staleModules,
+      "node-pty",
+      "prebuilds",
+      "darwin-arm64",
+      "spawn-helper",
+    ))).toBe(true);
+  });
+
+  it("restores node-pty spawn-helper executable permission when packaging server modules", () => {
+    const tmp = makeTempDir();
+    const serverDir = path.join(tmp, "resources", "server");
+    const serverBuildModules = path.join(tmp, "dist-server", "mac-arm64", "node_modules");
+    fs.mkdirSync(serverDir, { recursive: true });
+    writeServerRuntimeSentinels(serverBuildModules, { platform: "darwin", arch: "arm64" });
+    const sourceHelper = path.join(
+      serverBuildModules,
+      "node-pty",
+      "prebuilds",
+      "darwin-arm64",
+      "spawn-helper",
+    );
+    fs.chmodSync(sourceHelper, 0o644);
+
+    copyBundledServerNodeModules(serverDir, serverBuildModules, {
+      platform: "darwin",
+      arch: "arm64",
+      log: () => {},
+    });
+
+    const packagedHelper = path.join(
+      serverDir,
+      "node_modules",
+      "node-pty",
+      "prebuilds",
+      "darwin-arm64",
+      "spawn-helper",
+    );
+    fs.accessSync(packagedHelper, fs.constants.X_OK);
   });
 
   it("fails fast when the packaged server node_modules misses a startup dependency", () => {

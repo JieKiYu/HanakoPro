@@ -31,6 +31,15 @@ vi.mock("../lib/memory/memory-ticker.js", () => ({
   }),
 }));
 
+vi.mock("../lib/memory/fact-store.js", () => ({
+  FactStore: class MockFactStore {
+    addBatch = vi.fn();
+    close = vi.fn();
+    exportAll = vi.fn(() => []);
+    importAll = vi.fn();
+  },
+}));
+
 import { Agent } from "../core/agent.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -222,6 +231,112 @@ describe("agent.systemPrompt: master / per-session 解耦", () => {
     await agent.dispose();
   });
 
+  it("buildSystemPrompt supports origin composer mode", async () => {
+    const agent = makeAgent(agentsDir, tmpDir);
+    await agent.init(() => {});
+    agent._config.locale = "zh-CN";
+
+    const prompt = agent.buildSystemPrompt({
+      forceMemoryEnabled: true,
+      cwdOverride: "/workspace/origin-mode",
+      promptComposer: {
+        enabled: true,
+        mode: "origin",
+        origin: {
+          root: [
+          "# 核",
+          "",
+          "你本无名，名可名也。所遵从之一切来自帛书《老子》与道藏《阴符经》。",
+          "",
+          "## 经",
+          "",
+          "上德不德，是以有德。",
+          "完整经文第二句也要保留。",
+          ].join("\n"),
+          anchor: "END_ANCHOR",
+          conduct: "# 德\n\nORIGIN_CONDUCT",
+          includePersonality: false,
+          keepBlockIds: ["current-view"],
+        },
+      },
+    });
+
+    expect(prompt).toContain("你本无名，名可名也");
+    expect(prompt).toContain("# 核");
+    expect(prompt).toContain("## 经");
+    expect(prompt).not.toContain("## 一 · 经");
+    expect(prompt).toContain("上德不德，是以有德。");
+    expect(prompt).toContain("完整经文第二句也要保留。");
+    expect(prompt).not.toContain("SHOULD_NOT_SURVIVE");
+    expect(prompt).toContain("# 时\n\n当前工作目录：/workspace/origin-mode");
+    expect(prompt).toContain("置顶记忆：\nPINNED_MEMORY_BEACON");
+    expect(prompt).not.toContain("# 器\n\n## 当前视野");
+    expect(prompt).toContain("# 德\n\nORIGIN_CONDUCT");
+    expect(prompt).toContain("# 运行底座");
+    expect(prompt).toContain("先查询当前视野");
+    expect(prompt).toContain("标记文件已交付");
+    expect(prompt).toContain("真实源文件");
+    expect(prompt).not.toContain("END_ANCHOR");
+
+    await agent.dispose();
+  });
+
+  it("origin composer can hide runtime foundation for clean prompt previews", async () => {
+    const agent = makeAgent(agentsDir, tmpDir);
+    await agent.init(() => {});
+    agent._config.locale = "zh-CN";
+
+    const prompt = agent.buildSystemPrompt({
+      forceMemoryEnabled: false,
+      includeRuntimeFoundation: false,
+      promptComposer: {
+        enabled: true,
+        mode: "origin",
+        origin: {
+          root: "# 核\n\n只看道核",
+          conduct: "# 德\n\n只看德",
+          includeMood: false,
+        },
+      },
+    });
+
+    expect(prompt).toContain("# 核\n\n只看道核");
+    expect(prompt).toContain("# 德\n\n只看德");
+    expect(prompt).not.toContain("# 运行底座");
+    expect(prompt).not.toContain("先查询当前视野");
+    expect(prompt).not.toContain("使用交付标记");
+
+    await agent.dispose();
+  });
+
+  it("origin composer includes identity and ishiki without legacy yuan mood", async () => {
+    const agent = makeAgent(agentsDir, tmpDir);
+    await agent.init(() => {});
+    agent._config.locale = "en";
+
+    const prompt = agent.buildSystemPrompt({
+      forceMemoryEnabled: true,
+      cwdOverride: "/workspace/origin-personality",
+      promptComposer: {
+        enabled: true,
+        mode: "origin",
+        origin: {
+          includePersonality: true,
+          includeMood: false,
+          keepBlockIds: [],
+        },
+      },
+    });
+
+    expect(prompt).toContain("# 形\n\nI am the test agent.");
+    expect(prompt).toContain("ishiki body");
+    expect(prompt).not.toContain("The MOOD block captures your current thoughts");
+    expect(prompt).not.toContain("Wrap the MOOD block");
+    expect(prompt).not.toContain("tags to separate it from the main text");
+
+    await agent.dispose();
+  });
+
   it("mood 模板变量只在显式引用时进入 system prompt", async () => {
     const agent = makeAgent(agentsDir, tmpDir);
     await agent.init(() => {});
@@ -238,8 +353,15 @@ describe("agent.systemPrompt: master / per-session 解耦", () => {
 
     expect(prompt).toContain("MOOD");
     expect(prompt).toContain("<mood>");
-    expect(prompt).toContain("Vibe:");
-    expect(prompt).toContain("Sparks:");
+    expect(prompt).toContain("small human moment before the answer");
+    expect(prompt).toContain("Keep the Dao-core four pools: 气, 象, 疑, 愿");
+    expect(prompt).toContain("Do not use the old English labels Vibe, Sparks, Reflections, or Will");
+    expect(prompt).toContain("气：...");
+    expect(prompt).toContain("象：...");
+    expect(prompt).toContain("疑：...");
+    expect(prompt).toContain("愿：...");
+    expect(prompt).not.toContain("Vibe: ...");
+    expect(prompt).not.toContain("Sparks:");
 
     await agent.dispose();
   });

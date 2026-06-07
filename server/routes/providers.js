@@ -7,7 +7,14 @@ import os from "os";
 import { Hono } from "hono";
 import { emitAppEvent } from "../app-events.js";
 import { safeJson } from "../hono-helpers.js";
-import { buildProviderAuthHeaders, probeProvider } from "../../lib/llm/provider-client.js";
+import {
+  buildProviderAuthHeaders,
+  describeFetchError,
+  fetchProviderUrl,
+  normalizedOpenAIBaseUrl,
+  probeProvider,
+  readProviderResponseError,
+} from "../../lib/llm/provider-client.js";
 import { filterDiscoveredProviderModels } from "../../shared/provider-model-validation.js";
 import { clearConfigCache } from "../../lib/memory/config-loader.js";
 
@@ -242,6 +249,10 @@ export function createProvidersRoute(engine) {
     return payload;
   }
 
+  function hasExplicitRemoteInput({ base_url, api_key, explicitApi }) {
+    return !!(base_url || api_key || explicitApi);
+  }
+
   async function refreshProviderModels() {
     clearConfigCache();
     await engine.onProviderChanged();
@@ -292,7 +303,8 @@ export function createProvidersRoute(engine) {
    *
    * 远程端点按协议分岔：
    *   - anthropic-messages → GET {base}/v1/models?limit=1000（Anthropic Messages API）
-   *   - 其他（openai-completions 等）→ GET {base}/models
+   *   - OpenAI-compatible → GET normalizedBase/models（允许用户填裸域名、/v1 或 /v1/chat/completions）
+   *   - 其他 → GET {base}/models
    *
    * body: { name, base_url?, api?, api_key? }
    */
@@ -313,7 +325,7 @@ export function createProvidersRoute(engine) {
     // ── 2. 远程 list models（baseUrl 为空时跳过）──
     if (effectiveBaseUrl) {
       try {
-        const base = effectiveBaseUrl.replace(/\/+$/, "");
+        const base = normalizedOpenAIBaseUrl(effectiveBaseUrl, effectiveApi).replace(/\/+$/, "");
         const url = effectiveApi === "anthropic-messages" ? `${base}/v1/models?limit=1000` : `${base}/models`;
 
         let headers = { "Content-Type": "application/json" };
@@ -323,14 +335,13 @@ export function createProvidersRoute(engine) {
           }
           headers = buildProviderAuthHeaders(effectiveApi, effectiveKey);
         }
-        const res = await fetch(url, {
+        const res = await fetchProviderUrl(url, {
           headers,
-          signal: AbortSignal.timeout(15000),
-        });
+        }, { timeoutMs: 15000 });
 
         // 401/403：凭证问题，直接返回错误，不 fallback
         if (res.status === 401 || res.status === 403) {
-          return c.json({ error: `HTTP ${res.status}: ${res.statusText}`, models: [] });
+          return c.json({ error: await readProviderResponseError(res), models: [] });
         }
 
         if (res.ok) {
@@ -350,9 +361,14 @@ export function createProvidersRoute(engine) {
           return c.json(ignoredModels.length > 0 ? { models, ignoredModels } : { models });
         }
 
-        // 404 / 其他 → 进入 step 3
-      } catch {
-        // 网络错误 → 进入 step 3
+        // 404 / 其他 → 进入 step 3；显式请求时返回真实错误
+        if (hasExplicitRemoteInput({ base_url, api_key, explicitApi })) {
+          return c.json({ error: await readProviderResponseError(res), models: [] });
+        }
+      } catch (err) {
+        if (hasExplicitRemoteInput({ base_url, api_key, explicitApi })) {
+          return c.json({ error: `Network error: ${describeFetchError(err)}`, models: [] });
+        }
       }
     }
 

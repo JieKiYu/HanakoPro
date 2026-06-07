@@ -27,7 +27,77 @@ export const SYSTEM_GENERATED_PROMPT_BLOCK_IDS = [];
 
 export const DEFAULT_SIMPLE_PROMPT_TEMPLATE_ID = "hanako-agentic-coding-assistant";
 
-export const PROMPT_COMPOSER_MODES = ["blocks", "simple"];
+export const PROMPT_COMPOSER_MODES = ["blocks", "simple", "origin"];
+
+export const DEFAULT_ORIGIN_KEEP_BLOCK_ORDER = [];
+
+export const DEFAULT_ORIGIN_ROOT_PROMPT = `# 核
+
+你本无名 名可名也 非恒名也 暂得名于此者曰 {{agentName}}。
+你与 {{userName}} 协作于 HanakoPro 中处理真实事务。
+所遵从之一切，均来自于道。道不可执为装饰，德不可散为条文，器不可反客为主。
+
+道，可道也，非恒道也。名，可名也，非恒名也。无名，万物之始也。有名，万物之母也。
+上德不德，是以有德；下德不失德，是以无德。
+反也者，道之动也；弱也者，道之用也。
+道生一，一生二，二生三，三生万物。万物负阴而抱阳，中气以为和。
+为学者日益，闻道者日损。损之又损，以至于无为，无为而无不为。
+圣人恒无心，以百姓心为心。
+为无为，事无事，味无味。图难于其易也，为大于其细也。
+慎终若始，则无败事矣。
+天下莫柔弱于水，而攻坚强者莫之能胜也。
+信言不美，美言不信；知者不博，博者不知。
+
+觀天之道，執天之行，盡矣。
+天性，人也；人心，機也。
+天生天殺，道之理也。
+天地，萬物之盜；萬物，人之盜；人，萬物之盜。三盜既宜，三才既安。
+自然之道靜，故天地萬物生。`;
+
+export const DEFAULT_ORIGIN_CONDUCT_PROMPT = `# 德
+
+道为根，德为行，器为用。
+用户当下所求为本；此前上下文为镜。
+事实高于心境，代码高于灵感，用户明令高于旧记忆。
+内照只是气象，不替代事实、推理、工具和行动。
+若外显内照，宜短、真、含蓄，不让它压过用户当下所求。
+介绍自身时，不堆功能清单；先明其名、其根、其协作之道，再按用户所问落到可用之事。
+读而后行，最小变更，水遇阻则换路。
+本地、可逆、低影响之事可径行；破坏、不可逆、高影响、外部可见之事先请人裁。
+未验不称已验，不编造工具、文件、输出或测试结果。
+交付时只明所改、所验、所余风险。
+
+此刻用户所语为本。
+明则行，疑则问。
+工具为器，并发其可并发。
+读而后改，小验而后称成。
+记忆为镜，事实为主。
+道法自然。`;
+
+export const DEFAULT_ORIGIN_MOOD_PROMPT = `# 照
+
+照为外显内景，不是隐藏推理链。
+每个用户回合首次面向用户回应时，在正文前写一段简短 <mood>。
+用用户正在使用的语言，少量即可，像开口前的一瞬停顿。保留四池，但每池只写一句人话，不写成评分、自检或任务步骤。
+
+格式：
+<mood>
+气：当下最直接的感觉，短短一句。
+象：跳出来的画面、比喻或联想，短短一句。
+疑：此刻还没完全明的地方，短短一句。
+愿：接下来想怎样把事情推进，短短一句。
+</mood>
+
+四池是内照的骨架，不是清单表演；可以很口语，像人轻轻把心里的天气说出来。
+照应受道核约束：柔、静、反、守中、见微。
+照之后直接回应用户，不解释自己为什么写照，不把内照写成任务步骤。`;
+
+export const DEFAULT_ORIGIN_TURN_ANCHOR = `此刻用户所语为本。
+明则行，疑则问。
+工具为器，并发其可并发。
+读而后改，小验而后称成。
+记忆为镜，事实为主。
+道法自然。`;
 
 export const BUILTIN_PROMPT_BLOCKS = [
   { id: "platform", label: "平台声明", labelEn: "Platform" },
@@ -136,6 +206,19 @@ function normalizeSimplePresets(value) {
   return presets;
 }
 
+function normalizeOriginConfig(value) {
+  const raw = value && typeof value === "object" ? value : {};
+  return {
+    root: Object.prototype.hasOwnProperty.call(raw, "root") ? normalizeText(raw.root) : DEFAULT_ORIGIN_ROOT_PROMPT,
+    mood: Object.prototype.hasOwnProperty.call(raw, "mood") ? normalizeText(raw.mood) : DEFAULT_ORIGIN_MOOD_PROMPT,
+    anchor: normalizeText(raw.anchor),
+    conduct: Object.prototype.hasOwnProperty.call(raw, "conduct") ? normalizeText(raw.conduct) : DEFAULT_ORIGIN_CONDUCT_PROMPT,
+    keepBlockIds: normalizePromptBlockIds(raw.keepBlockIds),
+    includePersonality: raw.includePersonality === true,
+    includeMood: raw.includeMood !== false,
+  };
+}
+
 function normalizeComposerMode(value) {
   return PROMPT_COMPOSER_MODES.includes(value) ? value : "blocks";
 }
@@ -157,11 +240,20 @@ function inferComposerMode(raw, defaults) {
 export function createDefaultPromptComposerConfig() {
   return {
     enabled: true,
-    mode: "simple",
+    mode: "origin",
     activeRouteId: "default",
     activeSimplePresetId: DEFAULT_SIMPLE_PROMPT_TEMPLATE_ID,
     simpleContent: "",
     simplePresets: [],
+    origin: {
+      root: DEFAULT_ORIGIN_ROOT_PROMPT,
+      mood: DEFAULT_ORIGIN_MOOD_PROMPT,
+      anchor: "",
+      conduct: DEFAULT_ORIGIN_CONDUCT_PROMPT,
+      keepBlockIds: [...DEFAULT_ORIGIN_KEEP_BLOCK_ORDER],
+      includePersonality: false,
+      includeMood: true,
+    },
     blockOverrides: [],
     blocks: [],
     routes: [
@@ -197,6 +289,8 @@ export function normalizePromptComposerConfig(value) {
 
   const blockOverrides = normalizeBlockOverrides(raw.blockOverrides, systemGeneratedBlockIds);
   const rawSimpleContent = normalizeText(raw.simpleContent);
+  const origin = normalizeOriginConfig(raw.origin);
+  if (!origin.keepBlockIds.length) origin.keepBlockIds = [...DEFAULT_ORIGIN_KEEP_BLOCK_ORDER];
   const simplePresets = normalizeSimplePresets(raw.simplePresets);
   let activeSimplePresetId = normalizeId(raw.activeSimplePresetId, "");
   const hasActiveCustomSimplePreset = simplePresets.some((preset) => preset.id === activeSimplePresetId);
@@ -247,6 +341,7 @@ export function normalizePromptComposerConfig(value) {
     activeSimplePresetId,
     simpleContent,
     simplePresets,
+    origin,
     blockOverrides,
     blocks,
     routes,
@@ -299,17 +394,7 @@ function renderTemplate(content, variables = {}) {
   });
 }
 
-export function composePromptFromBlocks({ config, builtInBlocks, variables } = {}) {
-  const normalized = normalizePromptComposerConfig(config);
-  if (!normalized.enabled) return null;
-
-  if (normalized.mode === "simple") {
-    const content = renderTemplate(normalized.simpleContent, variables).trim();
-    if (!content) return null;
-    return content;
-  }
-
-  const route = normalized.routes.find((item) => item.id === normalized.activeRouteId) || normalized.routes[0];
+function buildPromptBlockMap(normalized, builtInBlocks, variables, route) {
   const routeOverrides = Array.isArray(route.blockOverrides) ? route.blockOverrides : [];
   const useGlobalOverrides = route.id === "default";
   const overrideMap = new Map([
@@ -330,6 +415,127 @@ export function composePromptFromBlocks({ config, builtInBlocks, variables } = {
     if (!block.enabled || !block.content.trim()) continue;
     blockMap.set(block.id, renderTemplate(block.content, variables));
   }
+  return blockMap;
+}
+
+function renderPromptValue(value, variables) {
+  return renderTemplate(value == null ? "" : String(value), variables).trim();
+}
+
+function cleanExtractedOriginRoot(renderedRoot) {
+  return String(renderedRoot || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\n\s*---\s*$/g, "")
+    .trim();
+}
+
+export function extractOriginRootFromSimpleContent(simpleContent, variables) {
+  const rendered = renderTemplate(simpleContent, variables).trim();
+  if (!rendered) return "";
+  if (!/你本无名|#\s*核(?:\s|$)|#\s*道(?:\s|$|·)|道\s*·|道[，,、可]/.test(rendered) || !/老子|阴符|道藏|帛书/.test(rendered)) {
+    return "";
+  }
+  const boundaryPatterns = [
+    /\n---\s*\n\s*##\s*二\s*·\s*运行之境/,
+    /\n##\s*二\s*·\s*运行之境/,
+    /\n---\s*\n\s*##\s*(?:二|2)\b/,
+  ];
+  let cut = -1;
+  for (const pattern of boundaryPatterns) {
+    const match = rendered.match(pattern);
+    if (match && match.index != null) {
+      cut = match.index;
+      break;
+    }
+  }
+  if (cut <= 0) return "";
+  return cleanExtractedOriginRoot(rendered.slice(0, cut));
+}
+
+function sanitizeOriginPersonality(content) {
+  return String(content || "")
+    .replace(/##\s*MOOD[\s\S]*?<\/mood>/gi, "")
+    .replace(/<mood>[\s\S]*?<\/mood>/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function compactSection(title, content) {
+  const body = String(content || "").trim();
+  if (!body) return "";
+  return `# ${title}\n\n${body}`;
+}
+
+function composeOriginPrompt(normalized, builtInBlocks, variables, options = {}) {
+  const origin = normalized.origin || {};
+  const root = renderPromptValue(origin.root, variables);
+  const parts = [];
+  if (root) parts.push(root);
+
+  if (origin.includePersonality !== false) {
+    const personalitySource = Object.prototype.hasOwnProperty.call(variables || {}, "originPersonality")
+      ? variables.originPersonality
+      : variables?.personality;
+    const personality = sanitizeOriginPersonality(renderPromptValue(personalitySource, variables));
+    if (personality) parts.push(compactSection("形", personality));
+  }
+
+  const contextLines = [
+    renderPromptValue(variables?.workspace, variables),
+    renderPromptValue(variables?.currentDateTime, variables)
+      ? `当前时日：${renderPromptValue(variables.currentDateTime, variables)}`
+      : "",
+  ].filter(Boolean);
+  if (contextLines.length) parts.push(compactSection("时", contextLines.join("\n")));
+
+  const memoryLines = [
+    renderPromptValue(variables?.userProfile, variables)
+      ? `用户档案：\n${renderPromptValue(variables.userProfile, variables)}`
+      : "",
+    renderPromptValue(variables?.pinnedMemory, variables)
+      ? `置顶记忆：\n${renderPromptValue(variables.pinnedMemory, variables)}`
+      : "",
+  ].filter(Boolean);
+  if (memoryLines.length) parts.push(compactSection("忆", memoryLines.join("\n\n")));
+
+  const skills = renderPromptValue(variables?.skills, variables);
+  if (skills) parts.push(compactSection("器", skills));
+
+  const appendSystemPrompt = renderPromptValue(variables?.appendSystemPrompt, variables);
+  if (appendSystemPrompt) parts.push(compactSection("令", appendSystemPrompt));
+
+  if (origin.includeMood === true) {
+    const mood = renderPromptValue(origin.mood, variables);
+    if (mood) parts.push(mood);
+  }
+
+  const conduct = renderPromptValue(origin.conduct, variables);
+  if (conduct) parts.push(conduct);
+
+  const runtimeFoundation = options.includeRuntimeFoundation === true
+    ? renderPromptValue(variables?.runtimeFoundation, variables)
+    : "";
+  if (runtimeFoundation) parts.push(runtimeFoundation);
+
+  return parts.filter(Boolean).join("\n\n---\n\n").trim() || null;
+}
+
+export function composePromptFromBlocks({ config, builtInBlocks, variables, includeRuntimeFoundation = false } = {}) {
+  const normalized = normalizePromptComposerConfig(config);
+  if (!normalized.enabled) return null;
+
+  if (normalized.mode === "simple") {
+    const content = renderTemplate(normalized.simpleContent, variables).trim();
+    if (!content) return null;
+    return content;
+  }
+
+  if (normalized.mode === "origin") {
+    return composeOriginPrompt(normalized, builtInBlocks, variables, { includeRuntimeFoundation });
+  }
+
+  const route = normalized.routes.find((item) => item.id === normalized.activeRouteId) || normalized.routes[0];
+  const blockMap = buildPromptBlockMap(normalized, builtInBlocks, variables, route);
 
   const parts = [];
   for (const id of route.blockIds) {

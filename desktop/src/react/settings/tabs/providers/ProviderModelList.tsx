@@ -5,6 +5,7 @@ import { hanaFetch } from '../../api';
 import { invalidateConfigCache } from '../../../hooks/use-config';
 import { t, formatContext, lookupModelMeta } from '../../helpers';
 import { useAnchoredDropdown } from '../../hooks/useAnchoredDropdown';
+import type { ProviderCredentialDraft } from './ApiKeyCredentials';
 import { ModelEditPanel } from './ModelEditPanel';
 import styles from '../../Settings.module.css';
 
@@ -16,6 +17,21 @@ interface DiscoveredModel {
 }
 
 type CapabilityKind = 'image' | 'video' | 'reasoning';
+
+function finitePositiveNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function toSavedDiscoveredModel(model: DiscoveredModel): string | Record<string, any> {
+  const entry: Record<string, any> = { id: model.id };
+  const name = typeof model.name === 'string' ? model.name.trim() : '';
+  const context = finitePositiveNumber(model.context);
+  const maxOutput = finitePositiveNumber(model.maxOutput);
+  if (name && name !== model.id) entry.name = name;
+  if (context) entry.context = context;
+  if (maxOutput) entry.maxOutput = maxOutput;
+  return Object.keys(entry).length > 1 ? entry : model.id;
+}
 
 function CapabilityIcon({ kind }: { kind: CapabilityKind }) {
   const label = t(`settings.api.capability.${kind}`);
@@ -43,9 +59,10 @@ function CapabilityIcon({ kind }: { kind: CapabilityKind }) {
   );
 }
 
-export function ProviderModelList({ providerId, summary, onRefresh }: {
+export function ProviderModelList({ providerId, summary, credentialDraft, onRefresh }: {
   providerId: string;
   summary: ProviderSummary;
+  credentialDraft?: ProviderCredentialDraft;
   onRefresh: () => Promise<void>;
 }) {
   const showToast = useSettingsStore(s => s.showToast);
@@ -69,6 +86,7 @@ export function ProviderModelList({ providerId, summary, onRefresh }: {
   /** 从混合数组条目提取 model ID */
   const modelId = (m: any): string => typeof m === 'object' ? m.id : m;
   const currentModelIds = rawModels.map(modelId);
+  const needsModelSetup = (summary.missing_fields || []).includes('models') && currentModelIds.length === 0;
   // Merge: discovered model IDs + custom_models, deduplicated, with currentModelIds included for display
   const discoveredIds = discoveredModels.map(m => m.id);
   const allModels = [...new Set([...currentModelIds, ...discoveredIds, ...(summary.custom_models || [])])];
@@ -78,10 +96,12 @@ export function ProviderModelList({ providerId, summary, onRefresh }: {
   const addModelToProvider = async (mid: string) => {
     if (currentModelIds.includes(mid)) return;
     try {
+      const discovered = discoveredModels.find(m => m.id === mid);
+      const nextModel = discovered ? toSavedDiscoveredModel(discovered) : mid;
       await hanaFetch('/api/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ providers: { [providerId]: { models: [...rawModels, mid] } } }),
+        body: JSON.stringify({ providers: { [providerId]: { models: [...rawModels, nextModel] } } }),
       });
       invalidateConfigCache();
       await onRefresh();
@@ -136,33 +156,44 @@ export function ProviderModelList({ providerId, summary, onRefresh }: {
   };
 
   const [fetchHint, setFetchHint] = useState<{ msg: string; ok: boolean } | null>(null);
+  const [fetchingModels, setFetchingModels] = useState(false);
   const fetchHintTimer = useRef<ReturnType<typeof setTimeout>>(null);
 
-  const showFetchHint = (msg: string, ok: boolean) => {
+  const showFetchHint = (msg: string, ok: boolean, timeout = 2500) => {
     if (fetchHintTimer.current) clearTimeout(fetchHintTimer.current);
     setFetchHint({ msg, ok });
-    fetchHintTimer.current = setTimeout(() => setFetchHint(null), 2500);
+    if (timeout > 0) {
+      fetchHintTimer.current = setTimeout(() => setFetchHint(null), timeout);
+    }
   };
 
-  const fetchModels = async (btn: HTMLButtonElement | null) => {
-    if (btn) btn.classList.add(styles['spinning']);
+  const fetchModels = async () => {
+    if (fetchingModels) return;
+    setFetchingModels(true);
+    showFetchHint(t('settings.providers.fetchingModels'), true, 0);
     try {
       const res = await hanaFetch('/api/providers/fetch-models', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: providerId, base_url: summary.base_url, api: summary.api }),
+        body: JSON.stringify({
+          name: providerId,
+          base_url: credentialDraft?.base_url ?? summary.base_url,
+          api: credentialDraft?.api ?? summary.api,
+          api_key: credentialDraft?.api_key || undefined,
+        }),
       });
       const data = await res.json();
-      if (data.error) { showFetchHint(t('settings.providers.fetchFailed'), false); return; }
+      if (data.error) { showFetchHint(`${t('settings.providers.fetchFailed')}: ${data.error}`, false, 0); return; }
       const models = (data.models || []) as DiscoveredModel[];
-      if (models.length === 0) { showFetchHint(t('settings.providers.fetchFailed'), false); return; }
+      if (models.length === 0) { showFetchHint(t('settings.providers.fetchFailed'), false, 0); return; }
       // Backend already cached the results; just refresh the dropdown
       setDiscoveredModels(models);
-      showFetchHint(t('settings.providers.fetchSuccess', { name: providerId, n: models.length }), true);
-    } catch {
-      showFetchHint(t('settings.providers.fetchFailed'), false);
+      showFetchHint(t('settings.providers.fetchSuccess', { name: providerId, n: models.length }), true, 0);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showFetchHint(`${t('settings.providers.fetchFailed')}: ${msg}`, false, 0);
     } finally {
-      if (btn) btn.classList.remove(styles['spinning']);
+      setFetchingModels(false);
     }
   };
 
@@ -182,6 +213,11 @@ export function ProviderModelList({ providerId, summary, onRefresh }: {
 
   return (
     <div className={styles['pv-models']}>
+      {needsModelSetup && (
+        <div className={styles['pv-models-alert']}>
+          {t('settings.providers.modelsRequired')}
+        </div>
+      )}
       {/* Added models list */}
       {currentModelIds.length > 0 && (
         <div className={styles['pv-fav-section']}>
@@ -238,9 +274,11 @@ export function ProviderModelList({ providerId, summary, onRefresh }: {
           </svg>
         </button>
         <button
-          className={styles['pv-fetch-btn-inline']}
+          className={`${styles['pv-fetch-btn-inline']} ${fetchingModels ? styles['spinning'] : ''}`}
           title={t('settings.providers.fetchModels')}
-          onClick={(e) => fetchModels(e.currentTarget)}
+          onClick={fetchModels}
+          disabled={fetchingModels}
+          aria-busy={fetchingModels}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" />

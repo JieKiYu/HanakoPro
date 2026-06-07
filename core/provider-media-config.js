@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import YAML from "js-yaml";
 import { safeReadYAMLSync } from "../shared/safe-fs.js";
-import { lookupKnown } from "../shared/known-models.js";
+import { inferKnownModelType } from "../shared/known-models.js";
 
 function isPlainObject(value) {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -13,8 +13,7 @@ function modelId(model) {
 }
 
 function modelType(providerId, model) {
-  if (!isPlainObject(model)) return lookupKnown(providerId, model)?.type || "chat";
-  return model.type || lookupKnown(providerId, model.id)?.type || "chat";
+  return inferKnownModelType(providerId, model);
 }
 
 function normalizeMediaModelEntry(model) {

@@ -7,7 +7,7 @@
 
 import fs from "fs";
 import { getPiModel } from "../lib/pi-sdk/index.js";
-import { lookupKnown } from "../shared/known-models.js";
+import { inferKnownModelType, lookupKnown } from "../shared/known-models.js";
 import { normalizeVisionCapabilities, withHanaVideoInputCompat, withThinkingFormatCompat } from "../shared/model-capabilities.js";
 import { providerCredentialAllowsMissingApiKey } from "../shared/provider-auth.js";
 import { validateProviderModels } from "../shared/provider-model-validation.js";
@@ -166,11 +166,7 @@ function buildModelEntry(modelEntry, provider, baseUrl = "", api = "openai-compl
 
 function filterChatModelEntries(provider, models) {
   return models.filter(m => {
-    const isObj = typeof m === "object" && m !== null;
-    const id = getModelId(m);
-    const known = lookupKnown(provider, id);
-    const type = (isObj && m.type) || known?.type || "chat";
-    return type === "chat";
+    return inferKnownModelType(provider, m) === "chat";
   });
 }
 

@@ -35,9 +35,13 @@ npm run mac:pack:local
 - `SKIP_NOTARIZE=true`
 - `HANA_LOCAL_RESIGN=true`
 
-The local build skips Apple notarization and re-signs the app bundle ad-hoc so
-Electron Framework, native addons, the bundled server, and the computer-use
-helper share a compatible local signature.
+The local build skips Apple notarization and re-signs the app bundle with the
+stable local identity `HanakoPro Local Code Signing` when available. The helper
+script `scripts/ensure-local-codesign-cert.cjs` creates or reuses that identity
+in the login keychain, and `scripts/sign-local.cjs` falls back to ad-hoc signing
+only when the local identity is unavailable. This keeps Electron Framework,
+native addons, the bundled server, and the computer-use helper on one compatible
+local signature while reducing repeated macOS permission prompts.
 
 To use another proxy port:
 
@@ -61,5 +65,5 @@ HANA_LOCAL_RESIGN=false \
 npm run dist
 ```
 
-The local ad-hoc app is for development and self-use. A public release still
-needs a Developer ID signature and notarization.
+The local self-signed app is for development and self-use. A public release
+still needs a Developer ID signature and notarization.

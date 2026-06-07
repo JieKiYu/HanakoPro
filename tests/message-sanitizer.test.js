@@ -12,6 +12,7 @@
 import { describe, it, expect } from "vitest";
 import {
   sanitizeMessagesForModel,
+  sanitizeAssistantGeneratedImagesForContext,
   modelSupportsImage,
   modelSupportsVideo,
 } from "../core/message-sanitizer.js";
@@ -201,5 +202,88 @@ describe("sanitizeMessagesForModel", () => {
     expect(res.messages[0]).toBe(pure);  // 纯文本未复制
     expect(res.messages[1]).not.toBe(dirty);  // 脏消息已复制
     expect(res.messages[2]).not.toBe(tr);
+  });
+});
+
+describe("sanitizeAssistantGeneratedImagesForContext", () => {
+  it("将 assistant 原生生图结果降级为纯文本上下文", () => {
+    const messages = [
+      {
+        role: "user",
+        content: [TEXT_BLOCK("生成头像")],
+      },
+      {
+        role: "assistant",
+        api: "openai-responses",
+        provider: "k+",
+        model: "gpt-5.5",
+        responseId: "resp_img",
+        content: [
+          { type: "thinking", thinking: "", thinkingSignature: "{\"id\":\"rs_1\"}" },
+          { type: "text", text: "生成好了。", textSignature: "{\"v\":1,\"id\":\"msg_1\"}" },
+          IMG_BLOCK,
+        ],
+      },
+      {
+        role: "user",
+        content: [TEXT_BLOCK("接着回复")],
+      },
+    ];
+
+    const res = sanitizeAssistantGeneratedImagesForContext(messages);
+
+    expect(res.stripped).toBe(1);
+    expect(res.strippedImages).toBe(1);
+    expect(res.strippedThinking).toBe(1);
+    expect(res.strippedTextSignatures).toBe(1);
+    expect(res.mergedTextBlocks).toBe(1);
+    expect(res.messages[0]).toBe(messages[0]);
+    expect(res.messages[2]).toBe(messages[2]);
+    expect(res.messages[1]).not.toBe(messages[1]);
+    expect(res.messages[1]).not.toHaveProperty("responseId");
+    expect(res.messages[1].content).toEqual([
+      { type: "text", text: "生成好了。\n\n[生成图片已省略：图片文件已保存到本次对话，不会把图片二进制重放进模型上下文]" },
+    ]);
+    expect(messages[1].content).toContain(IMG_BLOCK);
+  });
+
+  it("合并同一 assistant 生图轮的多个 text block，避免 Responses replay 生成重复 output item id", () => {
+    const messages = [
+      {
+        role: "assistant",
+        responseId: "resp_img",
+        content: [
+          { type: "thinking", thinking: "hidden", thinkingSignature: "{\"id\":\"rs_1\"}" },
+          { type: "text", text: "<mood>安静</mood>", textSignature: "{\"v\":1,\"id\":\"msg_mood\"}" },
+          IMG_BLOCK,
+          { type: "text", text: "生成好了。", textSignature: "{\"v\":1,\"id\":\"msg_final\"}" },
+        ],
+      },
+    ];
+
+    const res = sanitizeAssistantGeneratedImagesForContext(messages);
+
+    expect(res.strippedImages).toBe(1);
+    expect(res.strippedThinking).toBe(1);
+    expect(res.strippedTextSignatures).toBe(2);
+    expect(res.mergedTextBlocks).toBe(1);
+    expect(res.messages[0].content).toEqual([
+      {
+        type: "text",
+        text: "<mood>安静</mood>\n\n[生成图片已省略：图片文件已保存到本次对话，不会把图片二进制重放进模型上下文]\n\n生成好了。",
+      },
+    ]);
+  });
+
+  it("没有 assistant 内联图片时保持原 messages 引用", () => {
+    const messages = [
+      { role: "assistant", content: [TEXT_BLOCK("plain")] },
+      { role: "user", content: [IMG_BLOCK] },
+    ];
+
+    const res = sanitizeAssistantGeneratedImagesForContext(messages);
+
+    expect(res.stripped).toBe(0);
+    expect(res.messages).toBe(messages);
   });
 });

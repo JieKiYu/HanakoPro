@@ -100,6 +100,7 @@
     "maxOutput": 128000,
     "image": true,
     "reasoning": true,
+    "xhigh": true,
     "visionCapabilities": {
       "grounding": true,
       "boxes": true,
@@ -148,6 +149,7 @@
     "maxOutput": 128000,
     "image": true,
     "reasoning": true,
+    "xhigh": true,
     "visionCapabilities": {
       "grounding": true,
       "boxes": true,
@@ -2996,6 +2998,14 @@
     "name": "GPT Image 2",
     "type": "image"
   },
+  "agnes-image-2.1-flash": {
+    "name": "Agnes Image 2.1 Flash",
+    "type": "image"
+  },
+  "agnes-image-2.0-flash": {
+    "name": "Agnes Image 2.0 Flash",
+    "type": "image"
+  },
   "gpt-oss-120b": {
     "name": "Gpt Oss 120b",
     "context": 131072,
@@ -3817,9 +3827,7 @@
     "name": "MiMo V2.5 Pro",
     "context": 1048576,
     "maxOutput": 131072,
-    "reasoning": true,
-    "image": true,
-    "video": true
+    "reasoning": true
   },
   "mimo-v2.5-tts": {
     "name": "MiMo V2.5 TTS",

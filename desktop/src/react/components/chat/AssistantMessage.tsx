@@ -43,6 +43,44 @@ function hasActiveFileWriteTool(blocks: ContentBlock[]): boolean {
   )));
 }
 
+export interface BrowserReplyTarget {
+  url: string;
+  host: string;
+}
+
+export function normalizeBrowserUrl(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+export function browserReplyTargetFromBlocks(blocks: ContentBlock[]): BrowserReplyTarget | null {
+  let target: BrowserReplyTarget | null = null;
+  for (const block of blocks) {
+    if (block.type !== 'tool_group') continue;
+    for (const tool of block.tools) {
+      if (tool.name !== 'browser') continue;
+      const details = tool.details as Record<string, unknown> | undefined;
+      const args = tool.args as Record<string, unknown> | undefined;
+      const running = typeof details?.running === 'boolean' ? details.running : undefined;
+      if (running === false) target = null;
+
+      const url =
+        normalizeBrowserUrl(details?.url) ??
+        normalizeBrowserUrl(details?.currentUrl) ??
+        normalizeBrowserUrl(args?.url);
+      if (!url || running === false) continue;
+
+      let host = url;
+      try {
+        host = new URL(url).hostname || url;
+      } catch {
+        host = url;
+      }
+      target = { url, host };
+    }
+  }
+  return target;
+}
+
 /**
  * 收集一个 tool_group 里"主动操作"过的 terminal session id。
  * 与 ToolGroupBlock 内部的 activeIds 判定保持一致 —— 必须出现 terminal_create 或 terminal_write。
@@ -177,6 +215,44 @@ const FileWriteIntentHint = memo(function FileWriteIntentHint() {
   );
 });
 
+const BrowserReplyTag = memo(function BrowserReplyTag({ target, label, sessionPath }: { target: BrowserReplyTarget; label: string; sessionPath: string }) {
+  const handleOpen = useCallback(async () => {
+    if (sessionPath) {
+      try {
+        await hanaFetch('/api/browser/show-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionPath }),
+        });
+        return;
+      } catch (err) {
+        console.warn('[browser] show session failed:', err);
+      }
+    }
+    window.platform?.openBrowserViewer?.();
+  }, [sessionPath]);
+
+  return (
+    <button
+      type="button"
+      className={styles.assistantBrowserTag}
+      onClick={handleOpen}
+      title={target.url}
+      aria-label={`${label}: ${target.host}`}
+    >
+      <span className={styles.assistantBrowserTagIcon} aria-hidden="true">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="2" y1="12" x2="22" y2="12" />
+          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+        </svg>
+      </span>
+      <span className={styles.assistantBrowserTagText}>{target.host}</span>
+    </button>
+  );
+});
+
 interface Props {
   message: ChatMessage;
   showAvatar: boolean;
@@ -186,9 +262,10 @@ interface Props {
   messageRef?: (element: HTMLDivElement | null) => void;
   isLatestAssistantMessage?: boolean;
   precedingUserTimestamp?: number | string;
+  browserReplyTarget?: BrowserReplyTarget | null;
 }
 
-export const AssistantMessage = memo(function AssistantMessage({ message, showAvatar, sessionPath, agentId, readOnly = false, messageRef, isLatestAssistantMessage = false, precedingUserTimestamp }: Props) {
+export const AssistantMessage = memo(function AssistantMessage({ message, showAvatar, sessionPath, agentId, readOnly = false, messageRef, isLatestAssistantMessage = false, precedingUserTimestamp, browserReplyTarget = null }: Props) {
   const { t } = useI18n();
   const agents = useStore(s => s.agents);
   const globalAgentName = useStore(s => s.agentName) || 'Hanako';
@@ -214,7 +291,6 @@ export const AssistantMessage = memo(function AssistantMessage({ message, showAv
   const activeFileWriteTool = useMemo(() => hasActiveFileWriteTool(blocks), [blocks]);
   const terminalExclusions = useMemo(() => computeTerminalExclusionsPerBlock(blocks), [blocks]);
   const terminalAggregates = useMemo(() => computeTerminalAggregates(blocks), [blocks]);
-
   const [copied, setCopied] = useState(false);
   const handleCopy = useCallback(() => {
     const ids = selectSelectedIdsBySession(useStore.getState(), sessionPath);
@@ -269,6 +345,7 @@ export const AssistantMessage = memo(function AssistantMessage({ message, showAv
   // 用前一条用户消息时间戳；若不可用则用本条 assistant 消息时间戳；再不行用 0（仅回退对话，不还原文件）
   const revertSinceTs = precedingUserTimestamp ?? message.timestamp ?? 0;
   const canRevert = isLatestAssistantMessage && !readOnly && !isStreaming;
+  const browserOpenLabel = t('browser.using') || '浏览器';
 
   return (
     <div className={`${styles.messageGroup} ${styles.messageGroupAssistant}${isSelected ? ` ${styles.messageGroupSelected}` : ''}`}
@@ -302,6 +379,11 @@ export const AssistantMessage = memo(function AssistantMessage({ message, showAv
           />
         ))}
       </div>
+      {browserReplyTarget && (
+        <div className={styles.assistantBrowserRow}>
+          <BrowserReplyTag target={browserReplyTarget} label={browserOpenLabel} sessionPath={sessionPath} />
+        </div>
+      )}
       {canRevert && (
         <div className={styles.assistantRevertRow}>
           <button
@@ -360,6 +442,7 @@ const ContentBlockView = memo(function ContentBlockView({ block, agentName, agen
     case 'mood':
       return <MoodBlock yuan={block.yuan} text={block.text} />;
     case 'vision_progress':
+      if (block.reused && block.phase === 'done') return null;
       return <VisionProgressBlock block={block} />;
     case 'tool_group':
       return <ToolGroupBlock tools={block.tools} collapsed={block.collapsed} agentName={agentName} excludeTerminalIds={excludeTerminalIds} terminalAggregates={terminalAggregates} />;

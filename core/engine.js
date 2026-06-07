@@ -44,6 +44,10 @@ function findUniqueModelById(models, id) {
   return matches.length === 1 ? matches[0] : null;
 }
 
+function isPlainObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
 function readSessionThinkingLevel(ctx) {
   try {
     const level = ctx?.sessionManager?.buildSessionContext?.()?.thinkingLevel;
@@ -59,6 +63,60 @@ function resolveRequestReasoningLevel(models, prefs, ctx) {
   return preferenceThinkingLevel === "xhigh" && sessionThinkingLevel === "high"
     ? "xhigh"
     : (sessionThinkingLevel || preferenceThinkingLevel);
+}
+
+function readImageGenConfig(pluginManager) {
+  try {
+    const values = pluginManager?.getConfig?.("image-gen", { redacted: false })?.values;
+    return isPlainObject(values) ? values : null;
+  } catch {
+    return null;
+  }
+}
+
+function nativeImageDefaultsForProvider(config, providerId) {
+  if (!isPlainObject(config) || !providerId) return null;
+  const allDefaults = isPlainObject(config.providerDefaults) ? config.providerDefaults : {};
+  const providerDefaults = isPlainObject(allDefaults[providerId]) ? allDefaults[providerId] : {};
+  const tool = { type: "image_generation" };
+  const size = providerDefaults.size || providerDefaults.resolution;
+  if (typeof size === "string" && size.trim()) tool.size = size.trim();
+  if (typeof providerDefaults.quality === "string" && providerDefaults.quality.trim()) {
+    tool.quality = providerDefaults.quality.trim();
+  }
+  const outputFormat = providerDefaults.output_format || providerDefaults.format;
+  if (typeof outputFormat === "string" && outputFormat.trim()) {
+    tool.output_format = outputFormat.trim();
+  }
+  if (typeof providerDefaults.background === "string" && providerDefaults.background.trim()) {
+    tool.background = providerDefaults.background.trim();
+  }
+  return Object.keys(tool).length > 1 ? tool : null;
+}
+
+export function applyNativeImageGenerationDefaults(payload, requestModel, pluginManager) {
+  if (!isPlainObject(payload) || requestModel?.api !== "openai-responses") return payload;
+  if (payload.tool_choice === "none") return payload;
+
+  const tools = Array.isArray(payload.tools) ? payload.tools : [];
+  const hasImageGenerationTool = tools.some(tool => isPlainObject(tool) && tool.type === "image_generation");
+  if (!hasImageGenerationTool) return payload;
+
+  const providerId = requestModel?.provider;
+  const config = readImageGenConfig(pluginManager);
+  const defaults = nativeImageDefaultsForProvider(config, providerId);
+  if (!defaults) return payload;
+
+  const mergeTool = (tool) => isPlainObject(tool) && tool.type === "image_generation"
+    ? { ...tool, ...defaults, type: "image_generation" }
+    : tool;
+
+  const nextTools = tools.map(mergeTool);
+
+  return {
+    ...payload,
+    tools: nextTools,
+  };
 }
 
 function resolveChannelsEnabledForToolAvailability(engine) {
@@ -685,6 +743,13 @@ export class HanaEngine {
   setThinkingLevel(l) { return this._configCoord.setThinkingLevel(l); }
   getSessionThinkingLevel(sessionPath) { return this._sessionCoord.getSessionThinkingLevel(sessionPath); }
   setSessionThinkingLevel(sessionPath, level) { return this._sessionCoord.setSessionThinkingLevel(sessionPath, level); }
+  getSessionGoal(sessionPath) { return this._sessionCoord.getSessionGoal(sessionPath); }
+  setSessionGoal(sessionPath, objective) { return this._sessionCoord.setSessionGoal(sessionPath, objective); }
+  clearSessionGoal(sessionPath) { return this._sessionCoord.clearSessionGoal(sessionPath); }
+  markSessionGoalComplete(sessionPath, note) { return this._sessionCoord.markSessionGoalComplete(sessionPath, note); }
+  markSessionGoalBlocked(sessionPath, note) { return this._sessionCoord.markSessionGoalBlocked(sessionPath, note); }
+  setPendingSessionGoal(objective) { return this._sessionCoord.setPendingSessionGoal(objective); }
+  clearPendingSessionGoal() { return this._sessionCoord.clearPendingSessionGoal(); }
   getSandbox() { return this._prefs.getSandbox(); }
   setSandbox(v) { this._prefs.setSandbox(v); }
   getSandboxNetwork() { return this._prefs.getSandboxNetwork(); }
@@ -943,6 +1008,7 @@ export class HanaEngine {
     this._sessionCoord.refreshAllSessionsModels();
   }
   getRegistryModelsForProvider(name) { return this._models.getRegistryModelsForProvider(name); }
+  getCachedModelsForProvider(name) { return this._models.getCachedModelsForProvider(name); }
 
   static SHARED_MODEL_KEYS = SHARED_MODEL_KEYS;
 
@@ -1056,7 +1122,8 @@ export class HanaEngine {
           // The SDK hook exposes the serialized body, but not whether maxTokens came
           // from user intent or buildBaseOptions' model-derived default. Keep source
           // unspecified here; output-budget removes only values matching that SDK default.
-          return normalizeProviderPayload(p, requestModel, { mode: "chat", reasoningLevel });
+          const normalizedPayload = normalizeProviderPayload(p, requestModel, { mode: "chat", reasoningLevel });
+          return applyNativeImageGenerationDefaults(normalizedPayload, requestModel, this._pluginManager);
         });
       },
       /**

@@ -71,6 +71,17 @@ describe("shouldTriggerCompression", () => {
       }),
     ).toBe(false);
   });
+
+  it("uses provided token snapshot for threshold detection", () => {
+    expect(
+      shouldTriggerCompression({
+        messages: fakeMessages,
+        contextWindow: 1_000,
+        contextConfig: { ...DEFAULT_CONTEXT_COMPRESSION, enabled: true, threshold: 0.8 },
+        tokens: 800,
+      }),
+    ).toBe(true);
+  });
 });
 
 describe("splitMessages", () => {

@@ -54,6 +54,9 @@ const {
   mapDesktopPetEventToState,
   durableDesktopPetState,
 } = require("./src/shared/desktop-pet-state.cjs");
+const {
+  buildGhosttyOpenArgs,
+} = require("./src/shared/ghostty-launch.cjs");
 
 const APP_USER_MODEL_ID = "com.hanakopro.app"; // Keep in sync with package.json build.appId.
 app.setName("HanakoPro");
@@ -1717,8 +1720,11 @@ function createTerminalWindow(initialCwd, opts = {}) {
     if (terminalWindow && !terminalWindow.isDestroyed()) terminalWindow.show();
   });
 
+  const query = {};
+  if (initialCwd) query.cwd = initialCwd;
+  if (focusId) query.focusId = focusId;
   loadWindowURL(terminalWindow, "terminal", {
-    query: initialCwd ? { cwd: initialCwd } : {},
+    query,
   });
 
   // 拦截窗口内导航（只允许保留在终端页面）
@@ -1741,6 +1747,24 @@ function createTerminalWindow(initialCwd, opts = {}) {
   terminalWindow.on("closed", () => {
     terminalWindow = null;
   });
+}
+
+function openGhosttyTerminal(initialCwd) {
+  if (process.platform !== "darwin") return false;
+  const launch = buildGhosttyOpenArgs(initialCwd);
+  if (!launch) return false;
+  try {
+    const child = spawn(launch.command, launch.args, {
+      cwd: launch.cwd,
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+    return true;
+  } catch (err) {
+    console.warn("[desktop] Ghostty launch failed:", redactMainLogText(err?.message || String(err)));
+    return false;
+  }
 }
 
 // ── Skill 预览 → 主窗口 overlay ──
@@ -3370,7 +3394,9 @@ wrapIpcBestEffortHandler("open-terminal", (_event, arg) => {
     if (typeof arg.newTab === "boolean") newTab = arg.newTab;
     else newTab = !focusId; // 默认：没指定 focusId 就建新 tab
   }
+  if (!focusId && openGhosttyTerminal(cwd)) return { ok: true, app: "ghostty" };
   createTerminalWindow(cwd, { newTab, focusId });
+  return { ok: true, app: "hanako" };
 });
 
 // 在系统文件管理器中打开文件夹（限制为目录且为绝对路径）

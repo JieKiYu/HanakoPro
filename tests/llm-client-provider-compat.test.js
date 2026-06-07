@@ -277,6 +277,42 @@ describe("callText provider-compat routing", () => {
     });
   });
 
+  it("does not forward null model headers on utility requests", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "ok" }] }],
+      }),
+    });
+
+    await callText({
+      api: "openai-responses",
+      apiKey: "sk-test",
+      baseUrl: "https://api.acui.shop/v1",
+      model: {
+        id: "gpt-5.5",
+        provider: "acui",
+        headers: {
+          "User-Agent": null,
+          "X-Stainless-Lang": null,
+          "X-Custom": "kept",
+        },
+      },
+      messages: [{ role: "user", content: "hi" }],
+      timeoutMs: 5_000,
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.headers).toMatchObject({
+      "Authorization": "Bearer sk-test",
+      "Content-Type": "application/json",
+      "X-Custom": "kept",
+    });
+    expect(init.headers).not.toHaveProperty("User-Agent");
+    expect(init.headers).not.toHaveProperty("X-Stainless-Lang");
+  });
+
   it("keeps callText string-compatible by default and returns usage only when requested", async () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce({

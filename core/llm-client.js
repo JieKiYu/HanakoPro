@@ -1,5 +1,6 @@
 import { AppError } from '../shared/errors.js';
 import { errorBus } from '../shared/error-bus.js';
+import { createAbortError } from '../shared/abort-errors.js';
 import { normalizeProviderPayload } from './provider-compat.js';
 import { logLlmUsage, normalizeLlmUsage } from '../lib/llm/usage-observer.js';
 
@@ -36,10 +37,17 @@ function normalizeTextFromContent(content) {
 }
 
 function createUserAbortError() {
-  const abortErr = new Error("This operation was aborted");
-  abortErr.name = "AbortError";
-  abortErr.type = "aborted";
-  return abortErr;
+  return createAbortError();
+}
+
+function mergeModelRequestHeaders(headers, modelHeaders) {
+  if (!modelHeaders || typeof modelHeaders !== "object") return headers;
+  const next = { ...headers };
+  for (const [key, value] of Object.entries(modelHeaders)) {
+    if (value === null || value === undefined) continue;
+    next[key] = value;
+  }
+  return next;
 }
 
 function stripTaggedThinking(text) {
@@ -313,7 +321,7 @@ export async function callText({
   }
 
   if (modelObj?.headers && typeof modelObj.headers === "object") {
-    headers = { ...modelObj.headers, ...headers };
+    headers = mergeModelRequestHeaders(headers, modelObj.headers);
   }
 
   // Provider 兼容化（与 chat 路径共享 provider-compat）。

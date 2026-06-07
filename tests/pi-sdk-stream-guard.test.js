@@ -141,4 +141,28 @@ describe("Pi SDK stream guard", () => {
     expect(mirrored.map(event => event.type)).toEqual(["toolcall_start", "toolcall_delta", "toolcall_end"]);
     expect(mirrored[1].partial.content[0].partialArgs).toContain("\"content\":\"hi");
   });
+
+  it("preserves abort-like stream failures as aborted instead of model errors", async () => {
+    const inner = {
+      async *[Symbol.asyncIterator]() {
+        yield { type: "start", partial: assistantMessage([]) };
+        throw new Error("signal is aborted without reason");
+      },
+      result: vi.fn(async () => null),
+    };
+
+    const { events } = await collect(guardAssistantMessageStream(inner));
+
+    expect(events).toEqual([
+      expect.objectContaining({ type: "start" }),
+      expect.objectContaining({
+        type: "error",
+        reason: "aborted",
+        error: expect.objectContaining({
+          stopReason: "aborted",
+          errorMessage: "signal is aborted without reason",
+        }),
+      }),
+    ]);
+  });
 });

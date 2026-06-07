@@ -189,6 +189,43 @@ describe("VisionBridge", () => {
     });
   });
 
+  it("reuses prepared resource notes without emitting duplicate progress cards", async () => {
+    const dir = makeTempDir();
+    const sessionPath = path.join(dir, "session.jsonl");
+    const resourceKey = "visual-resource:browser-shot-1";
+    const { bridge, callText } = makeBridge();
+    const targetModel = { id: "deepseek-chat", provider: "deepseek", input: ["text"] };
+    const firstEvents = [];
+
+    await bridge.prepareResources({
+      sessionPath,
+      targetModel,
+      userRequest: "review the browser screenshot",
+      resources: [{ key: resourceKey, label: "browser screenshot", image }],
+      emitProgress: (event) => firstEvents.push(event),
+    });
+
+    const reusedEvents = [];
+    const reused = await bridge.prepareResources({
+      sessionPath,
+      targetModel,
+      userRequest: "review the browser screenshot again",
+      resources: [{ key: resourceKey, label: "browser screenshot", image }],
+      emitProgress: (event) => reusedEvents.push(event),
+    });
+
+    expect(callText).toHaveBeenCalledTimes(1);
+    expect(firstEvents.map((event) => event.phase)).toEqual(["running", "done"]);
+    expect(reusedEvents).toEqual([]);
+    expect(reused.notes).toEqual([
+      expect.objectContaining({
+        key: resourceKey,
+        note: expect.stringContaining("image_overview"),
+        reused: true,
+      }),
+    ]);
+  });
+
   it("bounds the in-memory note cache while keeping evicted notes recoverable from sidecar", async () => {
     const dir = makeTempDir();
     const firstSession = path.join(dir, "first.jsonl");

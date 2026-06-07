@@ -101,18 +101,7 @@ export function BrowserViewerApp() {
           <span className="page-title">{title}</span>
         </div>
 
-        {/* Emergency stop */}
-        <div className="toolbar-right">
-          <button
-            className="stop-btn"
-            title={t?.('browser.emergencyStop') || ''}
-            onClick={() => hana?.browserEmergencyStop?.()}
-          >
-            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-              <rect x="3" y="3" width="8" height="8" rx="1" fill="currentColor" stroke="none" />
-            </svg>
-          </button>
-        </div>
+        <div className="toolbar-right" />
       </div>
 
       {/* Card shadow frame (WebContentsView sits on top) */}

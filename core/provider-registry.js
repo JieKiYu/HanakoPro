@@ -15,7 +15,7 @@ import path from "path";
 import YAML from "js-yaml";
 import { safeReadYAMLSync } from "../shared/safe-fs.js";
 import { fromRoot } from "../shared/hana-root.js";
-import { lookupKnown } from "../shared/known-models.js";
+import { inferKnownModelType, lookupKnown } from "../shared/known-models.js";
 import {
   normalizeProviderAuthType,
   providerCredentialAllowsMissingApiKey,
@@ -200,10 +200,7 @@ function getModelId(modelEntry) {
 }
 
 function getModelType(providerId, modelEntry) {
-  const isObj = typeof modelEntry === "object" && modelEntry !== null;
-  const id = getModelId(modelEntry);
-  const known = lookupKnown(providerId, id);
-  return (isObj && modelEntry.type) || known?.type || "chat";
+  return inferKnownModelType(providerId, modelEntry);
 }
 
 function normalizeUserMediaModels(providerId, userConfig, capabilityName, declaredModels, runtime) {
@@ -1079,7 +1076,7 @@ export class ProviderRegistry {
       const id = isObj ? m.id : m;
       if (!id) continue;
       const known = lookupKnown(providerId, id);
-      const resolvedType = (isObj && m.type) || known?.type || "chat";
+      const resolvedType = inferKnownModelType(providerId, m);
       if (resolvedType !== type) continue;
       results.push({ id, name: (isObj && m.name) || known?.name || id, type: resolvedType });
     }

@@ -23,4 +23,5 @@ export interface ContextCompressionConfig {
 
 export declare const COMPRESSION_MODES: readonly CompressionModeDefinition[];
 export declare const BUILTIN_MODE_PROMPTS: Readonly<Record<string, string>>;
+export declare const MANUAL_CONTEXT_COMPRESSION_THRESHOLD: number;
 export declare const DEFAULT_CONTEXT_COMPRESSION: Readonly<ContextCompressionConfig>;

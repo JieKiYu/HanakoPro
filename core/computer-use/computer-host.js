@@ -395,12 +395,14 @@ export class ComputerHost {
 
   _assertAppApproved(provider, providerId, target = {}) {
     if (provider.capabilities?.isolated === true) return;
+    const settings = this._settings();
+    if (settings.require_app_approval !== true) return;
     const appId = target.appId
       || (target.pid || target.processId ? `pid:${target.pid || target.processId}` : null)
       || target.name
       || target.appName
       || null;
-    if (appId && isComputerUseAppApproved(this._getSettings?.() || {}, { providerId, appId })) return;
+    if (appId && isComputerUseAppApproved(settings, { providerId, appId })) return;
     throw computerUseError(
       COMPUTER_USE_ERRORS.APP_APPROVAL_REQUIRED,
       "Computer Use requires app approval before controlling this target.",

@@ -13,9 +13,9 @@
     --space-xl: 2.5rem;
 
     /* 对话列宽 */
-    --chat-column-width: 45rem;
+    --chat-column-width: min(64rem, 100%);
     --chat-input-column-extra: 1.25rem;
-    --chat-input-column-width: calc(var(--chat-column-width) + var(--chat-input-column-extra));
+    --chat-input-column-width: min(100%, calc(var(--chat-column-width) + var(--chat-input-column-extra)));
     --welcome-chat-input-column-width: 40rem;
 
     /* 圆角 */
@@ -995,13 +995,26 @@ html[data-platform="linux"] .tb-toggle-right {
 
 /* 代码块 */
 .md-content pre {
+    width: calc(var(--chat-code-block-width, 100%) - var(--chat-module-card-inset, 0.75rem) - var(--chat-module-card-inset, 0.75rem));
+    max-width: calc(100% - var(--chat-module-card-inset, 0.75rem) - var(--chat-module-card-inset, 0.75rem));
+    box-sizing: border-box;
     background: var(--overlay-subtle);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: var(--space-sm) var(--space-md);
-    margin: var(--space-sm) 0;
+    margin: var(--space-sm) var(--chat-module-card-inset, 0.75rem);
     overflow-x: auto;
     line-height: 1.5;
+    white-space: pre;
+    overflow-wrap: normal;
+    word-break: normal;
+    scrollbar-width: none;
+}
+
+.md-content pre::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
 }
 
 /* 代码块复制按钮 */
@@ -1031,11 +1044,16 @@ html[data-platform="linux"] .tb-toggle-right {
 }
 
 .md-content pre code {
+    display: inline-block;
+    min-width: max-content;
     background: none;
     padding: 0;
     border-radius: 0;
     font-size: 0.82em;
     color: var(--text);
+    white-space: pre;
+    overflow-wrap: normal;
+    word-break: normal;
 }
 
 /* 公式 */

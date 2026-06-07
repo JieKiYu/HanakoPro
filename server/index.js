@@ -475,6 +475,53 @@ app.post("/api/session-thinking-level", async (c) => {
   });
 });
 
+app.get("/api/session-goal", async (c) => {
+  const sessionPath = c.req.query("sessionPath") || null;
+  const pendingNewSession = c.req.query("pendingNewSession") === "true";
+  const goal = pendingNewSession || !sessionPath
+    ? engine.getSessionGoal?.(null)
+    : engine.getSessionGoal?.(sessionPath);
+  return c.json({ ok: true, goal: goal || null });
+});
+
+app.post("/api/session-goal", async (c) => {
+  const { sessionPath, pendingNewSession, action, objective, note } = await safeJson(c);
+  const targetSessionPath = typeof sessionPath === "string" && sessionPath ? sessionPath : null;
+  const usePending = pendingNewSession === true || !targetSessionPath;
+  let result;
+  if (action === "clear") {
+    result = usePending
+      ? engine.clearPendingSessionGoal?.()
+      : engine.clearSessionGoal?.(targetSessionPath);
+  } else if (action === "complete") {
+    if (usePending) {
+      result = engine.clearPendingSessionGoal?.();
+    } else {
+      result = engine.markSessionGoalComplete?.(targetSessionPath, note);
+    }
+  } else if (action === "blocked") {
+    if (usePending) {
+      result = { ok: false, error: "pending goal cannot be marked blocked", goal: engine.getSessionGoal?.(null) || null };
+    } else {
+      result = engine.markSessionGoalBlocked?.(targetSessionPath, note);
+    }
+  } else if (action === "set" || !action) {
+    result = usePending
+      ? engine.setPendingSessionGoal?.(objective)
+      : engine.setSessionGoal?.(targetSessionPath, objective);
+  } else {
+    return c.json({ ok: false, error: "unknown session goal action" }, 400);
+  }
+  if (result?.ok === false) {
+    return c.json({
+      ok: false,
+      error: result.error || "failed to update session goal",
+      goal: result.goal || null,
+    }, 409);
+  }
+  return c.json({ ok: true, goal: result?.goal || null });
+});
+
 app.post("/api/session-permission-mode", async (c) => {
   const { mode, pendingNewSession, currentSessionOnly, sessionPath } = await safeJson(c);
   const targetSessionPath = typeof sessionPath === "string" && sessionPath ? sessionPath : null;

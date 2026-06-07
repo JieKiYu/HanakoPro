@@ -46,6 +46,18 @@ describe("Computer Use packaging contract", () => {
     );
   });
 
+  it("fails macOS afterPack when the dedicated Computer Use app is missing", async () => {
+    const appOutDir = makeTempDir();
+    const helper = path.join(resourcesDir(appOutDir), "computer-use", "macos", "hana-computer-use-helper");
+    fs.mkdirSync(path.dirname(helper), { recursive: true });
+    fs.writeFileSync(helper, "#!/bin/sh\n");
+    fs.chmodSync(helper, 0o755);
+
+    await expect(fixModules(makeMacAfterPackContext(appOutDir))).rejects.toThrow(
+      /Computer Use app helper missing/,
+    );
+  });
+
   it("runs the helper build before electron-builder in the GitHub macOS release workflow", () => {
     const workflow = fs.readFileSync(path.resolve(".github", "workflows", "build.yml"), "utf8");
     const helperBuild = workflow.indexOf("node scripts/build-computer-use-helper.mjs");

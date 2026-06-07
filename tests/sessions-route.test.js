@@ -33,7 +33,7 @@ vi.mock("../lib/browser/browser-manager.js", () => ({
 
 vi.mock("../core/message-utils.js", () => ({
   extractTextContent: vi.fn(() => ({ text: "", images: [], thinking: "", toolUses: [] })),
-  loadSessionHistoryMessages: vi.fn(async () => []),
+  loadSessionHistoryEntries: vi.fn(async () => []),
   loadLatestAssistantSummaryFromSessionFile: vi.fn(async () => null),
   isValidSessionPath: vi.fn(() => true),
   isActiveSessionPath: vi.fn(() => true),
@@ -461,7 +461,7 @@ describe("sessions route", () => {
 
     vi.mocked(msgUtils.extractTextContent)
       .mockReturnValueOnce({ text: "parent says hi", images: [], thinking: "", toolUses: [] });
-    vi.mocked(msgUtils.loadSessionHistoryMessages).mockResolvedValueOnce([
+    vi.mocked(msgUtils.loadSessionHistoryEntries).mockResolvedValueOnce([
       { role: "assistant", content: "parent says hi" },
       {
         role: "toolResult",
@@ -508,7 +508,7 @@ describe("sessions route", () => {
     vi.mocked(msgUtils.extractTextContent)
       .mockReturnValueOnce({ text: "hello", images: [], thinking: "", toolUses: [] })
       .mockReturnValueOnce({ text: "hi back", images: [], thinking: "", toolUses: [] });
-    vi.mocked(msgUtils.loadSessionHistoryMessages).mockResolvedValueOnce([
+    vi.mocked(msgUtils.loadSessionHistoryEntries).mockResolvedValueOnce([
       { role: "user", content: "hello", timestamp: "2026-05-07T05:42:00.000Z" },
       { role: "assistant", content: "hi back", timestamp: "2026-05-07T05:43:00.000Z" },
     ]);
@@ -540,6 +540,39 @@ describe("sessions route", () => {
     ]);
   });
 
+  it("keeps assistant messages that only contain generated images", async () => {
+    const { createSessionsRoute } = await import("../server/routes/sessions.js");
+    const msgUtils = await import("../core/message-utils.js");
+    const app = new Hono();
+    const image = { data: "IMG_BASE64", mimeType: "image/png" };
+
+    vi.mocked(msgUtils.extractTextContent)
+      .mockReturnValueOnce({ text: "", images: [image], thinking: "", toolUses: [] });
+    vi.mocked(msgUtils.loadSessionHistoryEntries).mockResolvedValueOnce([
+      { type: "message", message: { role: "assistant", content: [{ type: "image", data: image.data, mimeType: image.mimeType }] } },
+    ]);
+
+    const engine = {
+      agentsDir: "/tmp/agents",
+      deferredResults: null,
+    };
+
+    app.route("/api", createSessionsRoute(engine));
+
+    const res = await app.request("/api/sessions/messages");
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.messages).toEqual([
+      {
+        id: "0",
+        role: "assistant",
+        content: "",
+        images: [image],
+      },
+    ]);
+  });
+
   it("refreshes session file lifecycle metadata when rebuilding history blocks", async () => {
     const { createSessionsRoute } = await import("../server/routes/sessions.js");
     const msgUtils = await import("../core/message-utils.js");
@@ -548,7 +581,7 @@ describe("sessions route", () => {
 
     vi.mocked(msgUtils.extractTextContent)
       .mockReturnValueOnce({ text: "I made a file", images: [], thinking: "", toolUses: [] });
-    vi.mocked(msgUtils.loadSessionHistoryMessages).mockResolvedValueOnce([
+    vi.mocked(msgUtils.loadSessionHistoryEntries).mockResolvedValueOnce([
       { role: "assistant", content: "I made a file" },
       {
         role: "toolResult",
@@ -652,7 +685,7 @@ describe("sessions route", () => {
     const app = new Hono();
     const sessionPath = "/tmp/agents/hana/sessions/main.jsonl";
 
-    vi.mocked(msgUtils.loadSessionHistoryMessages).mockResolvedValueOnce([]);
+    vi.mocked(msgUtils.loadSessionHistoryEntries).mockResolvedValueOnce([]);
 
     const engine = {
       agentsDir: "/tmp/agents",
@@ -699,7 +732,7 @@ describe("sessions route", () => {
 
     vi.mocked(msgUtils.extractTextContent)
       .mockReturnValueOnce({ text: "legacy file", images: [], thinking: "", toolUses: [] });
-    vi.mocked(msgUtils.loadSessionHistoryMessages).mockResolvedValueOnce([
+    vi.mocked(msgUtils.loadSessionHistoryEntries).mockResolvedValueOnce([
       { role: "assistant", content: "legacy file" },
       {
         role: "toolResult",
@@ -756,7 +789,7 @@ describe("sessions route", () => {
 
     vi.mocked(msgUtils.extractTextContent)
       .mockReturnValueOnce({ text: "parent says hi", images: [], thinking: "", toolUses: [] });
-    vi.mocked(msgUtils.loadSessionHistoryMessages).mockResolvedValueOnce([
+    vi.mocked(msgUtils.loadSessionHistoryEntries).mockResolvedValueOnce([
       { role: "assistant", content: "parent says hi" },
       {
         role: "toolResult",
@@ -828,7 +861,7 @@ describe("sessions route", () => {
 
     vi.mocked(msgUtils.extractTextContent)
       .mockReturnValueOnce({ text: "parent says hi", images: [], thinking: "", toolUses: [] });
-    vi.mocked(msgUtils.loadSessionHistoryMessages).mockResolvedValueOnce([
+    vi.mocked(msgUtils.loadSessionHistoryEntries).mockResolvedValueOnce([
       { role: "assistant", content: "parent says hi" },
       {
         role: "toolResult",
@@ -874,7 +907,7 @@ describe("sessions route", () => {
 
     vi.mocked(msgUtils.extractTextContent)
       .mockReturnValueOnce({ text: "parent says hi", images: [], thinking: "", toolUses: [] });
-    vi.mocked(msgUtils.loadSessionHistoryMessages).mockResolvedValueOnce([
+    vi.mocked(msgUtils.loadSessionHistoryEntries).mockResolvedValueOnce([
       { role: "assistant", content: "parent says hi" },
       {
         role: "toolResult",
@@ -924,7 +957,7 @@ describe("sessions route", () => {
 
     vi.mocked(msgUtils.extractTextContent)
       .mockReturnValueOnce({ text: "parent says hi", images: [], thinking: "", toolUses: [] });
-    vi.mocked(msgUtils.loadSessionHistoryMessages).mockResolvedValueOnce([
+    vi.mocked(msgUtils.loadSessionHistoryEntries).mockResolvedValueOnce([
       { role: "assistant", content: "parent says hi" },
       {
         role: "toolResult",

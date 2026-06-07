@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useSettingsStore, type ProviderSummary } from '../../store';
 import { hanaFetch } from '../../api';
 import { invalidateConfigCache } from '../../../hooks/use-config';
 import { t } from '../../helpers';
 import { OAuthCredentials } from './OAuthCredentials';
-import { ApiKeyCredentials } from './ApiKeyCredentials';
+import { ApiKeyCredentials, type ProviderCredentialDraft } from './ApiKeyCredentials';
 import { ProviderModelList } from './ProviderModelList';
 import styles from '../../Settings.module.css';
 
@@ -16,6 +16,26 @@ export function ProviderDetail({ providerId, summary, providerConfig, isPresetSe
   presetInfo?: { label: string; value: string; url?: string; api?: string; local?: boolean };
   onRefresh: () => Promise<void>;
 }) {
+  const credentialMissingFields = (summary.missing_fields || []).filter(field => (
+    field === 'api_key' || field === 'base_url' || field === 'api'
+  ));
+  const showCredentialIncomplete = summary.config_status === 'needs_setup'
+    && summary.can_delete
+    && !summary.config_error
+    && credentialMissingFields.length > 0;
+  const [credentialDraft, setCredentialDraft] = useState<ProviderCredentialDraft>({
+    base_url: summary.base_url || presetInfo?.url || '',
+    api: summary.api || presetInfo?.api || '',
+    api_key: summary.api_key || '',
+  });
+  useEffect(() => {
+    setCredentialDraft({
+      base_url: summary.base_url || presetInfo?.url || '',
+      api: summary.api || presetInfo?.api || '',
+      api_key: summary.api_key || '',
+    });
+  }, [providerId, presetInfo?.api, presetInfo?.url, summary.api, summary.api_key, summary.base_url]);
+
   return (
     <div className={styles['pv-detail-inner']}>
       <div className={styles['pv-detail-header']}>
@@ -29,7 +49,7 @@ export function ProviderDetail({ providerId, summary, providerConfig, isPresetSe
           {t('settings.providers.configInvalid')}
         </div>
       )}
-      {summary.config_status === 'needs_setup' && summary.can_delete && !summary.config_error && (
+      {showCredentialIncomplete && (
         <div className={styles['pv-config-alert']}>
           {t('settings.providers.configIncomplete')}
         </div>
@@ -44,9 +64,15 @@ export function ProviderDetail({ providerId, summary, providerConfig, isPresetSe
           isPresetSetup={isPresetSetup}
           presetInfo={presetInfo}
           onRefresh={onRefresh}
+          onDraftChange={setCredentialDraft}
         />
       )}
-      <ProviderModelList providerId={providerId} summary={summary} onRefresh={onRefresh} />
+      <ProviderModelList
+        providerId={providerId}
+        summary={summary}
+        credentialDraft={summary.supports_oauth ? undefined : credentialDraft}
+        onRefresh={onRefresh}
+      />
     </div>
   );
 }

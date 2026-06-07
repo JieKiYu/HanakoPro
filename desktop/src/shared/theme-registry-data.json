@@ -34,6 +34,18 @@
       "i18nName": "settings.appearance.highContrast",
       "i18nMode": "settings.appearance.highContrastMode"
     },
+    "mo-bai": {
+      "cssPath": "themes/mo-bai.css",
+      "backgroundColor": "#F1EFEA",
+      "i18nName": "settings.appearance.moBai",
+      "i18nMode": "settings.appearance.moBaiMode"
+    },
+    "indigo-porcelain": {
+      "cssPath": "themes/indigo-porcelain.css",
+      "backgroundColor": "#F1F3F5",
+      "i18nName": "settings.appearance.indigoPorcelain",
+      "i18nMode": "settings.appearance.indigoPorcelainMode"
+    },
     "grass-aroma": {
       "cssPath": "themes/grass-aroma.css",
       "backgroundColor": "#F5F8F3",

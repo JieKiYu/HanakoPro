@@ -442,6 +442,9 @@ class StreamBufferManager {
         break;
 
       case 'vision_progress':
+        if (msg.reused && (msg.phase === 'done' || !msg.phase)) {
+          break;
+        }
         this.splitPendingInterjectionIfReady(buf);
         this.ensureMessage(buf);
         this.sealCurrentTextSegment(buf);

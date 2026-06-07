@@ -5,7 +5,7 @@
  * Receives oldContent / newContent from the write/edit tool details.
  */
 
-import { memo, useMemo, useState } from 'react';
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { structuredPatch } from 'diff';
 import hljs from 'highlight.js/lib/core';
 import styles from './Chat.module.css';
@@ -160,6 +160,18 @@ interface Props {
 
 export const FileDiffCard = memo(function FileDiffCard({ fileName, filePath, oldContent, newContent }: Props) {
   const [collapsed, setCollapsed] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [scrollMetrics, setScrollMetrics] = useState({ clientWidth: 0, scrollWidth: 0, scrollLeft: 0 });
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const scrollbarRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<{ pointerId: number; startX: number; scrollLeft: number } | null>(null);
+  const scrollbarDragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    scrollLeft: number;
+    trackWidth: number;
+    thumbWidth: number;
+  } | null>(null);
   const lang = useMemo(() => langFromFileName(fileName), [fileName]);
 
   const diff = useMemo(
@@ -173,6 +185,134 @@ export const FileDiffCard = memo(function FileDiffCard({ fileName, filePath, old
 
   const handleOpenFile = () => {
     window.platform?.openFile?.(filePath);
+  };
+
+  const updateScrollMetrics = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const next = {
+      clientWidth: el.clientWidth,
+      scrollWidth: el.scrollWidth,
+      scrollLeft: el.scrollLeft,
+    };
+    setScrollMetrics(prev => (
+      prev.clientWidth === next.clientWidth &&
+      prev.scrollWidth === next.scrollWidth &&
+      Math.abs(prev.scrollLeft - next.scrollLeft) < 0.5
+        ? prev
+        : next
+    ));
+  }, []);
+
+  useEffect(() => {
+    if (collapsed) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const frame = window.requestAnimationFrame(updateScrollMetrics);
+    const ResizeObserverCtor = window.ResizeObserver;
+    let observer: ResizeObserver | null = null;
+    if (ResizeObserverCtor) {
+      observer = new ResizeObserverCtor(updateScrollMetrics);
+      observer.observe(el);
+      if (el.firstElementChild) observer.observe(el.firstElementChild);
+    }
+    window.addEventListener('resize', updateScrollMetrics);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener('resize', updateScrollMetrics);
+    };
+  }, [collapsed, diff, updateScrollMetrics]);
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const el = scrollRef.current;
+    if (!el || el.scrollWidth <= el.clientWidth) return;
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      scrollLeft: el.scrollLeft,
+    };
+    setDragging(true);
+    el.setPointerCapture(event.pointerId);
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    const el = scrollRef.current;
+    if (!drag || !el || drag.pointerId !== event.pointerId) return;
+    el.scrollLeft = drag.scrollLeft - (event.clientX - drag.startX);
+    event.preventDefault();
+  };
+
+  const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    const el = scrollRef.current;
+    if (drag && el && drag.pointerId === event.pointerId) {
+      if (el.hasPointerCapture(event.pointerId)) el.releasePointerCapture(event.pointerId);
+    }
+    dragRef.current = null;
+    setDragging(false);
+  };
+
+  const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    const el = scrollRef.current;
+    if (!el || el.scrollWidth <= el.clientWidth) return;
+    if (!event.shiftKey || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+    el.scrollLeft += event.deltaY;
+    event.preventDefault();
+  };
+
+  const canScrollX = scrollMetrics.scrollWidth > scrollMetrics.clientWidth + 1;
+  const thumbWidthPct = canScrollX
+    ? Math.max(8, (scrollMetrics.clientWidth / scrollMetrics.scrollWidth) * 100)
+    : 100;
+  const thumbLeftPct = canScrollX
+    ? (scrollMetrics.scrollLeft / (scrollMetrics.scrollWidth - scrollMetrics.clientWidth)) * (100 - thumbWidthPct)
+    : 0;
+
+  const handleScrollbarPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const el = scrollRef.current;
+    const track = scrollbarRef.current;
+    if (!el || !track || !canScrollX) return;
+    const rect = track.getBoundingClientRect();
+    const thumbWidth = Math.max(32, (scrollMetrics.clientWidth / scrollMetrics.scrollWidth) * rect.width);
+    const maxThumbLeft = Math.max(1, rect.width - thumbWidth);
+    const targetThumbLeft = Math.min(
+      maxThumbLeft,
+      Math.max(0, event.clientX - rect.left - thumbWidth / 2),
+    );
+    el.scrollLeft = (targetThumbLeft / maxThumbLeft) * (scrollMetrics.scrollWidth - scrollMetrics.clientWidth);
+    scrollbarDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      scrollLeft: el.scrollLeft,
+      trackWidth: rect.width,
+      thumbWidth,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+    updateScrollMetrics();
+  };
+
+  const handleScrollbarPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = scrollbarDragRef.current;
+    const el = scrollRef.current;
+    if (!drag || !el || drag.pointerId !== event.pointerId) return;
+    const maxThumbTravel = Math.max(1, drag.trackWidth - drag.thumbWidth);
+    const maxScrollLeft = Math.max(0, scrollMetrics.scrollWidth - scrollMetrics.clientWidth);
+    el.scrollLeft = drag.scrollLeft + ((event.clientX - drag.startX) / maxThumbTravel) * maxScrollLeft;
+    event.preventDefault();
+    updateScrollMetrics();
+  };
+
+  const endScrollbarDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = scrollbarDragRef.current;
+    if (drag && drag.pointerId === event.pointerId && event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    scrollbarDragRef.current = null;
   };
 
   return (
@@ -194,36 +334,68 @@ export const FileDiffCard = memo(function FileDiffCard({ fileName, filePath, old
       </div>
 
       {!collapsed && (
-        <div className={styles.diffCardBody}>
-          {diff?.hunks.map((hunk, hi) => (
-            <div key={hi} className={styles.diffHunk}>
-              {hi > 0 && <div className={styles.diffHunkSeparator}>···</div>}
-              {hunk.lines.map((line, li) => (
-                <div
-                  key={li}
-                  className={`${styles.diffLine} ${
-                    line.type === 'add' ? styles.diffLineAdd :
-                    line.type === 'del' ? styles.diffLineDel :
-                    styles.diffLineCtx
-                  }`}
-                >
-                  <span className={styles.diffLineNum}>
-                    {line.type === 'add' ? '' : (line.oldNum ?? '')}
-                  </span>
-                  <span className={styles.diffLineNum}>
-                    {line.type === 'del' ? '' : (line.newNum ?? '')}
-                  </span>
-                  <span className={styles.diffLineSign}>
-                    {line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' '}
-                  </span>
-                  <span
-                    className={styles.diffLineText}
-                    dangerouslySetInnerHTML={{ __html: highlightLine(line.text, lang) }}
-                  />
-                </div>
-              ))}
-            </div>
-          ))}
+        <div
+          ref={scrollRef}
+          className={`${styles.diffCardBody}${dragging ? ` ${styles.diffCardBodyDragging}` : ''}`}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+          onWheel={handleWheel}
+          onScroll={updateScrollMetrics}
+        >
+          <table className={styles.diffTable}>
+            <tbody>
+            {diff?.hunks.map((hunk, hi) => (
+              <Fragment key={hi}>
+                {hi > 0 && (
+                  <tr>
+                    <td className={styles.diffHunkSeparator} colSpan={4}>···</td>
+                  </tr>
+                )}
+                {hunk.lines.map((line, li) => (
+                  <tr
+                    key={li}
+                    className={`${styles.diffLine} ${
+                      line.type === 'add' ? styles.diffLineAdd :
+                      line.type === 'del' ? styles.diffLineDel :
+                      styles.diffLineCtx
+                    }`}
+                  >
+                    <td className={styles.diffLineNum}>
+                      {line.type === 'add' ? '' : (line.oldNum ?? '')}
+                    </td>
+                    <td className={styles.diffLineNum}>
+                      {line.type === 'del' ? '' : (line.newNum ?? '')}
+                    </td>
+                    <td className={styles.diffLineSign}>
+                      {line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' '}
+                    </td>
+                    <td
+                      className={styles.diffLineText}
+                      dangerouslySetInnerHTML={{ __html: highlightLine(line.text, lang) }}
+                    />
+                  </tr>
+                ))}
+              </Fragment>
+            ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {!collapsed && canScrollX && (
+        <div
+          ref={scrollbarRef}
+          className={styles.diffHorizontalScrollbar}
+          onPointerDown={handleScrollbarPointerDown}
+          onPointerMove={handleScrollbarPointerMove}
+          onPointerUp={endScrollbarDrag}
+          onPointerCancel={endScrollbarDrag}
+        >
+          <div
+            className={styles.diffHorizontalScrollbarThumb}
+            style={{ width: `${thumbWidthPct}%`, left: `${thumbLeftPct}%` }}
+          />
         </div>
       )}
     </div>

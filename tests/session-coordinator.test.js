@@ -19,6 +19,7 @@ vi.mock("../lib/pi-sdk/index.js", () => ({
   SettingsManager: {
     inMemory: vi.fn(() => ({})),
   },
+  estimateTokens: vi.fn(() => 1),
   formatSkillsForPrompt: vi.fn((skills) => `<available_skills>${skills.map(skill => skill.name).join(",")}</available_skills>`),
 }));
 
@@ -222,6 +223,199 @@ describe("SessionCoordinator", () => {
     });
     expect(footerResult.systemPrompt).toBe("BASE");
     expect(getSkillsForAgent).toHaveBeenCalled();
+  });
+
+  it("keeps provider context sanitizer as the final per-session context guard", async () => {
+    const agent = {
+      id: "hana",
+      agentDir: path.join(tempDir, "agents", "hana"),
+      sessionDir: path.join(tempDir, "agents", "hana", "sessions"),
+      sessionMemoryEnabled: true,
+      memoryMasterEnabled: true,
+      setMemoryEnabled: vi.fn(),
+      buildSystemPrompt: () => "BASE",
+      tools: [],
+    };
+    const pluginContextHandler = vi.fn(async () => ({
+      messages: [
+        {
+          role: "assistant",
+          responseId: "resp_img",
+          provider: "k+",
+          api: "openai-responses",
+          model: "gpt-5.5",
+          content: [
+            { type: "thinking", thinking: "", thinkingSignature: "{\"id\":\"rs_1\"}" },
+            { type: "image", data: "PNG_BASE64", mimeType: "image/png" },
+            { type: "text", text: "生成好了。", textSignature: "{\"v\":1,\"id\":\"msg_1\"}" },
+          ],
+        },
+        { role: "user", content: [{ type: "text", text: "继续" }] },
+      ],
+    }));
+    const resourceLoader = {
+      getAppendSystemPrompt: () => [],
+      getSkills: () => ({ skills: [], diagnostics: [] }),
+      getAgentsFiles: () => ({ agentsFiles: [] }),
+      getExtensions: () => ({
+        extensions: [
+          {
+            path: "plugin-after-hana",
+            handlers: new Map([["context", [pluginContextHandler]]]),
+          },
+        ],
+        errors: [],
+      }),
+    };
+
+    const coordinator = new SessionCoordinator({
+      agentsDir: path.join(tempDir, "agents"),
+      getAgent: () => agent,
+      getActiveAgentId: () => "hana",
+      getModels: () => ({
+        currentModel: {
+          id: "gpt-5.5",
+          name: "GPT-5.5",
+          provider: "k+",
+          api: "openai-responses",
+          input: ["text", "image"],
+        },
+        authStorage: {},
+        modelRegistry: {},
+        resolveThinkingLevel: () => "none",
+      }),
+      getResourceLoader: () => resourceLoader,
+      getSkills: () => null,
+      buildTools: () => ({ tools: [], customTools: [] }),
+      emitEvent: () => {},
+      getHomeCwd: () => tempDir,
+      agentIdFromSessionPath: () => null,
+      switchAgentOnly: async () => {},
+      getConfig: () => ({}),
+      getPrefs: () => ({ getThinkingLevel: () => "none" }),
+      getAgents: () => new Map(),
+      getActivityStore: () => null,
+      getAgentById: () => agent,
+      listAgents: () => [],
+    });
+
+    await coordinator.createSession(null, tempDir, true);
+
+    const extensions = createAgentSessionMock.mock.calls[0][0].resourceLoader.getExtensions().extensions;
+    expect(extensions.at(-1).path).toBe("hana-provider-context-final-sanitizer");
+
+    let messages = [{ role: "user", content: [{ type: "text", text: "继续" }] }];
+    for (const extension of extensions) {
+      for (const handler of extension.handlers?.get?.("context") || []) {
+        const result = await handler({ messages }, {
+          model: {
+            id: "gpt-5.5",
+            provider: "k+",
+            api: "openai-responses",
+            input: ["text", "image"],
+          },
+        });
+        if (result?.messages) messages = result.messages;
+      }
+    }
+
+    expect(pluginContextHandler).toHaveBeenCalled();
+    expect(messages[0]).not.toHaveProperty("responseId");
+    expect(messages[0].content).toEqual([
+      { type: "text", text: "[生成图片已省略：图片文件已保存到本次对话，不会把图片二进制重放进模型上下文]\n\n生成好了。" },
+    ]);
+  });
+
+  it("injects recalled memory through the hidden SDK context extension", async () => {
+    const agentDir = path.join(tempDir, "agents", "hana");
+    const sessionFile = path.join(agentDir, "sessions", "memory-context.jsonl");
+    fs.mkdirSync(path.join(agentDir, "sessions"), { recursive: true });
+    fs.writeFileSync(
+      path.join(agentDir, "pinned.md"),
+      "- 用户希望 Hanako 记忆改造采用钉络镜笺四层结构\n",
+      "utf-8",
+    );
+    const agent = {
+      id: "hana",
+      agentDir,
+      sessionDir: path.join(agentDir, "sessions"),
+      sessionMemoryEnabled: true,
+      memoryMasterEnabled: true,
+      config: { locale: "zh", memory: { enabled: true, use: true } },
+      summaryManager: {
+        getAllSummaries: () => [
+          {
+            session_id: "old-session",
+            summary: "Hanako 记忆召回应当自然触发，不需要用户反复说之前提过",
+            updated_at: "2026-06-03T01:00:00.000Z",
+          },
+        ],
+      },
+      setMemoryEnabled: vi.fn(),
+      buildSystemPrompt: () => "BASE",
+      getToolsSnapshot: vi.fn(() => []),
+      tools: [],
+    };
+    createAgentSessionMock.mockResolvedValueOnce({
+      session: {
+        sessionManager: { getSessionFile: () => sessionFile },
+        subscribe: vi.fn(() => vi.fn()),
+        setActiveToolsByName: vi.fn(),
+      },
+    });
+
+    const coordinator = new SessionCoordinator({
+      agentsDir: path.join(tempDir, "agents"),
+      getAgent: () => agent,
+      getActiveAgentId: () => "hana",
+      getModels: () => ({
+        currentModel: { name: "test-model" },
+        authStorage: {},
+        modelRegistry: {},
+        resolveThinkingLevel: () => "medium",
+      }),
+      getResourceLoader: () => ({
+        getSystemPrompt: () => "BASE",
+        getAppendSystemPrompt: () => [],
+        getExtensions: () => ({ extensions: [], errors: [] }),
+        getAgentsFiles: () => ({ agentsFiles: [] }),
+      }),
+      getSkills: () => null,
+      buildTools: () => ({ tools: [], customTools: [] }),
+      emitEvent: () => {},
+      getHomeCwd: () => tempDir,
+      agentIdFromSessionPath: () => null,
+      switchAgentOnly: async () => {},
+      getConfig: () => ({}),
+      getPrefs: () => ({ getThinkingLevel: () => "medium" }),
+      getAgents: () => new Map(),
+      getActivityStore: () => null,
+      getAgentById: () => agent,
+      listAgents: () => [],
+    });
+
+    await coordinator.createSession(null, tempDir, true);
+
+    const resourceLoader = createAgentSessionMock.mock.calls[0][0].resourceLoader;
+    const memoryExtension = resourceLoader
+      .getExtensions()
+      .extensions
+      .find((extension) => extension.path === "hana-memory-recall-context");
+    const contextHandler = memoryExtension.handlers.get("context")[0];
+    const result = await contextHandler(
+      {
+        messages: [
+          { role: "system", content: "BASE" },
+          { role: "user", content: "Hanako 记忆改造怎么做得自然？" },
+        ],
+      },
+      { sessionManager: { getSessionFile: () => sessionFile } },
+    );
+
+    expect(result.messages.map((message) => message.role)).toEqual(["system", "system", "user"]);
+    expect(result.messages[1].content[0].text).toContain("Hanako Recalled Memory");
+    expect(result.messages[1].content[0].text).toContain("钉络镜笺");
+    expect(result.messages[1].content[0].text).toContain("自然触发");
   });
 
   it("passes the frozen experience state into the agent tool snapshot", async () => {
@@ -1732,5 +1926,150 @@ describe("SessionCoordinator", () => {
 
     const sessions = await coordinator.listSessions();
     expect(sessions.find((s) => s.path === subagentPath)).toBeUndefined();
+  });
+
+  it("runs automatic context compression before prompt at the configured threshold", async () => {
+    const sessionPath = "/tmp/session.jsonl";
+    const agent = {
+      id: "hana",
+      _config: {
+        context: {
+          enabled: true,
+          threshold: 0.8,
+          recentTurnsProtected: 3,
+        },
+      },
+      _memoryTicker: { notifyTurn: vi.fn() },
+    };
+    const session = {
+      model: { id: "model", provider: "test", contextWindow: 1000 },
+      sessionManager: { getSessionFile: () => sessionPath },
+      agent: { state: { messages: [{ role: "user", content: "u" }] } },
+      getContextUsage: () => ({ tokens: 800, contextWindow: 1000 }),
+      prompt: vi.fn(),
+    };
+    const emitEvent = vi.fn();
+    const coordinator = new SessionCoordinator({
+      agentsDir: "/tmp/agents",
+      getAgent: () => agent,
+      getActiveAgentId: () => "hana",
+      getModels: () => ({ authStorage: {}, modelRegistry: {}, resolveThinkingLevel: () => "medium" }),
+      getResourceLoader: () => ({ getSystemPrompt: () => "BASE" }),
+      getSkills: () => null,
+      buildTools: () => ({ tools: [], customTools: [] }),
+      emitEvent,
+      getHomeCwd: () => "/tmp/home",
+      agentIdFromSessionPath: () => "hana",
+      switchAgentOnly: async () => {},
+      getConfig: () => ({}),
+      getPrefs: () => ({ getThinkingLevel: () => "medium" }),
+      getAgents: () => new Map(),
+      getActivityStore: () => null,
+      getAgentById: () => agent,
+      listAgents: () => [],
+    });
+    coordinator._session = session;
+    coordinator._sessions.set(sessionPath, { session, agentId: "hana", lastTouchedAt: 0 });
+    const compressSpy = vi.spyOn(coordinator, "_contextCompress").mockResolvedValue(true);
+
+    await coordinator.prompt("hello");
+
+    expect(compressSpy).toHaveBeenCalledWith(session, agent, 1000, { tokens: 800 });
+    expect(emitEvent).toHaveBeenCalledWith({ type: "compaction_start", reason: "auto-threshold" }, sessionPath);
+    expect(emitEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: "compaction_end",
+      reason: "auto-threshold",
+      aborted: false,
+      compressionAvailable: true,
+    }), sessionPath);
+    expect(session.prompt).toHaveBeenCalledWith("hello", undefined);
+  });
+
+  it("does not auto-compress before prompt below the configured threshold", async () => {
+    const sessionPath = "/tmp/session.jsonl";
+    const agent = {
+      id: "hana",
+      _config: {
+        context: {
+          enabled: true,
+          threshold: 0.8,
+          recentTurnsProtected: 3,
+        },
+      },
+      _memoryTicker: { notifyTurn: vi.fn() },
+    };
+    const session = {
+      model: { id: "model", provider: "test", contextWindow: 1000 },
+      sessionManager: { getSessionFile: () => sessionPath },
+      agent: { state: { messages: [{ role: "user", content: "u" }] } },
+      getContextUsage: () => ({ tokens: 799, contextWindow: 1000 }),
+      prompt: vi.fn(),
+    };
+    const coordinator = new SessionCoordinator({
+      agentsDir: "/tmp/agents",
+      getAgent: () => agent,
+      getActiveAgentId: () => "hana",
+      getModels: () => ({ authStorage: {}, modelRegistry: {}, resolveThinkingLevel: () => "medium" }),
+      getResourceLoader: () => ({ getSystemPrompt: () => "BASE" }),
+      getSkills: () => null,
+      buildTools: () => ({ tools: [], customTools: [] }),
+      emitEvent: vi.fn(),
+      getHomeCwd: () => "/tmp/home",
+      agentIdFromSessionPath: () => "hana",
+      switchAgentOnly: async () => {},
+      getConfig: () => ({}),
+      getPrefs: () => ({ getThinkingLevel: () => "medium" }),
+      getAgents: () => new Map(),
+      getActivityStore: () => null,
+      getAgentById: () => agent,
+      listAgents: () => [],
+    });
+    coordinator._session = session;
+    coordinator._sessions.set(sessionPath, { session, agentId: "hana", lastTouchedAt: 0 });
+    const compressSpy = vi.spyOn(coordinator, "_contextCompress").mockResolvedValue(true);
+
+    await coordinator.prompt("hello");
+
+    expect(compressSpy).not.toHaveBeenCalled();
+    expect(session.prompt).toHaveBeenCalledWith("hello", undefined);
+  });
+
+  it("_contextCompress uses the provided token snapshot without re-estimating", async () => {
+    const agent = {
+      _config: {
+        context: {
+          enabled: true,
+          threshold: 0.8,
+          recentTurnsProtected: 1,
+        },
+      },
+    };
+    const session = {
+      model: { id: "model", provider: "test", contextWindow: 1000 },
+      agent: { state: { messages: [{ role: "user", content: "u" }] } },
+    };
+    const coordinator = new SessionCoordinator({
+      agentsDir: "/tmp/agents",
+      getAgent: () => agent,
+      getActiveAgentId: () => "hana",
+      getModels: () => ({ authStorage: {}, modelRegistry: {}, resolveThinkingLevel: () => "medium" }),
+      getResourceLoader: () => ({ getSystemPrompt: () => "BASE" }),
+      getSkills: () => null,
+      buildTools: () => ({ tools: [], customTools: [] }),
+      emitEvent: vi.fn(),
+      getHomeCwd: () => "/tmp/home",
+      agentIdFromSessionPath: () => "hana",
+      switchAgentOnly: async () => {},
+      getConfig: () => ({}),
+      getPrefs: () => ({ getThinkingLevel: () => "medium" }),
+      getAgents: () => new Map(),
+      getActivityStore: () => null,
+      getAgentById: () => agent,
+      listAgents: () => [],
+    });
+
+    await expect(
+      coordinator._contextCompress(session, agent, 1000, { tokens: 799 }),
+    ).resolves.toBe(false);
   });
 });

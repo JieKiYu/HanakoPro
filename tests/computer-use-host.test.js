@@ -215,7 +215,7 @@ describe("ComputerHost", () => {
     });
   });
 
-  it("requires app approval for non-isolated providers", async () => {
+  it("allows non-isolated providers by default when per-app approval is off", async () => {
     const provider = createMockComputerProvider({ providerId: "mock" });
     provider.capabilities.isolated = false;
     const providers = new ComputerProviderRegistry();
@@ -224,6 +224,21 @@ describe("ComputerHost", () => {
       providers,
       defaultProviderId: "mock",
       getSettings: () => ({ enabled: true }),
+    });
+
+    const lease = await host.createLease(ctx, { appId: "app.notes" });
+    expect(lease.providerId).toBe("mock");
+  });
+
+  it("requires app approval for non-isolated providers when per-app approval is on", async () => {
+    const provider = createMockComputerProvider({ providerId: "mock" });
+    provider.capabilities.isolated = false;
+    const providers = new ComputerProviderRegistry();
+    providers.register(provider);
+    const host = new ComputerHost({
+      providers,
+      defaultProviderId: "mock",
+      getSettings: () => ({ enabled: true, require_app_approval: true }),
     });
 
     await expect(host.createLease(ctx, { appId: "app.notes" }))
@@ -240,6 +255,7 @@ describe("ComputerHost", () => {
       defaultProviderId: "mock",
       getSettings: () => ({
         enabled: true,
+        require_app_approval: true,
         app_approvals: [{ providerId: "mock", appId: "app.notes", approvedAt: "2026-05-01T00:00:00.000Z" }],
       }),
     });

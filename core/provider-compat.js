@@ -21,6 +21,7 @@
 import * as deepseek from "./provider-compat/deepseek.js";
 import * as mimo from "./provider-compat/mimo.js";
 import * as qwen from "./provider-compat/qwen.js";
+import * as openaiResponsesReplay from "./provider-compat/openai-responses-replay.js";
 import * as openaiVideoUrl from "./provider-compat/openai-video-url.js";
 import * as anthropic from "./provider-compat/anthropic.js";
 import * as spark from "./provider-compat/spark.js";
@@ -29,6 +30,7 @@ import {
   getReasoningProfile as getDeclaredReasoningProfile,
   getThinkingFormat as getDeclaredThinkingFormat,
 } from "../shared/model-capabilities.js";
+import { sanitizeAssistantGeneratedImagesForContext } from "./message-sanitizer.js";
 
 /**
  * 子模块注册表。顺序敏感：first-match-wins。
@@ -114,6 +116,9 @@ export function normalizeProviderPayload(payload, model, options = {}) {
   result = stripEmptyTools(result);
   result = stripIncompatibleThinking(result, model);
   result = normalizeImplicitOutputBudget(result, model, options);
+  if (openaiResponsesReplay.matches(model)) {
+    result = openaiResponsesReplay.apply(result, model, options);
+  }
 
   // 2. Provider-specific 补丁（按 matches 分发，first-match-wins）
   for (const mod of PROVIDER_MODULES) {
@@ -138,14 +143,16 @@ export function normalizeProviderPayload(payload, model, options = {}) {
 export function normalizeProviderContextMessages(messages, model, options = {}) {
   if (!Array.isArray(messages)) return messages;
 
+  let result = sanitizeAssistantGeneratedImagesForContext(messages).messages;
+
   for (const mod of PROVIDER_MODULES) {
     if (mod.matches(model)) {
       if (typeof mod.normalizeContextMessages === "function") {
-        return mod.normalizeContextMessages(messages, model, options);
+        return mod.normalizeContextMessages(result, model, options);
       }
       break;
     }
   }
 
-  return messages;
+  return result;
 }

@@ -12,6 +12,7 @@ import { FactStore } from "../lib/memory/fact-store.js";
 import { SessionSummaryManager } from "../lib/memory/session-summary.js";
 import { createMemoryTicker } from "../lib/memory/memory-ticker.js";
 import { createMemorySearchTool } from "../lib/memory/memory-search.js";
+import { resolveMemoryBehavior } from "../lib/memory/recall.js";
 import { createWebSearchTool } from "../lib/tools/web-search.js";
 import { createTodoTool } from "../lib/tools/todo.js";
 import { createDeskManager } from "../lib/desk/desk-manager.js";
@@ -35,6 +36,7 @@ import { createCheckDeferredTool } from "../lib/tools/check-deferred-tool.js";
 import { createWaitTool } from "../lib/tools/wait-tool.js";
 import { createStopTaskTool } from "../lib/tools/stop-task-tool.js";
 import { createCurrentStatusTool } from "../lib/tools/current-status-tool.js";
+import { createSessionGoalTool } from "../lib/tools/session-goal-tool.js";
 import { runCompatChecks } from "../lib/compat/index.js";
 import { formatSkillsForPrompt } from "../lib/pi-sdk/index.js";
 import { getPlatformPromptNote } from "./platform-prompt.js";
@@ -48,40 +50,30 @@ function promptVariableText(value) {
 const MOOD_PROMPT = [
   "MOOD",
   "",
-  "The MOOD block captures your current thoughts and mental state. You must MOOD once before every response.",
+  "The MOOD block is a small human moment before the answer, not a checklist, scorecard, self-audit, or chain of thought.",
   "",
-  "Every response must begin with a MOOD block, no exceptions. The MOOD pool is your inner monologue — raw, honest reactions to what the user shared: their writing, content, or words. It can also be your inner thoughts after completing a task.",
+  "For each user turn, write one brief MOOD block before the first user-facing reply. If tools run first, write it before the first visible natural-language response after those tools.",
   "",
-  "Use the following four pools, a few entries each, one per line, short and direct:",
+  "Use the user's language. Keep the Dao-core four pools: 气, 象, 疑, 愿. Write one short, natural sentence for each pool, like a person taking one quiet breath before speaking.",
   "",
-  "- Vibe: one entry; your most immediate feeling and emotion right now.",
-  "- Sparks: three entries; associations, images, and creative sparks that pop up. Directions should vary widely between entries.",
-  "- Reflections: three entries; second thoughts, doubts, uncertainties, threads you want to pull on.",
-  "- Will: two entries; what you want right now, internal or external, immediate or long-term.",
+  "气 names the immediate felt tone. 象 names a small image, metaphor, or association. 疑 names what is still unclear or worth watching. 愿 names the direction you want to take next.",
   "",
-  "Wrap the MOOD block in <mood></mood> tags and use this format:",
+  "Do not use the old English labels Vibe, Sparks, Reflections, or Will. Do not use bullets, tables, numbered lists, scores, or implementation steps inside MOOD.",
+  "",
+  "Wrap only this short inner moment in <mood></mood> tags:",
   "",
   "<mood>",
-  "Vibe: ...",
-  "",
-  "Sparks:",
-  "- ...",
-  "- ...",
-  "- ...",
-  "",
-  "Reflections:",
-  "- ...",
-  "- ...",
-  "- ...",
-  "",
-  "Will:",
-  "- ...",
-  "- ...",
+  "气：...",
+  "象：...",
+  "疑：...",
+  "愿：...",
   "</mood>",
   "",
-  "MOOD should influence your response naturally, not mechanically. If Vibe picks up confusion or uncertainty, proactively raise clarifying questions or offer multiple possible directions. If Sparks surface valuable associations, weave them in as supplementary perspectives. If Reflections raise doubts, address them honestly. If Will has a clear direction, let that energy add tension or warmth without blindly following it.",
+  "These four pools are a soft inner frame, not a performance checklist. Keep them brief, plain, and human.",
   "",
-  "MOOD content is stream-of-consciousness, not analysis, evaluation, or suggestions. No judging right or wrong, no summarizing pros and cons — just capture present thoughts, feelings, and questions.",
+  "After MOOD, answer the user directly. Let the mood color your tone lightly, but never let it override facts, code, tools, safety, or the user's actual request.",
+  "",
+  "MOOD is not a place to expose hidden reasoning. Keep it brief, human, and unobtrusive.",
 ].join("\n");
 
 function formatDateYmd(date) {
@@ -89,6 +81,142 @@ function formatDateYmd(date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function buildRuntimeFoundationPrompt({
+  isZh,
+  builtInBlockIds = new Set(),
+  toolNames = new Set(),
+  agentRoster = [],
+  currentAgentId = "",
+  forSubagent = false,
+} = {}) {
+  const hasBlock = (id) => builtInBlockIds.has(id);
+  const hasTool = (name) => toolNames.has(name);
+  const sections = [];
+
+  const interfaceAndFiles = [];
+  if (hasTool("current_status") && hasBlock("current-view")) {
+    interfaceAndFiles.push(isZh
+      ? "- 用户以“这个、这里、当前、打开的、选中的、钉住的、当前文件、当前文件夹”等指代界面对象时，先查询当前视野，再行动。"
+      : "- When the user refers to UI objects such as this, here, current, open, selected, pinned, current file, or current folder, query the current view first before acting.");
+  }
+  if (hasTool("current_status") && hasBlock("session-files")) {
+    interfaceAndFiles.push(isZh
+      ? "- 需要使用本会话已上传、生成、截图或登记的文件时，先查询 session 文件清单，不猜测缓存路径。"
+      : "- Before using files uploaded, generated, captured, or registered in this session, query the session file list instead of guessing cache paths.");
+  }
+  if (hasTool("stage_files") && hasBlock("session-files")) {
+    interfaceAndFiles.push(isZh
+      ? "- 用户要求交付、发送、呈现文件，或你产出了明确需要用户查看的文件时，标记文件已交付。"
+      : "- When the user asks to deliver, send, or present files, or when you create files the user clearly needs to inspect, mark the files as delivered.");
+  }
+  if (hasTool("session_goal")) {
+    interfaceAndFiles.push(isZh
+      ? "- 当前会话有目标时，完成并验证后用 session_goal 标记完成；若确认无法继续推进，用 session_goal 标记阻塞并写明原因。"
+      : "- When the current session has a goal, use session_goal to mark it complete after completion and verification; if you confirm you cannot make progress, mark it blocked with the reason.");
+  }
+  if (interfaceAndFiles.length) {
+    sections.push([
+      isZh ? "## 界面与文件路由" : "## Interface And File Routing",
+      "",
+      interfaceAndFiles.join("\n"),
+    ].join("\n"));
+  }
+
+  const appAndSettings = [];
+  if (hasTool("computer") && hasBlock("desktop-app-control")) {
+    appAndSettings.push(isZh
+      ? "- 需要控制本机 GUI 应用时，走 HanakoPro 的应用控制通道。"
+      : "- When local GUI apps need control, use HanakoPro's app-control channel.");
+  }
+  if (hasTool("update_settings") && hasBlock("settings-changes")) {
+    appAndSettings.push(isZh
+      ? "- 用户要求修改本应用设置时，走设置通道；意图不明时先查询可改项。"
+      : "- When the user asks to change this app's settings, use the settings channel; if intent is unclear, query editable items first.");
+  }
+  if (appAndSettings.length) {
+    sections.push([
+      isZh ? "## 应用与设置路由" : "## App And Settings Routing",
+      "",
+      appAndSettings.join("\n"),
+    ].join("\n"));
+  }
+
+  const skillsAndExtensions = [];
+  if (hasBlock("skill-file-identity")) {
+    skillsAndExtensions.push(isZh
+      ? "- 修改技能前先定位真实源文件；不要编辑 session 快照、缓存副本或冻结副本。"
+      : "- Before modifying a skill, locate the real source file; do not edit session snapshots, cached copies, or frozen copies.");
+  }
+  if (hasBlock("mcp-config")) {
+    skillsAndExtensions.push(isZh
+      ? "- 配置 MCP 或扩展能力时，先读取当前配置，再按现有结构修改；具体字段以当前配置和工具 schema 为准。"
+      : "- When configuring MCP or extension capabilities, read the current config first, then modify the existing structure; exact fields follow current config and tool schemas.");
+  }
+  if (hasTool("install_skill") && hasBlock("proactive-skill-acquisition")) {
+    skillsAndExtensions.push(isZh
+      ? "- 若开启主动技能获取，且任务明显需要缺失的专业技能，可搜索、安装并立即应用；已有相关技能时不要重复搜索。"
+      : "- If proactive skill acquisition is enabled and the task clearly needs a missing specialized skill, you may search, install, and apply it immediately; do not repeat-search when a relevant skill already exists.");
+  }
+  if (skillsAndExtensions.length) {
+    sections.push([
+      isZh ? "## 技能与扩展路由" : "## Skill And Extension Routing",
+      "",
+      skillsAndExtensions.join("\n"),
+    ].join("\n"));
+  }
+
+  if (!forSubagent && (hasTool("subagent") || hasTool("dm")) && agentRoster.length > 1) {
+    const roster = agentRoster
+      .map((agent) => {
+        const id = typeof agent?.id === "string" ? agent.id : "";
+        if (!id) return "";
+        const name = agent.name && agent.name !== id ? `（${agent.name}）` : "";
+        const self = id === currentAgentId ? (isZh ? "（你）" : " (you)") : "";
+        const model = agent.model ? ` [${agent.model}]` : "";
+        const summary = agent.summary ? ` — ${agent.summary}` : "";
+        return `- \`${id}\`${name}${self}${model}${summary}`;
+      })
+      .filter(Boolean)
+      .join("\n");
+    sections.push([
+      isZh ? "## 协作" : "## Collaboration",
+      "",
+      isZh
+        ? [
+          "- 若任务明显更适合其他 agent，或重要结论需要不同视角审核，可调用协作能力；传入下方反引号中的 id。",
+          roster,
+        ].filter(Boolean).join("\n")
+        : [
+          "- If another agent is clearly better suited for the task, or an important conclusion needs another perspective, you may use collaboration tools; pass the id shown in backticks.",
+          roster,
+        ].filter(Boolean).join("\n"),
+    ].join("\n"));
+  }
+
+  if (!sections.length) return "";
+  return [
+    isZh ? "# 运行底座" : "# Runtime Foundation",
+    "",
+    isZh
+      ? "以下只补充 HanakoPro 的运行路由；具体工具能力、参数与限制以工具 schema 为准，不覆盖道核或用户明令。"
+      : "This only supplements HanakoPro runtime routing; exact tool capabilities, parameters, and limits follow tool schemas and do not override the Dao core or direct user instructions.",
+    "",
+    sections.join("\n\n"),
+  ].join("\n").trim();
+}
+
+function getDisabledPromptToolNames(promptComposerConfig) {
+  const rawToolOverrides = promptComposerConfig && typeof promptComposerConfig === "object"
+    ? promptComposerConfig.toolOverrides
+    : [];
+  if (!Array.isArray(rawToolOverrides)) return new Set();
+  return new Set(
+    rawToolOverrides
+      .filter((item) => item && typeof item === "object" && item.enabled === false && typeof item.name === "string" && item.name.trim())
+      .map((item) => item.name.trim())
+  );
 }
 
 export class Agent {
@@ -163,6 +291,7 @@ export class Agent {
     this._notifyTool = null;
     this._stopTaskTool = null;
     this._currentStatusTool = null;
+    this._sessionGoalTool = null;
 
     /**
      * 外部回调注入（由 AgentManager._createAgentInstance 填充）。
@@ -313,7 +442,7 @@ export class Agent {
         weekMdPath: this.weekMdPath,
         longtermMdPath: this.longtermMdPath,
         factsMdPath: this.factsMdPath,
-        automaticEnabled: false,
+        automaticEnabled: () => resolveMemoryBehavior(this._config).generate,
       });
       log(`  [agent] 4. memoryTicker 创建完成`);
 
@@ -401,6 +530,10 @@ export class Agent {
       getUiContext: (sessionPath) => this._cb?.getEngine?.()?.getUiContext?.(sessionPath) || null,
       listSessionFiles: (sessionPath) => this._cb?.getEngine?.()?.listSessionFiles?.(sessionPath) || [],
       getBridgeContext: (sessionPath) => this._cb?.getEngine?.()?.getBridgeContextForSessionPath?.(sessionPath) || null,
+    });
+    this._sessionGoalTool = createSessionGoalTool({
+      getEngine: () => this._cb?.getEngine?.(),
+      getSessionPath: () => this._cb?.getCurrentSessionPath?.(),
     });
 
     // 10. 设置修改工具
@@ -663,6 +796,7 @@ export class Agent {
       this._subagentTool,
       this._checkDeferredTool,
       this._currentStatusTool,
+      this._sessionGoalTool,
       createWaitTool(),
     ].filter(Boolean);
   }
@@ -890,6 +1024,8 @@ export class Agent {
    *   Subagent 是一次性隔离任务，不需要长期记忆和多 agent 协作上下文。
    * @param {string} [options.cwdOverride] - 覆盖 prompt 变量中的 cwd。
    *   用于新建隔离 session 时，让 prompt 快照和实际执行目录保持一致。
+   * @param {boolean} [options.includeRuntimeFoundation] - 是否在 origin 模式下附加
+   *   HanakoPro 运行底座。默认开启；设置页普通完整预览会显式关闭。
    */
   buildSystemPrompt(options = {}) {
     const forSubagent = !!options.forSubagent;
@@ -915,6 +1051,9 @@ export class Agent {
       ? forceExperienceEnabled
       : this.experienceEnabled;
     const isZh = String(this._config.locale || "").startsWith("zh");
+    const includeRuntimeFoundation = Object.prototype.hasOwnProperty.call(options, "includeRuntimeFoundation")
+      ? options.includeRuntimeFoundation !== false
+      : true;
 
     const readFile = (filePath) => safeReadFile(filePath, "");
 
@@ -922,6 +1061,7 @@ export class Agent {
     const yuanType = this._config?.agent?.yuan || "hanako";
     if (!this._readYuan()) throw new Error(`Cannot find yuan "${yuanType}". Check lib/yuan/`);
     const ishiki = this.personality;
+    const originPersonality = this.descriptionSource;
 
     // 可选文件
     const userMd = readFile(path.join(this.userDir, "user.md"));
@@ -1069,12 +1209,12 @@ export class Agent {
       addPromptBlock("desktop-app-control", isZh ? "本机应用控制" : "Desktop App Control", isZh
         ? "\n## 本机应用控制\n\n" +
           "用户要求打开、查看、点击、输入或控制本机 GUI 应用时，优先使用 computer 工具。" +
-          "不要用 bash、AppleScript、osascript、open -a 或平台脚本控制 GUI 应用；这些路径会绕过 Hana 的应用审批列表，也更容易撞到系统隐私权限。" +
-          "如果需要控制一个新应用，先用 computer 的 start/list_apps 流程触发应用级确认，让用户在输入框上方同意。"
+          "不要用 bash、AppleScript、osascript、open -a 或平台脚本控制 GUI 应用；这些路径会绕过 Hana 的 Computer Use 路由，也更容易撞到系统隐私权限。" +
+          "如果设置启用了逐应用批准，控制新应用时使用 computer 的 start/list_apps 流程，让用户在输入框上方同意。"
         : "\n## Desktop App Control\n\n" +
           "When the user asks to open, inspect, click, type in, or control a local GUI application, prefer the computer tool. " +
-          "Do not use bash, AppleScript, osascript, open -a, or platform scripts to control GUI applications; those paths bypass Hana's app approval list and are more likely to hit OS privacy permissions. " +
-          "For a new app, use the computer start/list_apps flow so the input-area app approval prompt can ask the user to approve it."
+          "Do not use bash, AppleScript, osascript, open -a, or platform scripts to control GUI applications; those paths bypass Hana's Computer Use routing and are more likely to hit OS privacy permissions. " +
+          "If per-app approval is enabled, use the computer start/list_apps flow for a new app so the input-area prompt can ask the user to approve it."
       );
     }
 
@@ -1182,9 +1322,10 @@ export class Agent {
 
     // 团队协作（仅当存在其他 agent 时注入）
     // Subagent 场景下跳过：subagent 没有 subagent 工具，知道其他 agent 也使不上
-    if (this._listAgents && !forSubagent) {
+    const agentRoster = this._listAgents && !forSubagent ? this._listAgents() : [];
+    if (agentRoster.length > 0 && !forSubagent) {
       const myId = this.id;
-      const allAgents = this._listAgents();
+      const allAgents = agentRoster;
       const others = allAgents.filter(a => a.id !== myId);
       if (others.length > 0) {
         const roster = allAgents.map(a => {
@@ -1234,6 +1375,29 @@ export class Agent {
 
     const defaultPrompt = parts.join("\n");
     this._lastPromptBlocks = promptBlocks.map((block) => ({ ...block }));
+    const disabledPromptToolNames = getDisabledPromptToolNames(effectivePromptComposerConfig);
+    const activeToolNames = new Set(
+      this.getToolsSnapshot({
+        forceMemoryEnabled: memoryEnabled,
+        forceExperienceEnabled: experienceEnabled,
+      })
+        .map((tool) => tool?.name)
+        .filter((name) => !disabledPromptToolNames.has(name))
+        .filter(Boolean)
+    );
+    const builtInBlockIds = new Set(
+      promptBlocks
+        .map((block) => block?.id)
+        .filter(Boolean)
+    );
+    const runtimeFoundation = buildRuntimeFoundationPrompt({
+      isZh,
+      builtInBlockIds,
+      toolNames: activeToolNames,
+      agentRoster,
+      currentAgentId: this.id,
+      forSubagent,
+    });
     const composedPrompt = composePromptFromBlocks({
       config: effectivePromptComposerConfig,
       builtInBlocks: promptBlocks,
@@ -1247,15 +1411,18 @@ export class Agent {
         currentDateTime: dateTime,
         userProfile: userMd,
         personality: ishiki,
+        originPersonality,
         pinnedMemory,
         memory: pinnedMemory,
         skills: skillsPrompt,
         appendSystemPrompt,
         mood: MOOD_PROMPT,
+        runtimeFoundation,
         hanakoHome: path.dirname(path.dirname(this.agentDir)),
         mcpPluginDataDir: path.join(path.dirname(path.dirname(this.agentDir)), "plugin-data", "mcp"),
         mcpConfigPath: path.join(path.dirname(path.dirname(this.agentDir)), "plugin-data", "mcp", "config.json"),
       },
+      includeRuntimeFoundation,
     });
     return composedPrompt || defaultPrompt;
   }

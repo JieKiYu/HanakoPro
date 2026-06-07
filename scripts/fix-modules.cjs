@@ -12,6 +12,12 @@ const path = require("path");
 const {
   CRITICAL_BUNDLED_EXTERNALS,
 } = require("../desktop/src/shared/server-readiness.cjs");
+const {
+  describeNodePtySpawnHelperRequirement,
+  ensureNodePtySpawnHelperExecutable,
+  firstExistingNodePtySpawnHelper,
+  isExecutable,
+} = require("./node-pty-spawn-helper.cjs");
 
 const SERVER_NODE_MODULE_REQUIRED_FILES = [
   ...CRITICAL_BUNDLED_EXTERNALS.map((pkg) => `${pkg}/package.json`),
@@ -34,8 +40,18 @@ function missingBundledServerNodeModuleFiles(nodeModulesDir) {
   return missing;
 }
 
-function assertBundledServerNodeModulesReady(nodeModulesDir) {
+function assertBundledServerNodeModulesReady(nodeModulesDir, opts = {}) {
   const missing = missingBundledServerNodeModuleFiles(nodeModulesDir);
+  const nodePtyDir = path.join(nodeModulesDir, "node-pty");
+  const spawnHelperRequirement = describeNodePtySpawnHelperRequirement(opts);
+  const spawnHelper = spawnHelperRequirement
+    ? firstExistingNodePtySpawnHelper(nodePtyDir, opts)
+    : null;
+  if (spawnHelperRequirement && !spawnHelper) {
+    missing.push(`node_modules/${spawnHelperRequirement}`);
+  } else if (spawnHelper && !isExecutable(spawnHelper)) {
+    missing.push(`node_modules/${path.relative(nodeModulesDir, spawnHelper)} (not executable)`);
+  }
   if (missing.length > 0) {
     throw new Error(
       `[fix-modules] Packaged server node_modules is incomplete: ${missing.join(", ")}`,
@@ -61,7 +77,8 @@ function copyBundledServerNodeModules(serverDir, serverBuildModules, opts = {}) 
   const serverNodeModules = path.join(serverDir, "node_modules");
   fs.rmSync(serverNodeModules, { recursive: true, force: true });
   fs.cpSync(serverBuildModules, serverNodeModules, { recursive: true });
-  assertBundledServerNodeModulesReady(serverNodeModules);
+  ensureNodePtySpawnHelperExecutable(path.join(serverNodeModules, "node-pty"), opts);
+  assertBundledServerNodeModulesReady(serverNodeModules, opts);
 
   const log = typeof opts.log === "function" ? opts.log : console.log;
   log(`[fix-modules] 重建 server node_modules → ${serverNodeModules}`);
@@ -86,6 +103,8 @@ exports.default = async function (context) {
     : path.join(context.appOutDir, "resources");
   if (platformName === "mac") {
     const computerUseHelper = path.join(resourcesDir, "computer-use", "macos", "hana-computer-use-helper");
+    const computerUseApp = path.join(resourcesDir, "computer-use", "macos", "Hanako Computer Use.app");
+    const computerUseAppHelper = path.join(computerUseApp, "Contents", "MacOS", "hana-computer-use-helper");
     if (!fs.existsSync(computerUseHelper)) {
       throw new Error(
         `[fix-modules] Computer Use helper missing from macOS app resources: ${computerUseHelper}. ` +
@@ -96,12 +115,26 @@ exports.default = async function (context) {
     if ((mode & 0o111) === 0) {
       throw new Error(`[fix-modules] Computer Use helper is not executable: ${computerUseHelper}`);
     }
+    if (!fs.existsSync(computerUseAppHelper)) {
+      throw new Error(
+        `[fix-modules] Computer Use app helper missing from macOS app resources: ${computerUseAppHelper}. ` +
+        "Run scripts/build-computer-use-helper.mjs before electron-builder.",
+      );
+    }
+    const appHelperMode = fs.statSync(computerUseAppHelper).mode;
+    if ((appHelperMode & 0o111) === 0) {
+      throw new Error(`[fix-modules] Computer Use app helper is not executable: ${computerUseAppHelper}`);
+    }
   }
   const serverDir = path.join(resourcesDir, "server");
   const osDirName = platformName === "mac" ? "mac" : platformName === "windows" ? "win" : "linux";
   const serverBuildModules = path.join(__dirname, "..", "dist-server", `${osDirName}-${arch}`, "node_modules");
 
-  copyBundledServerNodeModules(serverDir, serverBuildModules);
+  const targetPlatform = platformName === "mac" ? "darwin" : platformName === "windows" ? "win32" : "linux";
+  copyBundledServerNodeModules(serverDir, serverBuildModules, {
+    platform: targetPlatform,
+    arch,
+  });
 
   if (!fs.existsSync(distModules)) return;
 

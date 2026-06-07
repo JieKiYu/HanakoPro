@@ -39,6 +39,14 @@ function writeModelsJson(data) {
   );
 }
 
+function writeModelsCache(data) {
+  fs.writeFileSync(
+    path.join(tmpDir, "models-cache.json"),
+    JSON.stringify(data, null, 2),
+    "utf-8",
+  );
+}
+
 function deepseekProvider(apiKey) {
   const provider = {
     base_url: "https://api.deepseek.com/v1",
@@ -58,6 +66,27 @@ async function getDeepseekApiKey(manager) {
 }
 
 describe("ModelManager AuthStorage ownership", () => {
+  it("reads provider model discovery cache without affecting available models", () => {
+    writeModelsCache({
+      volcengine: {
+        fetchedAt: "2026-06-05T08:00:00.000Z",
+        models: [
+          { id: "doubao-seedream-4-0-250828", name: "Seedream 4.0" },
+          { id: "doubao-seed-2-0-lite-260428", name: "Seed 2.0 Lite" },
+        ],
+      },
+    });
+
+    const manager = new ModelManager({ hanakoHome: tmpDir });
+
+    expect(manager.getCachedModelsForProvider("volcengine")).toEqual([
+      { id: "doubao-seedream-4-0-250828", name: "Seedream 4.0" },
+      { id: "doubao-seed-2-0-lite-260428", name: "Seed 2.0 Lite" },
+    ]);
+    expect(manager.availableModels).toEqual([]);
+    expect(manager.getCachedModelsForProvider("missing")).toEqual([]);
+  });
+
   it("migrates legacy API-key auth into added-models before clearing auth.json", async () => {
     writeAuth({
       deepseek: { type: "api_key", key: "sk-legacy-4d2a" },

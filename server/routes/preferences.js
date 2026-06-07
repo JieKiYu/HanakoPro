@@ -11,6 +11,7 @@
  */
 
 import { Hono } from "hono";
+import { spawn } from "child_process";
 import { emitAppEvent } from "../app-events.js";
 import { safeJson } from "../hono-helpers.js";
 import { debugLog } from "../../lib/debug-log.js";
@@ -42,7 +43,45 @@ function disabledComputerUseStatus(settings, { platform = process.platform } = {
   };
 }
 
-export function createPreferencesRoute(engine, { platform = process.platform } = {}) {
+const MACOS_PRIVACY_PANES = {
+  accessibility: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+  screenRecording: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+  privacy: "x-apple.systempreferences:com.apple.preference.security",
+};
+
+function normalizePermissionName(name) {
+  return String(name || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
+}
+
+function firstMissingComputerUsePermission(permissions = []) {
+  if (!Array.isArray(permissions)) return null;
+  const missing = permissions.filter((permission) => permission?.granted === false);
+  const accessibility = missing.find((permission) => normalizePermissionName(permission?.name).includes("accessibility"));
+  if (accessibility) return "accessibility";
+  const screen = missing.find((permission) => {
+    const name = normalizePermissionName(permission?.name);
+    return name.includes("screenrecording") || name.includes("screencapture");
+  });
+  if (screen) return "screenRecording";
+  return missing.length ? "privacy" : null;
+}
+
+function openMacosPrivacyPane(kind, { platform = process.platform, spawnImpl = spawn } = {}) {
+  if (platform !== "darwin") return { opened: false, reason: "unsupported-platform" };
+  const url = MACOS_PRIVACY_PANES[kind] || MACOS_PRIVACY_PANES.privacy;
+  try {
+    const child = spawnImpl("open", [url], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref?.();
+    return { opened: true, url, kind };
+  } catch (err) {
+    return { opened: false, url, kind, reason: err?.message || String(err) };
+  }
+}
+
+export function createPreferencesRoute(engine, { platform = process.platform, spawnImpl = spawn } = {}) {
   const route = new Hono();
 
   // 读取全局模型 + 搜索配置
@@ -230,8 +269,16 @@ export function createPreferencesRoute(engine, { platform = process.platform } =
       const body = await safeJson(c);
       const providerId = body && typeof body === "object" ? body.providerId || null : null;
       const result = await engine.getComputerHost?.()?.requestPermissions?.({}, providerId);
-      emitAppEvent(engine, "computer-use-permissions-requested", { providerId: providerId || result?.providerId || null });
-      return c.json({ ok: true, result });
+      const nextMissingPermission = firstMissingComputerUsePermission(result?.permissions);
+      const systemSettings = nextMissingPermission
+        ? openMacosPrivacyPane(nextMissingPermission, { platform, spawnImpl })
+        : { opened: false, reason: "no-missing-permission" };
+      emitAppEvent(engine, "computer-use-permissions-requested", {
+        providerId: providerId || result?.providerId || null,
+        nextMissingPermission,
+        systemSettings,
+      });
+      return c.json({ ok: true, result, nextMissingPermission, systemSettings });
     } catch (err) {
       return c.json({ error: err.message }, 400);
     }

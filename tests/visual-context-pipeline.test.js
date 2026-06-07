@@ -191,4 +191,30 @@ describe("VisualContextPipeline", () => {
     expect(callText).not.toHaveBeenCalled();
     expect(result).toEqual({ messages, injected: 0 });
   });
+
+  it("does not analyze assistant native generated images as next-turn visual context", async () => {
+    const { bridge, callText } = makeBridge();
+    const messages = [
+      { role: "user", content: "生成头像" },
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "生成好了。" },
+          { type: "image", mimeType: "image/png", data: "GENERATED_IMAGE_BASE64" },
+        ],
+      },
+      { role: "user", content: "接着回复" },
+    ];
+
+    const result = await adaptVisualContextMessages({
+      messages,
+      sessionPath: "/tmp/session.jsonl",
+      targetModel: { id: "deepseek-chat", provider: "deepseek", input: ["text"] },
+      visionBridge: bridge,
+      isVisionAuxiliaryEnabled: () => true,
+    });
+
+    expect(callText).not.toHaveBeenCalled();
+    expect(result).toEqual({ messages, injected: 0 });
+  });
 });

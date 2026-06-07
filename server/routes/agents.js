@@ -570,6 +570,7 @@ export function createAgentsRoute(engine) {
         cwd: typeof body.cwd === "string" && body.cwd.trim() ? body.cwd : null,
         memoryEnabled: body.memoryEnabled !== false,
         workspaceFolders,
+        includeRuntimeFoundation: body.includeRuntimeFoundation === true,
         ...(hasOwn(body, "promptComposer") ? { promptComposer: body.promptComposer } : {}),
       });
       return c.json(preview);

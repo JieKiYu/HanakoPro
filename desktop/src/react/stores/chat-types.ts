@@ -168,7 +168,7 @@ export interface ChatMessage {
 
 export type ChatListItem =
   | { type: 'message'; data: ChatMessage }
-  | { type: 'compaction'; id: string; yuan: string };
+  | { type: 'compaction'; id: string; yuan: string; afterMessageId?: string | null; timestamp?: number | string | null };
 
 // ── Per-session 模型快照 ──
 // 挂在 chat-slice 的 sessionModelsByPath keyed map 上，

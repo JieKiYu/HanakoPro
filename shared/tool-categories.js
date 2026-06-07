@@ -35,6 +35,7 @@ export const STANDARD_TOOL_NAMES = [
   "recall_experience",
   "check_pending_tasks",
   "current_status",
+  "session_goal",
   "wait",
   "stop_task",
   // 共享终端（与 desktop 终端窗口同一 PTY 池）

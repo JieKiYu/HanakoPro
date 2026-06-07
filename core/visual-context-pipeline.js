@@ -127,6 +127,7 @@ async function sessionFileResource(file) {
 
 async function collectMessageResources(msg, options) {
   if (!msg || typeof msg !== "object") return [];
+  if (msg.role === "assistant") return [];
   if (contentText(msg.content).includes(VISION_CONTEXT_START)) return [];
   const resources = [];
   if (Array.isArray(msg.content)) {
