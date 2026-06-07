@@ -58,9 +58,18 @@ function findByExtension(dir, extensions) {
   return result;
 }
 
+function removeCodeSignTempFiles() {
+  const files = findByExtension(APP, [".cstemp"]);
+  for (const file of files) {
+    fs.rmSync(file, { force: true });
+  }
+  if (files.length) console.log(`Removed ${files.length} stale codesign temp file(s)`);
+}
+
 // 1. 签 server 里的所有 Mach-O 文件（node binary + .node addons）
 console.log(`Signing ${APP}`);
 console.log(`Using signing identity: ${SIGN_IDENTITY === "-" ? "ad-hoc (-)" : SIGN_IDENTITY}`);
+removeCodeSignTempFiles();
 
 const serverDir = path.join(APP, "Contents", "Resources", "server");
 if (fs.existsSync(serverDir)) {
@@ -118,5 +127,6 @@ for (const entry of fs.readdirSync(frameworks)) {
 sign(APP, `--entitlements "${ENT}"`);
 
 // 5. 验证
+removeCodeSignTempFiles();
 execSync(`codesign --verify --deep --strict "${APP}"`, { stdio: "inherit" });
 console.log("✓ Signed and verified");

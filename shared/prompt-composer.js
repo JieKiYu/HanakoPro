@@ -29,7 +29,10 @@ export const DEFAULT_SIMPLE_PROMPT_TEMPLATE_ID = "hanako-agentic-coding-assistan
 
 export const PROMPT_COMPOSER_MODES = ["blocks", "simple", "origin"];
 
-export const DEFAULT_ORIGIN_KEEP_BLOCK_ORDER = [];
+export const DEFAULT_ORIGIN_KEEP_BLOCK_ORDER = [
+  "experience",
+  "session-files",
+];
 
 export const DEFAULT_ORIGIN_ROOT_PROMPT = `# 核
 
@@ -466,6 +469,23 @@ function compactSection(title, content) {
   return `# ${title}\n\n${body}`;
 }
 
+function composeKeptOriginBlocks(normalized, builtInBlocks, variables) {
+  const keepBlockIds = normalizePromptBlockIds(normalized.origin?.keepBlockIds);
+  if (!keepBlockIds.length) return [];
+  const route = {
+    id: "default",
+    blockIds: keepBlockIds,
+    blockOverrides: [],
+  };
+  const blockMap = buildPromptBlockMap(normalized, builtInBlocks, variables, route);
+  const parts = [];
+  for (const id of keepBlockIds) {
+    const content = blockMap.get(id);
+    if (typeof content === "string" && content.trim()) parts.push(content.trim());
+  }
+  return parts;
+}
+
 function composeOriginPrompt(normalized, builtInBlocks, variables, options = {}) {
   const origin = normalized.origin || {};
   const root = renderPromptValue(origin.root, variables);
@@ -511,6 +531,8 @@ function composeOriginPrompt(normalized, builtInBlocks, variables, options = {})
 
   const conduct = renderPromptValue(origin.conduct, variables);
   if (conduct) parts.push(conduct);
+
+  parts.push(...composeKeptOriginBlocks(normalized, builtInBlocks, variables));
 
   const runtimeFoundation = options.includeRuntimeFoundation === true
     ? renderPromptValue(variables?.runtimeFoundation, variables)

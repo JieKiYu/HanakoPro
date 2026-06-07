@@ -12,4 +12,8 @@ describe('package build boundary', () => {
     expect(packageJson.workspaces).toEqual(['packages/*']);
     expect(packageJson.build?.files).toContain('!packages/**');
   });
+
+  it('leaves root native modules untouched during electron-builder packaging', () => {
+    expect(packageJson.build?.npmRebuild).toBe(false);
+  });
 });

@@ -27,6 +27,15 @@ interface BrowserSessionState {
   unavailableReason: string | null;
 }
 
+function readSessionViewMode(): SessionViewMode {
+  const saved = globalThis.localStorage?.getItem('hana-session-view-mode');
+  return saved === 'project' ? 'project' : 'time';
+}
+
+function writeSessionViewMode(mode: SessionViewMode): void {
+  globalThis.localStorage?.setItem('hana-session-view-mode', mode);
+}
+
 function normalizeBrowserSessionStates(data: unknown): Record<string, BrowserSessionState> {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return {};
   const result: Record<string, BrowserSessionState> = {};
@@ -57,7 +66,9 @@ function normalizeBrowserSessionStates(data: unknown): Record<string, BrowserSes
 
 export function SessionList() {
   return <SessionListInner />;
-}interface SessionSearchResult {
+}
+
+interface SessionSearchResult {
   path: string;
   title: string | null;
   firstMessage: string;
@@ -87,6 +98,7 @@ function SessionListInner() {
   const closingBrowserSessionsRef = useRef(new Set<string>());
   const [searchQuery, setSearchQuery] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const [viewMode, setViewMode] = useState<SessionViewMode>(() => readSessionViewMode());
 
   const setVisibleBrowserSessions = useCallback((data: unknown) => {
     const states = normalizeBrowserSessionStates(data);
@@ -231,15 +243,10 @@ function SessionListInner() {
     return <div className={styles.sessionEmpty}>{t('sidebar.empty')}</div>;
   }
 
-  const [viewMode, setViewMode] = useState<SessionViewMode>(() => {
-    const saved = localStorage.getItem('hana-session-view-mode');
-    return saved === 'project' ? 'project' : 'time';
-  });
-
   const toggleViewMode = useCallback(() => {
     setViewMode(prev => {
       const next = prev === 'time' ? 'project' : 'time';
-      localStorage.setItem('hana-session-view-mode', next);
+      writeSessionViewMode(next);
       return next;
     });
   }, []);

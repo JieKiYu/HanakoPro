@@ -28,6 +28,7 @@ const initialStateFactory = (): MockState => ({
   scrollPositions: {} as Record<string, number>,
   todosLiveVersionBySession: {} as Record<string, number>,
   todosBySession: {} as Record<string, unknown>,
+  sessionGoalByPath: {} as Record<string, unknown>,
   sessionStreams: {} as Record<string, unknown>,
   attachedFiles: [],
   attachedFilesBySession: {} as Record<string, unknown>,
@@ -194,6 +195,10 @@ function installStoreMethods() {
   s.setSessionTodosForPath = vi.fn((path: string, todos: unknown[]) => {
     const bySession = mockState.todosBySession as Record<string, unknown>;
     bySession[path] = todos;
+  });
+  s.setSessionGoalForPath = vi.fn((path: string, goal: unknown) => {
+    const bySession = mockState.sessionGoalByPath as Record<string, unknown>;
+    bySession[path] = goal;
   });
   s.setInlineError = vi.fn((path: string, text: string) => {
     const inlineErrors = mockState.inlineErrors as Record<string, string | null>;

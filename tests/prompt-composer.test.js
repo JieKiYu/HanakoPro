@@ -389,7 +389,7 @@ describe("prompt composer", () => {
     expect(content).toContain("# 忆\n\n用户档案：\nlikes compact answers");
     expect(content).toContain("置顶记忆：\nprefers Dao mode");
     expect(content).toContain("# 器\n\nbrainstorming-skill");
-    expect(content).not.toContain("Call current_status for UI references.");
+    expect(content).toContain("Call current_status for UI references.");
     expect(content).not.toContain("Use a todo list for everything.");
     expect(content).toContain("# 令\n\n本轮特别指令");
     expect(content).toContain(DEFAULT_ORIGIN_MOOD_PROMPT);

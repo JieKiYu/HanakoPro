@@ -9,18 +9,21 @@ import { browseAgent, switchToAgent, loadSettingsConfig, loadAgents } from '../a
 import { AgentCardStack } from './agent/AgentCardStack';
 import { YuanSelector } from './agent/YuanSelector';
 import { AgentToolsSection } from './agent/AgentToolsSection';
+import { MemorySection } from './agent/AgentMemory';
 import { CharacterCardPreviewOverlay, type CharacterCardPlan } from '../overlays/CharacterCardPreviewOverlay';
 import styles from '../Settings.module.css';
 
 export function AgentTab() {
   const {
-    agents, currentAgentId, settingsAgentId, settingsConfig,
+    agents, currentAgentId, settingsAgentId, settingsConfig, currentPins, globalModelsConfig,
   } = useSettingsStore(
     useShallow(s => ({
       agents: s.agents,
       currentAgentId: s.currentAgentId,
       settingsAgentId: s.settingsAgentId,
       settingsConfig: s.settingsConfig,
+      currentPins: s.currentPins,
+      globalModelsConfig: s.globalModelsConfig,
     }))
   );
   const showToast = useSettingsStore(s => s.showToast);
@@ -28,6 +31,7 @@ export function AgentTab() {
   const getSettingsAgentId = useSettingsStore(s => s.getSettingsAgentId);
 
   const selectedSettingsAgentId = settingsAgentId || currentAgentId;
+  const isViewingOther = selectedSettingsAgentId !== currentAgentId;
 
   const [agentName, setAgentName] = useState('');
   const [identity, setIdentity] = useState('');
@@ -85,6 +89,14 @@ export function AgentTab() {
 
   const hasAvailableToolsField = !!settingsConfig && Object.prototype.hasOwnProperty.call(settingsConfig, 'availableTools');
   const availableTools = hasAvailableToolsField ? settingsConfig?.availableTools : undefined;
+  const modelConfig = {
+    ...(globalModelsConfig?.models || {}),
+    ...(settingsConfig?.models || {}),
+  };
+  const hasMemoryModel = !!(modelConfig.chat || modelConfig.utility_large || modelConfig.utility);
+  const memoryEnabled = settingsConfig?.memory?.enabled !== false;
+  const memoryUse = settingsConfig?.memory?.use !== false;
+  const memoryGenerate = settingsConfig?.memory?.generate !== false;
 
   const saveAgent = async () => {
     try {
@@ -322,6 +334,15 @@ export function AgentTab() {
           </button>
         </div>
       </section>
+
+      <MemorySection
+        hasMemoryModel={hasMemoryModel}
+        memoryEnabled={memoryEnabled}
+        memoryUse={memoryUse}
+        memoryGenerate={memoryGenerate}
+        isViewingOther={isViewingOther}
+        currentPins={currentPins}
+      />
 
       {/* 默认关闭 update_settings 和 dm，与后端 DEFAULT_DISABLED_TOOL_NAMES 保持同步 */}
       <AgentToolsSection

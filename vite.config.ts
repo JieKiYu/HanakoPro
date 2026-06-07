@@ -30,7 +30,7 @@ const CSP_PROFILES: Record<string, string> = {
     "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: file:",
   // 终端窗口：需要 WS/HTTP 到 server，xterm 使用 inline style
   'terminal.html':
-    "default-src 'self'; connect-src 'self' ws://127.0.0.1:* http://127.0.0.1:*; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:",
+    "default-src 'self'; connect-src 'self' ws://127.0.0.1:* http://127.0.0.1:*; img-src 'self' data: file:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:",
   'desktop-pet.html':
     "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: file:",
 };

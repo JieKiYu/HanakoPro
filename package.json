@@ -132,6 +132,7 @@
     "appId": "com.hanakopro.app",
     "productName": "HanakoPro",
     "asar": true,
+    "npmRebuild": false,
     "afterPack": "./scripts/fix-modules.cjs",
     "extraMetadata": {
       "main": "desktop/main.bundle.cjs"
@@ -217,7 +218,7 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
+      "allowToChangeInstallationDirectory": false,
       "include": "build/installer.nsh",
       "installerIcon": "desktop/src/icon.ico",
       "uninstallerIcon": "desktop/src/icon.ico"

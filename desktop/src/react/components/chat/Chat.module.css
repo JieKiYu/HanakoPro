@@ -429,7 +429,7 @@
 .msgActions {
     position: absolute;
     bottom: 4px;
-    right: 0;
+    right: 4px;
     opacity: 0;
     transition: opacity var(--duration-fast);
     z-index: 2;
