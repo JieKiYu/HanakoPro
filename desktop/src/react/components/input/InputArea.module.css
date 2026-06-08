@@ -617,6 +617,15 @@
     transform: rotate(180deg);
 }
 
+.model-pill[data-open="true"] {
+    color: var(--accent);
+    border-color: rgba(var(--accent-rgb), 0.25);
+}
+
+.model-pill[data-open="true"] .model-arrow {
+    transform: rotate(180deg);
+}
+
 .model-dropdown {
     display: none;
     position: absolute;

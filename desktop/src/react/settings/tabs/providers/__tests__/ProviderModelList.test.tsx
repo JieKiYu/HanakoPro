@@ -112,13 +112,55 @@ describe('ProviderModelList', () => {
     });
   });
 
-  it('shows image, video and reasoning capability icons after the added model id', () => {
+  it('keeps the add-model dropdown open through the opening autofocus scroll', async () => {
+    const now = vi.spyOn(performance, 'now');
+    now.mockReturnValue(1000);
+
+    render(
+      <ProviderModelList
+        providerId="k+"
+        summary={{
+          type: 'api-key',
+          auth_type: 'api-key',
+          display_name: 'K+',
+          base_url: 'https://api.ticketpro.cc/v1',
+          api: 'openai-responses',
+          api_key: 'sk-test',
+          models: [],
+          custom_models: [],
+          has_credentials: true,
+          supports_oauth: false,
+          is_coding_plan: false,
+          can_delete: true,
+        }}
+        onRefresh={vi.fn(async () => {})}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'settings.api.addModel' }));
+    expect(await screen.findByPlaceholderText('settings.api.searchModel')).toBeInTheDocument();
+
+    now.mockReturnValue(1080);
+    act(() => {
+      window.dispatchEvent(new Event('scroll'));
+    });
+    expect(screen.getByPlaceholderText('settings.api.searchModel')).toBeInTheDocument();
+
+    now.mockReturnValue(1240);
+    act(() => {
+      window.dispatchEvent(new Event('scroll'));
+    });
+    expect(screen.queryByPlaceholderText('settings.api.searchModel')).not.toBeInTheDocument();
+  });
+
+  it('shows image, video, audio and reasoning capability icons after the added model id', () => {
     mocks.lookupModelMeta.mockImplementation((id: unknown, provider: unknown) => {
       if (id === 'doubao-seed-2-0-lite-260428' && provider === 'volcengine') {
         return {
           name: 'Doubao Seed 2.0 Lite',
           image: true,
           video: true,
+          audio: true,
           reasoning: true,
           context: 256000,
         };
@@ -150,7 +192,8 @@ describe('ProviderModelList', () => {
     const id = screen.getByText('doubao-seed-2-0-lite-260428');
     expect(id.nextElementSibling).toHaveAttribute('title', 'settings.api.capability.image');
     expect(id.nextElementSibling?.nextElementSibling).toHaveAttribute('title', 'settings.api.capability.video');
-    expect(id.nextElementSibling?.nextElementSibling?.nextElementSibling).toHaveAttribute('title', 'settings.api.capability.reasoning');
+    expect(id.nextElementSibling?.nextElementSibling?.nextElementSibling).toHaveAttribute('title', 'settings.api.capability.audio');
+    expect(id.nextElementSibling?.nextElementSibling?.nextElementSibling?.nextElementSibling).toHaveAttribute('title', 'settings.api.capability.reasoning');
   });
 
   it('persists discovered relay model context when adding a model', async () => {

@@ -1,0 +1,26 @@
+/* Provider group headers share this baseline with SelectWidget.providerInset. */
+.groupHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 6px 0.65rem 2px;
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.7;
+  user-select: none;
+}
+
+.icon {
+  width: 0.9rem;
+  height: 0.9rem;
+  flex-shrink: 0;
+}
+
+.label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

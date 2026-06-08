@@ -86,4 +86,23 @@ describe('ProviderStep', () => {
     expect(onProviderReady).toHaveBeenCalledWith('kimi-coding', 'https://api.kimi.com/coding/', 'anthropic-messages', 'sk-test');
     expect(goToStep).toHaveBeenCalledWith(3);
   });
+
+  it('shows an aligned API type label for custom provider configuration', () => {
+    render(
+      <ProviderStep
+        preview={false}
+        hanaFetch={vi.fn()}
+        goToStep={vi.fn()}
+        showError={vi.fn()}
+        onProviderReady={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'onboarding.provider.selectPlaceholder' }));
+    fireEvent.click(screen.getByRole('button', { name: 'onboarding.provider.custom' }));
+
+    expect(screen.getByText('onboarding.provider.customName')).toBeInTheDocument();
+    expect(screen.getByText('onboarding.provider.customUrl')).toBeInTheDocument();
+    expect(screen.getByText('settings.providers.apiType')).toBeInTheDocument();
+  });
 });

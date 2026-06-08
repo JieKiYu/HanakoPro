@@ -3,12 +3,6 @@ import type { Session } from '../types';
 export type SessionViewMode = 'time' | 'project';
 export type DateGroup = 'today' | 'thisWeek' | 'earlier';
 
-export type DateSubSection = {
-  group: DateGroup;
-  titleKey: `time.${DateGroup}`;
-  items: Session[];
-};
-
 export type SessionSection =
   | {
       id: 'pinned';
@@ -28,7 +22,7 @@ export type SessionSection =
       kind: 'project';
       title: string;
       cwd: string | null;
-      subSections: DateSubSection[];
+      items: Session[];
     };
 
 interface BuildSessionSectionsOptions {
@@ -92,7 +86,7 @@ export function buildSessionSections(
   });
 
   if (mode === 'project') {
-    return [...sections, ...buildProjectSections(regular, options.now ?? new Date())];
+    return [...sections, ...buildProjectSections(regular)];
   }
 
   if (mode === 'time') {
@@ -115,7 +109,7 @@ export function projectName(cwd: string | null): string {
   return segments[segments.length - 1] || normalized;
 }
 
-function buildProjectSections(regular: Session[], now: Date): SessionSection[] {
+function buildProjectSections(regular: Session[]): SessionSection[] {
   const sections: SessionSection[] = [];
 
   // Group by project name (last folder) to avoid duplicate project folders
@@ -151,24 +145,12 @@ function buildProjectSections(regular: Session[], now: Date): SessionSection[] {
   for (const entry of entries) {
     const title = entry.cwd ? projectName(entry.cwd) : 'No Project';
 
-    // Build date sub-sections within this project
-    const subSections: DateSubSection[] = [];
-    const dateGroups: Record<DateGroup, Session[]> = { today: [], thisWeek: [], earlier: [] };
-    for (const s of entry.sessions) {
-      dateGroups[getSessionDateGroup(s.modified, now)].push(s);
-    }
-    for (const group of DATE_GROUP_ORDER) {
-      const items = dateGroups[group];
-      if (items.length === 0) continue;
-      subSections.push({ group, titleKey: `time.${group}`, items });
-    }
-
     sections.push({
       id: `project:${entry.projKey}`,
       kind: 'project',
       title,
       cwd: entry.cwd,
-      subSections,
+      items: entry.sessions,
     });
   }
 

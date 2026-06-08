@@ -2,7 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InputArea } from '../../components/InputArea';
 import { useStore } from '../../stores';
 
@@ -219,9 +219,29 @@ function tiptapKeyDownHandler(): ((view: unknown, event: KeyboardEvent) => boole
   return editorProps?.handleKeyDown as ((view: unknown, event: KeyboardEvent) => boolean | void) | undefined;
 }
 
+function installImageCompressionMocks() {
+  const close = vi.fn();
+  vi.stubGlobal('createImageBitmap', vi.fn(async () => ({
+    width: 4000,
+    height: 3000,
+    close,
+  })));
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+    drawImage: vi.fn(),
+  } as unknown as CanvasRenderingContext2D);
+  vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((callback: BlobCallback, type?: string) => {
+    callback(new Blob([new Uint8Array([4, 5, 6])], { type: type || 'image/jpeg' }));
+  });
+}
+
 describe('InputArea paste and slash menu behavior', () => {
-  beforeEach(() => {
+  afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  beforeEach(() => {
     vi.clearAllMocks();
     mocks.editorOptions = undefined;
     mocks.editorText = '';
@@ -303,5 +323,59 @@ describe('InputArea paste and slash menu behavior', () => {
       expect(mocks.loadSessions).toHaveBeenCalledTimes(1);
       expect(mocks.wsSend).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it('compresses oversized pasted images before upload-blob', async () => {
+    installImageCompressionMocks();
+    mocks.hanaFetch.mockImplementation(async (path: string) => {
+      if (path === '/api/upload-blob') {
+        return new Response(JSON.stringify({
+          uploads: [{
+            fileId: 'sf_compressed_paste',
+            dest: '/hana/session-files/pasted.jpg',
+            name: 'pasted.jpg',
+            isDirectory: false,
+          }],
+        }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    });
+    render(React.createElement(InputArea));
+
+    const preventDefault = vi.fn();
+    const file = new File([new Uint8Array(900 * 1024)], 'clipboard.png', { type: 'image/png' });
+    const handled = tiptapPasteHandler()?.(null, {
+      preventDefault,
+      clipboardData: {
+        items: [{
+          kind: 'file',
+          type: 'image/png',
+          getAsFile: () => file,
+        }],
+      },
+    } as unknown as ClipboardEvent);
+
+    expect(handled).toBe(true);
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(mocks.hanaFetch).toHaveBeenCalledWith('/api/upload-blob', expect.objectContaining({
+        method: 'POST',
+        body: expect.any(String),
+      }));
+    });
+    const uploadCall = mocks.hanaFetch.mock.calls.find(([path]) => path === '/api/upload-blob');
+    const body = JSON.parse(String(uploadCall?.[1]?.body));
+    expect(body).toMatchObject({
+      name: 'input.pastedImage.jpg',
+      mimeType: 'image/jpeg',
+      base64Data: 'BAUG',
+      sessionPath: '/session/input.jsonl',
+    });
+    expect(useStore.getState().attachedFiles).toEqual([{
+      fileId: 'sf_compressed_paste',
+      path: '/hana/session-files/pasted.jpg',
+      name: 'pasted.jpg',
+      isDirectory: false,
+    }]);
   });
 });

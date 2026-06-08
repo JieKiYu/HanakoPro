@@ -63,9 +63,11 @@ export function formatSessionDate(isoStr: string): string {
   if (diffHr < 24) return t('time.hoursAgo', { n: diffHr });
   if (diffDay < 7) return t('time.daysAgo', { n: diffDay });
 
-  const m = date.getMonth() + 1;
-  const d = date.getDate();
-  return t('time.dateFormat', { m, d });
+  const diffWeek = Math.floor(diffDay / 7);
+  if (diffWeek < 4) return t('time.weeksAgo', { n: diffWeek });
+
+  const diffMonth = Math.max(1, Math.floor(diffDay / 28));
+  return t('time.monthsAgo', { n: diffMonth });
 }
 
 export function cronToHuman(schedule: number | string): string {

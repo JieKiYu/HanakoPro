@@ -174,6 +174,89 @@ describe('ToolGroupBlock', () => {
     expect(screen.getByText('正在准备写入文件内容')).toBeTruthy();
   });
 
+  it('expands completed thinking when the block contains reasoning text', () => {
+    render(
+      <AssistantMessage
+        showAvatar={false}
+        sessionPath="/sessions/main.jsonl"
+        readOnly
+        message={{
+          id: 'a-thinking',
+          role: 'assistant',
+          blocks: [{
+            type: 'thinking',
+            sealed: true,
+            content: '我会先打开网页，再点击动画入口。',
+          }],
+        }}
+      />,
+    );
+
+    expect(screen.queryByText('我会先打开网页，再点击动画入口。')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '› thinking.done' }));
+    expect(screen.getByText('我会先打开网页，再点击动画入口。')).toBeVisible();
+  });
+
+  it('hides empty completed thinking without changing the following tool group', () => {
+    render(
+      <AssistantMessage
+        showAvatar={false}
+        sessionPath="/sessions/main.jsonl"
+        readOnly
+        message={{
+          id: 'a-empty-thinking-tool',
+          role: 'assistant',
+          blocks: [
+            { type: 'thinking', sealed: true, content: '' },
+            {
+              type: 'tool_group',
+              collapsed: false,
+              tools: [{
+                name: 'browser',
+                args: { action: 'navigate', url: 'https://www.bilibili.com/' },
+                done: true,
+                success: true,
+              }],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.queryByText('thinking.done')).toBeNull();
+    expect(screen.getByText('tool._fallback.done')).toBeTruthy();
+  });
+
+  it('hides completed thinking that only contains invisible control characters', () => {
+    render(
+      <AssistantMessage
+        showAvatar={false}
+        sessionPath="/sessions/main.jsonl"
+        readOnly
+        message={{
+          id: 'a-invisible-thinking-tool',
+          role: 'assistant',
+          blocks: [
+            { type: 'thinking', sealed: true, content: '\u200B\u200F\u2060\uFEFF\n\t' },
+            {
+              type: 'tool_group',
+              collapsed: false,
+              tools: [{
+                name: 'status',
+                args: {},
+                done: true,
+                success: true,
+              }],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.queryByText('thinking.done')).toBeNull();
+    expect(screen.getByText('tool._fallback.done')).toBeTruthy();
+  });
+
   it('shows only one browser reply tag at the latest assistant message for a completed turn', async () => {
     const items: ChatListItem[] = [
       {

@@ -1276,8 +1276,12 @@
     display: inline-flex;
     align-items: center;
     gap: 0.2rem;
+    padding: 0;
+    border: 0;
+    background: transparent;
     cursor: pointer;
     color: var(--text-muted);
+    font: inherit;
     font-style: italic;
     user-select: none;
     list-style: none;
@@ -1324,7 +1328,7 @@
 }
 
 /* 隐藏折叠状态下的内容 */
-.thinkingBlock:not([open]) .thinkingBlockBody {
+.thinkingBlock[data-open="false"] .thinkingBlockBody {
     display: none;
 }
 
@@ -1610,15 +1614,18 @@
 /* ── 图片输出卡片 ── */
 
 .imageOutputCard {
-    display: inline-flex;
+    display: flex;
     flex-direction: column;
+    width: var(--chat-code-block-width, 100%);
     max-width: 100%;
+    box-sizing: border-box;
     margin: var(--space-sm) 0;
     padding: 0.3rem;
     background: var(--bg-card, var(--bg));
     border: 0.5px solid var(--border, rgba(0,0,0,0.08));
     border-radius: var(--radius-chat-card);
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+    overflow: hidden;
     transition: border-color var(--duration-fast);
 }
 
@@ -1628,8 +1635,11 @@
 
 .imageOutputPreview {
     display: block;
+    width: 100%;
     max-width: 100%;
-    max-height: 450px;
+    max-height: min(56vh, 420px);
+    height: auto;
+    box-sizing: border-box;
     object-fit: contain;
     border-radius: var(--radius-chat-card-inner);
 }
@@ -1823,12 +1833,19 @@
 /* ── 浏览器截图 ── */
 
 .browserScreenshot {
+    width: var(--chat-code-block-width, 100%);
+    max-width: 100%;
+    box-sizing: border-box;
     margin: 8px 0;
-    max-width: 600px;
 }
 
 .browserScreenshot img {
+    display: block;
+    width: 100%;
     max-width: 100%;
+    max-height: min(56vh, 420px);
+    box-sizing: border-box;
+    object-fit: contain;
     border-radius: var(--radius-chat-card);
     border: 1px solid var(--border);
     cursor: pointer;

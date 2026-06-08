@@ -24,12 +24,9 @@ describe('markdown link colors', () => {
 
   it('keeps dark-theme markdown links light enough for dark surfaces', () => {
     const midnight = readFile('desktop/src/themes/midnight.css');
-    const midnightContrast = readFile('desktop/src/themes/midnight-contrast.css');
 
-    for (const css of [midnight, midnightContrast]) {
-      expect(css).toMatch(/--link:\s*#B9E2FF/);
-      expect(css).toMatch(/--link-hover:\s*#D7F0FF/);
-      expect(css).toMatch(/--link-rgb:\s*185,\s*226,\s*255/);
-    }
+    expect(midnight).toMatch(/--link:\s*#B9E2FF/);
+    expect(midnight).toMatch(/--link-hover:\s*#D7F0FF/);
+    expect(midnight).toMatch(/--link-rgb:\s*185,\s*226,\s*255/);
   });
 });

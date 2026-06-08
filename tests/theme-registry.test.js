@@ -45,21 +45,17 @@ describe('theme-registry', () => {
   });
 
   describe('THEMES 完整性', () => {
-    it('恰好 12 条', () => {
-      expect(Object.keys(reg.THEMES)).toHaveLength(12);
+    it('恰好 4 条', () => {
+      expect(Object.keys(reg.THEMES)).toHaveLength(4);
     });
 
     it('包含所有已知主题 id', () => {
       expect(Object.keys(reg.THEMES).sort()).toEqual([
-        'absolutely', 'contemplation', 'deep-think',
-        'delve', 'grass-aroma', 'high-contrast', 'indigo-porcelain',
-        'midnight', 'midnight-contrast', 'mo-bai', 'new-warm-paper', 'warm-paper',
+        'high-contrast', 'midnight', 'mo-bai', 'warm-paper',
       ]);
     });
 
-    it.each(['warm-paper', 'midnight', 'high-contrast', 'grass-aroma',
-             'mo-bai', 'indigo-porcelain', 'contemplation', 'absolutely',
-             'delve', 'deep-think', 'new-warm-paper', 'midnight-contrast'])(
+    it.each(['warm-paper', 'midnight', 'high-contrast', 'mo-bai'])(
       '"%s" 每条都有完整字段',
       (id) => {
         const t = reg.THEMES[id];
@@ -74,11 +70,6 @@ describe('theme-registry', () => {
       }
     );
 
-    it('高对比暗色主题紧跟新暖纸，保证设置页显示在它右侧', () => {
-      const ids = reg.getThemeIds();
-      expect(ids[ids.indexOf('new-warm-paper') + 1]).toBe('midnight-contrast');
-    });
-
     it('THEMES 及每个条目都是 frozen（防止意外 mutation）', () => {
       expect(Object.isFrozen(reg.THEMES)).toBe(true);
       for (const id of Object.keys(reg.THEMES)) {
@@ -91,11 +82,17 @@ describe('theme-registry', () => {
     it('合法主题 id 原样返回', () => {
       expect(reg.migrateSavedTheme('warm-paper')).toBe('warm-paper');
       expect(reg.migrateSavedTheme('midnight')).toBe('midnight');
-      expect(reg.migrateSavedTheme('new-warm-paper')).toBe('new-warm-paper');
+      expect(reg.migrateSavedTheme('mo-bai')).toBe('mo-bai');
     });
 
-    it('旧新暖纸主题 id 迁移到新 id', () => {
-      expect(reg.migrateSavedTheme('claude-design')).toBe('new-warm-paper');
+    it('已移除的浅色主题 id 迁移到默认暖纸', () => {
+      for (const id of ['claude-design', 'indigo-porcelain', 'grass-aroma', 'contemplation', 'absolutely', 'delve', 'deep-think', 'new-warm-paper']) {
+        expect(reg.migrateSavedTheme(id)).toBe('warm-paper');
+      }
+    });
+
+    it('已移除的深色高对比主题 id 迁移到青夜', () => {
+      expect(reg.migrateSavedTheme('midnight-contrast')).toBe('midnight');
     });
 
     it('"auto" 原样返回', () => {
@@ -120,8 +117,8 @@ describe('theme-registry', () => {
       expect(reg.resolveSavedTheme('midnight', true)).toEqual({
         stored: 'midnight', concrete: 'midnight',
       });
-      expect(reg.resolveSavedTheme('grass-aroma', false)).toEqual({
-        stored: 'grass-aroma', concrete: 'grass-aroma',
+      expect(reg.resolveSavedTheme('mo-bai', false)).toEqual({
+        stored: 'mo-bai', concrete: 'mo-bai',
       });
     });
 
@@ -155,9 +152,9 @@ describe('theme-registry', () => {
       expect(reg.getThemeIds().sort()).toEqual(Object.keys(reg.THEMES).sort());
     });
 
-    it('getAllUIOptions 含 12 个主题 + auto', () => {
+    it('getAllUIOptions 含 4 个主题 + auto', () => {
       const opts = reg.getAllUIOptions();
-      expect(opts).toHaveLength(13);
+      expect(opts).toHaveLength(5);
       expect(opts.map(o => o.id).sort()).toContain('auto');
       expect(opts.map(o => o.id).sort()).toContain('warm-paper');
       opts.forEach(o => {
@@ -167,12 +164,9 @@ describe('theme-registry', () => {
       });
     });
 
-    it('墨白 / 靛瓷 排在素白之后、草香之前', () => {
+    it('墨白 排在素白之后', () => {
       const ids = reg.getThemeIds();
-      expect(ids.slice(ids.indexOf('high-contrast') + 1, ids.indexOf('grass-aroma'))).toEqual([
-        'mo-bai',
-        'indigo-porcelain',
-      ]);
+      expect(ids[ids.indexOf('high-contrast') + 1]).toBe('mo-bai');
     });
 
     it('getAllUIOptions 最后一项是 auto（UI 顺序约束）', () => {

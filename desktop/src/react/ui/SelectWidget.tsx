@@ -7,7 +7,10 @@ export interface SelectOption {
   label: string;
   disabled?: boolean;
   group?: string;
+  description?: string;
 }
+
+export { default as selectWidgetStyles } from './SelectWidget.module.css';
 
 interface SelectWidgetProps {
   options: SelectOption[];
@@ -20,6 +23,14 @@ interface SelectWidgetProps {
   popupClassName?: string;
   renderTrigger?: (option: SelectOption | undefined, isOpen: boolean) => React.ReactNode;
   renderOption?: (option: SelectOption, isSelected: boolean) => React.ReactNode;
+  renderGroupHeader?: (group: string) => React.ReactNode;
+  density?: 'compact' | 'comfortable';
+  align?: 'start' | 'end';
+  triggerBare?: boolean;
+  offset?: number;
+  popupMinWidth?: number;
+  placement?: 'auto' | 'top' | 'bottom';
+  onAttemptOpen?: () => boolean;
 }
 
 export function SelectWidget({
@@ -33,31 +44,53 @@ export function SelectWidget({
   popupClassName,
   renderTrigger,
   renderOption,
+  renderGroupHeader,
+  density = 'compact',
+  align = 'end',
+  triggerBare = false,
+  offset = 2,
+  popupMinWidth,
+  placement = 'auto',
+  onAttemptOpen,
 }: SelectWidgetProps) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const openedAtRef = useRef(0);
   const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
+  const [openDirection, setOpenDirection] = useState<'up' | 'down'>('down');
 
   const close = useCallback(() => setOpen(false), []);
+
+  useEffect(() => {
+    if (!open) return;
+    openedAtRef.current = performance.now();
+  }, [open]);
 
   useEffect(() => {
     if (!open || !triggerRef.current) return;
     const rect = triggerRef.current.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
     const spaceAbove = rect.top;
-    const openAbove = spaceBelow < 200 && spaceAbove > spaceBelow;
+    const openAbove = placement === 'top'
+      ? true
+      : placement === 'bottom'
+        ? false
+        : (spaceBelow < 200 && spaceAbove > spaceBelow);
+    setOpenDirection(openAbove ? 'up' : 'down');
 
     setPanelStyle({
       position: 'fixed',
-      left: rect.left,
-      width: rect.width,
+      ...(align === 'start'
+        ? { left: rect.left }
+        : { right: window.innerWidth - rect.right }),
+      minWidth: popupMinWidth ?? rect.width,
       ...(openAbove
-        ? { bottom: window.innerHeight - rect.top + 2 }
-        : { top: rect.bottom + 2 }),
+        ? { bottom: window.innerHeight - rect.top + offset }
+        : { top: rect.bottom + offset }),
       zIndex: 9999,
     });
-  }, [open]);
+  }, [open, align, offset, popupMinWidth, placement]);
 
   useEffect(() => {
     if (!open) return;
@@ -75,6 +108,7 @@ export function SelectWidget({
     if (!open) return;
     const handler = (e: Event) => {
       if (panelRef.current?.contains(e.target as Node)) return;
+      if (performance.now() - openedAtRef.current < 160) return;
       close();
     };
     window.addEventListener('scroll', handler, true);
@@ -100,7 +134,7 @@ export function SelectWidget({
 
     return Object.entries(groups).map(([group, items]) => (
       <div key={group || '__none'}>
-        {group && <div className={styles.groupHeader}>{group}</div>}
+        {group && (renderGroupHeader ? renderGroupHeader(group) : <div className={styles.groupHeader}>{group}</div>)}
         {items.map(item => renderItem(item, group))}
       </div>
     ));
@@ -126,7 +160,12 @@ export function SelectWidget({
           close();
         }}
       >
-        {renderOption ? renderOption(item, selected) : item.label}
+        {renderOption ? renderOption(item, selected) : (
+          <>
+            <span>{item.label}</span>
+            {item.description && <span className={styles.optionDesc}>{item.description}</span>}
+          </>
+        )}
       </button>
     );
   };
@@ -135,12 +174,17 @@ export function SelectWidget({
     <div className={[styles.root, open && styles.open, className].filter(Boolean).join(' ')}>
       <button
         type="button"
-        className={[styles.trigger, triggerClassName].filter(Boolean).join(' ')}
+        className={[!triggerBare && styles.trigger, triggerClassName].filter(Boolean).join(' ')}
         ref={triggerRef}
-        onClick={() => !disabled && setOpen(!open)}
+        onClick={() => {
+          if (disabled) return;
+          if (!open && onAttemptOpen && !onAttemptOpen()) return;
+          setOpen(!open);
+        }}
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
+        data-open={open}
         title={displayText}
       >
         {renderTrigger ? renderTrigger(current, open) : (
@@ -154,10 +198,12 @@ export function SelectWidget({
       </button>
       {open && createPortal(
         <div
-          className={[styles.popup, popupClassName].filter(Boolean).join(' ')}
+          className={[styles.popup, density === 'comfortable' && styles.comfortable, popupClassName].filter(Boolean).join(' ')}
           ref={panelRef}
           style={panelStyle}
           data-select-widget-popup
+          data-direction={openDirection}
+          data-align={align}
           role="listbox"
         >
           {renderItems()}

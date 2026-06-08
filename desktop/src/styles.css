@@ -1,4 +1,4 @@
-@import url('./themes/new-warm-paper-fonts.css');
+@import url('./themes/app-fonts.css');
 @import url('./animations.css');
 
 /* ========================================
@@ -32,6 +32,8 @@
     --link: var(--accent, #537D96);
     --link-hover: var(--accent-hover, var(--link));
     --link-rgb: var(--accent-rgb, 83, 125, 150);
+    --markdown-amber-rgb: 166, 113, 57;
+    --markdown-amber-text: color-mix(in srgb, rgb(var(--markdown-amber-rgb)) 70%, var(--text) 30%);
 
     /* 动效 · 时长（三档：所有 transition / 短动画归到这三档） */
     --duration-instant: 0.1s;       /* 瞬：hover、关闭、退场、撤销 */
@@ -81,8 +83,7 @@
    新增 card 元素只需往 Card 层追加选择器
    ======================================== */
 
-html[data-theme="midnight"],
-html[data-theme="midnight-contrast"] {
+html[data-theme="midnight"] {
     --paper-texture-card-blend-mode: normal;
 }
 
@@ -118,7 +119,7 @@ body.paper-texture .yuan-chip {
 }
 
 /* ③ 亮度补偿：暖白叠层抵消纹理变暗（暗色主题跳过） */
-html:not([data-theme="midnight"]):not([data-theme="midnight-contrast"]) body.paper-texture::before {
+html:not([data-theme="midnight"]) body.paper-texture::before {
     content: '';
     position: fixed;
     inset: 0;
@@ -929,6 +930,9 @@ html[data-platform="linux"] .tb-toggle-right {
    ======================================== */
 .md-content {
     line-height: 1.75;
+    color: color-mix(in srgb, var(--text) 82%, var(--text-muted) 18%);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
 }
 
 
@@ -987,10 +991,11 @@ html[data-platform="linux"] .tb-toggle-right {
 .md-content code {
     font-family: var(--font-mono);
     font-size: 0.85em;
-    background: var(--overlay-light);
+    background: var(--markdown-inline-code-bg, var(--overlay-light));
     padding: 0.15em 0.35em;
     border-radius: 4px;
-    color: var(--text);
+    color: var(--markdown-inline-code-text, var(--text));
+    box-shadow: inset 0 0 0 1px var(--markdown-inline-code-border, transparent);
 }
 
 /* 代码块 */
@@ -1047,6 +1052,7 @@ html[data-platform="linux"] .tb-toggle-right {
     display: inline-block;
     min-width: max-content;
     background: none;
+    box-shadow: none;
     padding: 0;
     border-radius: 0;
     font-size: 0.82em;
@@ -1189,6 +1195,7 @@ html[data-platform="linux"] .tb-toggle-right {
 /* 标题（助手消息里偶尔用到） */
 .md-content h1, .md-content h2, .md-content h3,
 .md-content h4, .md-content h5, .md-content h6 {
+    color: var(--text);
     font-weight: 600;
     margin: 0.6em 0 0.3em 0;
     line-height: 1.4;
@@ -1226,7 +1233,15 @@ html[data-platform="linux"] .tb-toggle-right {
 
 /* 加粗、斜体 */
 .md-content strong {
+    color: var(--text);
     font-weight: 600;
+}
+
+.md-content strong code {
+    background: var(--markdown-strong-code-bg, var(--markdown-inline-code-bg, var(--overlay-light)));
+    color: var(--markdown-strong-code-text, var(--markdown-inline-code-text, var(--text)));
+    box-shadow: inset 0 0 0 1px var(--markdown-strong-code-border, var(--markdown-inline-code-border, transparent));
+    font-weight: 650;
 }
 
 .md-content em {

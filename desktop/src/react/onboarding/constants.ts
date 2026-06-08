@@ -24,8 +24,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
 ];
 
 export const OB_THEMES = [
-  'warm-paper', 'midnight', 'auto', 'high-contrast', 'mo-bai', 'indigo-porcelain', 'grass-aroma',
-  'contemplation', 'absolutely', 'delve', 'deep-think',
+  'warm-paper', 'midnight', 'auto', 'high-contrast', 'mo-bai',
 ] as const;
 
 export function themeKey(id: string): string {

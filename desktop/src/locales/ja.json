@@ -82,9 +82,7 @@
     "bridgeShort": "連携",
     "pinned": "ピン留め",
     "noProject": "未分類",
-    "projects": "プロジェクト",
-    "byTime": "時間順",
-    "byProject": "プロジェクト順"
+    "projects": "プロジェクト"
   },
   "session": {
     "untitled": "新しいチャット",
@@ -185,6 +183,8 @@
     "minutesAgo": "{n}分前",
     "hoursAgo": "{n}時間前",
     "daysAgo": "{n}日前",
+    "weeksAgo": "{n}週間前",
+    "monthsAgo": "{n}か月前",
     "dateFormat": "{m}/{d}",
     "today": "今日",
     "yesterday": "昨日",
@@ -740,22 +740,6 @@
       "highContrastMode": "ハイコントラスト",
       "moBai": "墨白",
       "moBaiMode": "紙墨",
-      "indigoPorcelain": "藍磁",
-      "indigoPorcelainMode": "深読",
-      "grassAroma": "草の香り",
-      "grassAromaMode": "Butter",
-      "contemplation": "沈思",
-      "contemplationMode": "Ming",
-      "absolutely": "Absolutely",
-      "absolutelyMode": "どこか見覚えが",
-      "delve": "Delve",
-      "delveMode": "探求しましょう",
-      "deepThink": "Deep Think",
-      "deepThinkMode": "くじらちゃん",
-      "newWarmPaper": "新温紙",
-      "newWarmPaperMode": "紙本",
-      "midnightContrast": "蒼夜・高コントラスト",
-      "midnightContrastMode": "くっきり",
       "auto": "自動",
       "autoMode": "システム",
       "serifFont": "明朝体",
@@ -764,7 +748,19 @@
       "paperTextureHint": "背景に和紙のテクスチャを追加する",
       "paperTextureDarkDisabledHint": "夜間テーマでは和紙の質感は使えません。明るいテーマに戻すと保存済みの設定で復帰します",
       "leavesOverlay": "晴れモード",
-      "leavesOverlayHint": "たまには日向ぼっこしよう"
+      "leavesOverlayHint": "たまには日向ぼっこしよう",
+      "inlineCodeStyle": "インラインコードのスタイル",
+      "markdownCodeStyleHint": "現在のテーマの Markdown インラインコードだけに適用します。",
+      "strongCodeStyle": "強調インラインコードのスタイル",
+      "strongCodeStyleHint": "**`重要なコード`** のような強調片段に使います。",
+      "resetMarkdownCodeStyle": "現在のテーマのコードスタイルを既定に戻す",
+      "markdownCodeStyle": {
+        "default": "既定",
+        "ink": "紙墨",
+        "jade": "青竹",
+        "amber": "琥珀",
+        "rose": "臙脂"
+      }
     },
     "editor": {
       "title": "エディター",
@@ -1056,6 +1052,7 @@
       "capability": {
         "image": "画像入力に対応",
         "video": "動画入力に対応",
+        "audio": "音声入力に対応",
         "reasoning": "推論に対応"
       }
     },

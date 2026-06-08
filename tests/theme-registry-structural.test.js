@@ -25,8 +25,7 @@ const SKIP_DIRS = [
 // - theme-registry.cjs / .d.cts: the single source of truth itself
 // - Tests that reference ids directly for white-box validation
 // - onboarding/constants.ts: onboarding UI layer owns its own theme-list UX decision
-//   (auto at position 3 + new-warm-paper excluded is a product/UX choice,
-//   not a data-mirroring bug; see Task 8 of theme-registry refactor plan)
+//   (auto at position 3 is a product/UX choice, not a data-mirroring bug).
 const ALLOWED_FILES = new Set([
   'desktop/src/shared/theme-registry.cjs',
   'desktop/src/shared/theme-registry.d.cts',
@@ -64,7 +63,7 @@ describe('theme-registry structural constraint', () => {
     expect(content).toContain("--font-ui: 'Inter'");
     expect(content).toContain("--font-serif: 'EB Garamond', 'Noto Serif SC'");
     expect(content).toContain("--font-mono: 'JetBrains Mono'");
-    const fontImportIndex = content.indexOf("new-warm-paper-fonts.css");
+    const fontImportIndex = content.indexOf("app-fonts.css");
     expect(fontImportIndex).toBeGreaterThanOrEqual(0);
     expect(fontImportIndex).toBeLessThan(content.indexOf(':root'));
   });

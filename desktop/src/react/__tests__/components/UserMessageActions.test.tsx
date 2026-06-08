@@ -2,7 +2,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { UserMessage } from '../../components/chat/UserMessage';
 import { useStore } from '../../stores';
 
@@ -45,6 +45,10 @@ describe('UserMessage Codex-style actions', () => {
         },
       },
     } as never);
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it('shows regenerate and edit controls only for the latest user message', () => {

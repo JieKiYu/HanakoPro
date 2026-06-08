@@ -14,11 +14,11 @@
   color: var(--text);
   background-color: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: var(--radius-input, 4px);
+  border-radius: var(--radius-input, 6px);
   padding: 0.45rem 0.65rem;
-  cursor: pointer;
+  cursor: default;
   text-align: left;
-  transition: border-color var(--duration-slow) var(--ease-out);
+  transition: border-color var(--duration-fast) var(--ease-out);
 }
 
 .trigger:hover,
@@ -45,10 +45,11 @@
 
 .arrow {
   flex-shrink: 0;
-  font-size: 0.9rem;
+  width: 14px;
+  height: 14px;
   color: var(--text-muted);
   margin-left: var(--space-sm);
-  transition: transform var(--duration-slow);
+  transition: transform var(--duration-fast) var(--ease-out);
 }
 
 .open .arrow {
@@ -60,45 +61,58 @@
   position: fixed;
   top: auto;
   left: auto;
-  width: 100%;
+  width: max-content;
   min-width: 180px;
-  max-height: 240px;
+  max-height: 260px;
   background-color: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: var(--radius-input, 4px);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px var(--shadow, rgba(0, 0, 0, 0.08)),
+              0 1px 3px rgba(0, 0, 0, 0.04);
   z-index: 9999;
   margin-top: 0;
-  overflow-y: auto;
+  overflow: hidden auto;
   flex-direction: column;
-  animation: hana-fade-up var(--duration-fast) var(--ease-out);
-  padding: var(--space-xs) 0;
+  animation: hana-popout var(--duration-fast) var(--ease-out);
+  transform-origin: top right;
+  padding: 0;
   -webkit-app-region: no-drag;
 }
+
+.popup[data-direction="up"][data-align="end"] { transform-origin: bottom right; }
+.popup[data-direction="up"][data-align="start"] { transform-origin: bottom left; }
+.popup[data-direction="down"][data-align="end"] { transform-origin: top right; }
+.popup[data-direction="down"][data-align="start"] { transform-origin: top left; }
 
 .option {
   display: flex;
   align-items: center;
   gap: 0.4rem;
   width: 100%;
-  padding: 0.45rem 0.65rem;
+  padding: 0.4rem 0.65rem;
   font-family: inherit;
-  font-size: 0.9rem;
-  color: var(--text-light);
+  font-size: 0.78rem;
+  color: var(--text);
   background: none;
   border: none;
-  cursor: pointer;
+  border-radius: 0;
+  cursor: default;
   text-align: left;
-  transition: background var(--duration-fast);
+  transition: all var(--duration-fast);
 }
 
 .option:hover {
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  background: var(--accent-light);
+  color: var(--accent);
 }
 
 .selected {
   color: var(--accent);
   font-weight: 600;
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.selected:hover {
+  background: var(--accent-light);
 }
 
 .disabled {
@@ -111,11 +125,37 @@
 }
 
 .groupHeader {
-  padding: 0.35rem 0.65rem 0.15rem;
-  font-size: 0.7rem;
+  padding: 0.45rem 0.55rem 0.15rem;
+  font-size: 0.68rem;
   color: var(--text-muted);
-  letter-spacing: 0.03em;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   user-select: none;
+}
+
+.groupHeader:not(:first-child) {
+  margin-top: 4px;
+  border-top: 1px solid var(--border-light, var(--border));
+  padding-top: 0.55rem;
+}
+
+.comfortable .option {
+  padding: 0.5rem 0.65rem;
+}
+
+.providerInset .option {
+  padding-left: 1.95rem;
+}
+
+.optionDesc {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.option:hover .optionDesc {
+  color: var(--accent);
+  opacity: 0.6;
 }
 
 :global(body.paper-texture) .trigger,

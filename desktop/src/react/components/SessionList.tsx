@@ -15,7 +15,7 @@ import { switchSession, archiveSession, renameSession, pinSession } from '../sto
 import { updateKeyed } from '../stores/create-keyed-slice';
 import type { Session, Agent } from '../types';
 import { AgentAvatar, resolveAgentDisplayInfo } from '../utils/agent-display';
-import { buildSessionSections, type SessionViewMode } from './session-sections';
+import { buildSessionSections, type SessionSection } from './session-sections';
 import { ContextMenu, type ContextMenuItem } from '../ui/ContextMenu';
 import { renderMarkdown } from '../utils/markdown';
 import styles from './SessionList.module.css';
@@ -25,15 +25,6 @@ interface BrowserSessionState {
   running: boolean;
   resumable: boolean;
   unavailableReason: string | null;
-}
-
-function readSessionViewMode(): SessionViewMode {
-  const saved = globalThis.localStorage?.getItem('hana-session-view-mode');
-  return saved === 'project' ? 'project' : 'time';
-}
-
-function writeSessionViewMode(mode: SessionViewMode): void {
-  globalThis.localStorage?.setItem('hana-session-view-mode', mode);
 }
 
 function normalizeBrowserSessionStates(data: unknown): Record<string, BrowserSessionState> {
@@ -98,7 +89,6 @@ function SessionListInner() {
   const closingBrowserSessionsRef = useRef(new Set<string>());
   const [searchQuery, setSearchQuery] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const [viewMode, setViewMode] = useState<SessionViewMode>(() => readSessionViewMode());
 
   const setVisibleBrowserSessions = useCallback((data: unknown) => {
     const states = normalizeBrowserSessionStates(data);
@@ -239,22 +229,11 @@ function SessionListInner() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  if (sessions.length === 0) {
-    return <div className={styles.sessionEmpty}>{t('sidebar.empty')}</div>;
-  }
-
-  const toggleViewMode = useCallback(() => {
-    setViewMode(prev => {
-      const next = prev === 'time' ? 'project' : 'time';
-      writeSessionViewMode(next);
-      return next;
-    });
-  }, []);
-
   const displaySessions = searchQuery.trim() ? (mergedSearchResults || []) : sessions;
-  const sections = buildSessionSections(displaySessions, { mode: viewMode });
+  const sections = buildSessionSections(displaySessions, { mode: 'project' });
   const activeSessionPath = pendingSessionSwitchPath || currentSessionPath;
-  const hasSearchResults = sections.length > 0;
+  const hasSearchResults = displaySessions.length > 0;
+  const visibleSections = hasSearchResults ? sections : [];
 
   // 当左侧搜索词改变时，更新 store 中的搜索查询
   useEffect(() => {
@@ -263,6 +242,10 @@ function SessionListInner() {
       setChatSearchQuery(searchQuery.trim());
     }
   }, [searchQuery]);
+
+  if (sessions.length === 0) {
+    return <div className={styles.sessionEmpty}>{t('sidebar.empty')}</div>;
+  }
 
   return (
     <>
@@ -292,27 +275,7 @@ function SessionListInner() {
       {!hasSearchResults && searchQuery && (
         <div className={styles.sessionEmpty}>{t('session.search.noResults')}</div>
       )}
-      <div className={styles.sessionViewModeToggle}>
-        <button
-          className={`${styles.sessionViewModeBtn} ${viewMode === 'time' ? styles.sessionViewModeBtnActive : ''}`}
-          onClick={() => { if (viewMode !== 'time') toggleViewMode(); }}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-          </svg>
-          <span>{t('sidebar.byTime')}</span>
-        </button>
-        <button
-          className={`${styles.sessionViewModeBtn} ${viewMode === 'project' ? styles.sessionViewModeBtnActive : ''}`}
-          onClick={() => { if (viewMode !== 'project') toggleViewMode(); }}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-          </svg>
-          <span>{t('sidebar.byProject')}</span>
-        </button>
-      </div>
-      {sections.map(section => {
+      {visibleSections.map(section => {
         if (section.kind === 'project') {
           return (
             <ProjectSection
@@ -905,10 +868,12 @@ function formatRcPlatform(platform: string) {
   return platform || 'Bridge';
 }
 
-// ── Project Section (collapsible, with date sub-sections) ──
+// ── Project Section (collapsible) ──
+
+type ProjectSessionSection = Extract<SessionSection, { kind: 'project' }>;
 
 const ProjectSection = memo(function ProjectSection({ section, activeSessionPath, pendingNewSession, streamingSessions, agents, browserSessions, onCloseBrowser }: {
-  section: { id: string; title: string; cwd: string | null; subSections: { group: string; titleKey: string; items: Session[] }[] };
+  section: ProjectSessionSection;
   activeSessionPath: string | null;
   pendingNewSession: boolean;
   streamingSessions: string[];
@@ -918,18 +883,8 @@ const ProjectSection = memo(function ProjectSection({ section, activeSessionPath
 }) {
   const { t } = useI18n();
   const [collapsed, setCollapsed] = useState(false);
-  // Sub-section collapse state
-  const [collapsedSubs, setCollapsedSubs] = useState<Set<string>>(new Set());
 
-  const toggleSub = useCallback((group: string) => {
-    setCollapsedSubs(prev => {
-      const next = new Set(prev);
-      if (next.has(group)) next.delete(group); else next.add(group);
-      return next;
-    });
-  }, []);
-
-  const totalCount = section.subSections.reduce((sum, sub) => sum + sub.items.length, 0);
+  const totalCount = section.items.length;
 
   return (
     <section className={styles.projectSection}>
@@ -952,40 +907,18 @@ const ProjectSection = memo(function ProjectSection({ section, activeSessionPath
       </button>
       {!collapsed && (
         <div className={styles.projectSectionBody}>
-          {section.subSections.map(sub => (
-            <div key={sub.group} className={styles.projectSubSection}>
-              <button
-                className={styles.projectSubHeader}
-                onClick={() => toggleSub(sub.group)}
-                title={collapsedSubs.has(sub.group) ? t('sidebar.expand') : t('sidebar.collapse')}
-              >
-                <svg
-                  className={`${styles.projectSubChevron} ${collapsedSubs.has(sub.group) ? styles.chevronCollapsed : ''}`}
-                  width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
-                >
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
-                <span className={styles.projectSubTitle}>{t(sub.titleKey)}</span>
-                <span className={styles.projectSubCount}>{sub.items.length}</span>
-              </button>
-              {!collapsedSubs.has(sub.group) && (
-                <div className={styles.projectSubBody}>
-                  {sub.items.map(s => (
-                    <SessionItem
-                      key={s.path}
-                      session={s}
-                      isActive={!pendingNewSession && s.path === activeSessionPath}
-                      isStreaming={streamingSessions.includes(s.path)}
-                      isPinned={!!s.pinnedAt}
-                      agents={agents}
-                      browserState={browserSessions[s.path] || null}
-                      onCloseBrowser={onCloseBrowser}
-                      searchSnippet={(s as any)._snippet || null}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
+          {section.items.map(s => (
+            <SessionItem
+              key={s.path}
+              session={s}
+              isActive={!pendingNewSession && s.path === activeSessionPath}
+              isStreaming={streamingSessions.includes(s.path)}
+              isPinned={!!s.pinnedAt}
+              agents={agents}
+              browserState={browserSessions[s.path] || null}
+              onCloseBrowser={onCloseBrowser}
+              searchSnippet={(s as any)._snippet || null}
+            />
           ))}
         </div>
       )}

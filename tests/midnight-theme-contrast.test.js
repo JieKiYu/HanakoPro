@@ -48,25 +48,10 @@ describe('midnight theme contrast', () => {
     expect(contrast(readThemeToken(css, 'sidebar-bridge-card-text'), '#9DA6AC')).toBeGreaterThanOrEqual(4.5);
   });
 
-  it('adds a high-contrast dark variant with stronger readable colors', () => {
-    const styles = fs.readFileSync(path.join(ROOT, 'desktop/src/styles.css'), 'utf8');
-    const css = fs.readFileSync(path.join(ROOT, 'desktop/src/themes/midnight-contrast.css'), 'utf8');
-    const bg = readThemeToken(css, 'bg');
-    const bgCard = readThemeToken(css, 'bg-card');
-
-    expect(styles).toContain('html:not([data-theme="midnight"]):not([data-theme="midnight-contrast"])');
-    expect(contrast(readThemeToken(css, 'text'), bgCard)).toBeGreaterThanOrEqual(9);
-    expect(contrast(readThemeToken(css, 'text-light'), bg)).toBeGreaterThanOrEqual(8);
-    expect(contrast(readThemeToken(css, 'text-muted'), bgCard)).toBeGreaterThanOrEqual(6);
-    expect(contrast(readThemeToken(css, 'accent'), bg)).toBeGreaterThanOrEqual(6);
-  });
-
   it('keeps dark theme cards aligned with their theme surfaces', () => {
     const styles = fs.readFileSync(path.join(ROOT, 'desktop/src/react/settings/Settings.module.css'), 'utf8');
 
     expect(styles).toContain('.theme-card[data-theme="midnight"]');
     expect(styles).toContain('background: #3B4A54;');
-    expect(styles).toContain('.theme-card[data-theme="midnight-contrast"]');
-    expect(styles).toContain('background: #26343D;');
   });
 });

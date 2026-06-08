@@ -82,9 +82,7 @@
     "bridgeShort": "接入",
     "pinned": "置頂",
     "noProject": "未分類",
-    "projects": "專案",
-    "byTime": "依時間",
-    "byProject": "依專案"
+    "projects": "專案"
   },
   "session": {
     "untitled": "新對話",
@@ -185,6 +183,8 @@
     "minutesAgo": "{n} 分鐘前",
     "hoursAgo": "{n} 小時前",
     "daysAgo": "{n} 天前",
+    "weeksAgo": "{n} 週前",
+    "monthsAgo": "{n} 個月前",
     "dateFormat": "{m}月{d}日",
     "today": "今天",
     "yesterday": "昨天",
@@ -740,22 +740,6 @@
       "highContrastMode": "高對比",
       "moBai": "墨白",
       "moBaiMode": "紙墨",
-      "indigoPorcelain": "靛瓷",
-      "indigoPorcelainMode": "深讀",
-      "grassAroma": "草香",
-      "grassAromaMode": "Butter",
-      "contemplation": "沉思",
-      "contemplationMode": "Ming",
-      "absolutely": "Absolutely",
-      "absolutelyMode": "有一點點熟悉",
-      "delve": "隨時準備接住你",
-      "delveMode": "探究一下",
-      "deepThink": "用戶徹底怒了",
-      "deepThinkMode": "小鯨魚",
-      "newWarmPaper": "新暖紙",
-      "newWarmPaperMode": "紙本",
-      "midnightContrast": "青夜·高對比",
-      "midnightContrastMode": "清晰",
       "auto": "自動",
       "autoMode": "跟隨系統",
       "serifFont": "襯線字體",
@@ -764,7 +748,19 @@
       "paperTextureHint": "為背景添加宣紙質感",
       "paperTextureDarkDisabledHint": "黑夜模式不支援紙質紋理，切回淺色主題後會按原設定恢復",
       "leavesOverlay": "晴天模式",
-      "leavesOverlayHint": "沒事兒曬曬太陽"
+      "leavesOverlayHint": "沒事兒曬曬太陽",
+      "inlineCodeStyle": "行內程式碼風格",
+      "markdownCodeStyleHint": "僅作用於目前主題的 Markdown 行內程式碼。",
+      "strongCodeStyle": "強調行內程式碼風格",
+      "strongCodeStyleHint": "用於 **`重點程式碼`** 這類強調片段。",
+      "resetMarkdownCodeStyle": "恢復目前主題預設程式碼風格",
+      "markdownCodeStyle": {
+        "default": "預設",
+        "ink": "紙墨",
+        "jade": "青竹",
+        "amber": "琥珀",
+        "rose": "胭脂"
+      }
     },
     "editor": {
       "title": "編輯器",
@@ -1058,6 +1054,7 @@
       "capability": {
         "image": "支援圖像輸入",
         "video": "支援影片輸入",
+        "audio": "支援音訊輸入",
         "reasoning": "支援推理"
       }
     },

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useStore } from '../../stores';
 import { hanaFetch } from '../../hooks/use-hana-fetch';
 import { useI18n } from '../../hooks/use-i18n';
@@ -6,6 +6,7 @@ import type { Model } from '../../types';
 import type { SessionModel } from '../../stores/chat-types';
 import type { ModelsLoadState } from '../../stores/model-slice';
 import { openProviderModelSettings } from '../../utils/model-settings-navigation';
+import { SelectWidget, ProviderGroupHeader, selectWidgetStyles, type SelectOption } from '@/ui';
 import styles from './InputArea.module.css';
 
 export function ModelSelector({ models, sessionModel, isStreaming = false, loadState }: {
@@ -15,9 +16,7 @@ export function ModelSelector({ models, sessionModel, isStreaming = false, loadS
   loadState?: ModelsLoadState;
 }) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
 
   const matchedSessionModel = sessionModel
     ? models.find(m => m.id === sessionModel.id && m.provider === sessionModel.provider)
@@ -35,16 +34,6 @@ export function ModelSelector({ models, sessionModel, isStreaming = false, loadS
     return t('model.noneConfigured') || t('model.unknown') || '...';
   })();
 
-  // Close on outside click
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
-
   const switchModel = useCallback(async (modelId: string, provider?: string) => {
     try {
       const { currentSessionPath, pendingNewSession, chatSessions, sessionModelsByPath } = useStore.getState();
@@ -55,7 +44,7 @@ export function ModelSelector({ models, sessionModel, isStreaming = false, loadS
         const sm = sessionModelsByPath[currentSessionPath];
         const useSession = !!(sm?.id && sm?.provider);
         const cur = useSession ? sm : models.find(m => m.isCurrent);
-        if (cur && modelId === cur.id && provider === cur.provider) { setOpen(false); return; }
+        if (cur && modelId === cur.id && provider === cur.provider) return;
 
         // Per-session switch
         setLoading(true);
@@ -114,7 +103,6 @@ export function ModelSelector({ models, sessionModel, isStreaming = false, loadS
       setLoading(false);
       useStore.getState().setModelSwitching(false);
     }
-    setOpen(false);
   }, [models, t]);
 
   // 按 provider 分组
@@ -137,53 +125,60 @@ export function ModelSelector({ models, sessionModel, isStreaming = false, loadS
 
   const groupKeys = Object.keys(grouped);
   const hasMultipleProviders = groupKeys.length > 1 || (groupKeys.length === 1 && groupKeys[0] !== '');
+  const valueOf = (m: { id: string; provider?: string }) => `${m.provider || ''}/${m.id}`;
+
+  const options: SelectOption[] = useMemo(() => (
+    groupKeys.flatMap(provider =>
+      grouped[provider].map(m => ({
+        value: valueOf(m),
+        label: m.name,
+        group: hasMultipleProviders ? (provider || '—') : undefined,
+      })),
+    )
+  ), [grouped, groupKeys, hasMultipleProviders]);
+
+  const currentValue = current ? valueOf(current) : '';
+
+  const handleSelect = useCallback((val: string) => {
+    const all = groupKeys.flatMap(p => grouped[p]);
+    const m = all.find(mm => valueOf(mm) === val);
+    if (m) switchModel(m.id, m.provider);
+  }, [grouped, groupKeys, switchModel]);
 
   return (
-    <div className={`${styles['model-selector']}${open ? ` ${styles.open}` : ''}`} ref={ref}>
-      <button
-        className={`${styles['model-pill']}${(loading || loadState === 'loading') ? ` ${styles['model-pill-disabled']}` : ''}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          if (loading || loadState === 'loading') return;
-          if (isStreaming) {
-            useStore.getState().addToast(t('model.switchWhileStreaming'), 'warning', 4000, {
-              dedupeKey: 'model-switch-streaming',
-            });
-            return;
-          }
-          if (loadState === 'error' || models.length === 0) {
-            openProviderModelSettings();
-            return;
-          }
-          setOpen(!open);
-        }}
-      >
-        <span>{label}</span>
-        <span className={styles['model-arrow']}>▾</span>
-      </button>
-      {open && (
-        <div className={styles['model-dropdown']}>
-          {groupKeys.map(provider => {
-            const items = grouped[provider];
-            return (
-              <div key={provider || '__none'}>
-                {hasMultipleProviders && (
-                  <div className={styles['model-group-header']}>{provider || '—'}</div>
-                )}
-                {items.map(m => (
-                  <button
-                    key={`${m.provider}/${m.id}`}
-                    className={`${styles['model-option']}${(m.id === current?.id && m.provider === current?.provider) ? ` ${styles.active}` : ''}`}
-                    onClick={() => switchModel(m.id, m.provider)}
-                  >
-                    {m.name}
-                  </button>
-                ))}
-              </div>
-            );
-          })}
-        </div>
+    <SelectWidget
+      className={styles['model-selector']}
+      options={options}
+      value={currentValue}
+      onChange={handleSelect}
+      disabled={loading || loadState === 'loading'}
+      placement="top"
+      align="end"
+      offset={4}
+      popupMinWidth={180}
+      popupClassName={selectWidgetStyles.providerInset}
+      triggerBare
+      onAttemptOpen={() => {
+        if (isStreaming) {
+          useStore.getState().addToast(t('model.switchWhileStreaming'), 'warning', 4000, {
+            dedupeKey: 'model-switch-streaming',
+          });
+          return false;
+        }
+        if (loadState === 'error' || models.length === 0) {
+          openProviderModelSettings();
+          return false;
+        }
+        return true;
+      }}
+      triggerClassName={`${styles['model-pill']}${(loading || loadState === 'loading') ? ` ${styles['model-pill-disabled']}` : ''}`}
+      renderTrigger={() => (
+        <>
+          <span>{label}</span>
+          <span className={styles['model-arrow']}>▾</span>
+        </>
       )}
-    </div>
+      renderGroupHeader={(g) => <ProviderGroupHeader provider={g} />}
+    />
   );
 }

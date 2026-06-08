@@ -83,9 +83,7 @@
     "bridgeShort": "接入社交平台",
     "pinned": "置顶",
     "noProject": "未分类",
-    "projects": "项目",
-    "byTime": "按时间",
-    "byProject": "按项目"
+    "projects": "项目"
   },
   "session": {
     "untitled": "新对话",
@@ -202,6 +200,8 @@
     "minutesAgo": "{n} 分钟前",
     "hoursAgo": "{n} 小时前",
     "daysAgo": "{n} 天前",
+    "weeksAgo": "{n} 周前",
+    "monthsAgo": "{n} 个月前",
     "dateFormat": "{m}月{d}日",
     "today": "今天",
     "yesterday": "昨天",
@@ -738,22 +738,6 @@
       "highContrastMode": "高对比",
       "moBai": "墨白",
       "moBaiMode": "纸墨",
-      "indigoPorcelain": "靛瓷",
-      "indigoPorcelainMode": "深读",
-      "grassAroma": "草香",
-      "grassAromaMode": "Butter",
-      "contemplation": "沉思",
-      "contemplationMode": "Ming",
-      "absolutely": "Absolutely",
-      "absolutelyMode": "有一点点熟悉",
-      "delve": "随时准备接住你",
-      "delveMode": "探究一下",
-      "deepThink": "用户彻底怒了",
-      "deepThinkMode": "小鲸鱼",
-      "newWarmPaper": "新暖纸",
-      "newWarmPaperMode": "纸本",
-      "midnightContrast": "青夜·高对比",
-      "midnightContrastMode": "清晰",
       "auto": "自动",
       "autoMode": "跟随系统",
       "serifFont": "衬线字体",
@@ -762,7 +746,19 @@
       "paperTextureHint": "为背景添加宣纸质感",
       "paperTextureDarkDisabledHint": "黑夜模式不支持纸质纹理，切回浅色主题后会按原设置恢复",
       "leavesOverlay": "晴天模式",
-      "leavesOverlayHint": "没事儿晒晒太阳"
+      "leavesOverlayHint": "没事儿晒晒太阳",
+      "inlineCodeStyle": "行内代码风格",
+      "markdownCodeStyleHint": "仅作用于当前主题的 Markdown 行内代码。",
+      "strongCodeStyle": "强调行内代码风格",
+      "strongCodeStyleHint": "用于 **`重点代码`** 这类强调片段。",
+      "resetMarkdownCodeStyle": "恢复当前主题默认代码风格",
+      "markdownCodeStyle": {
+        "default": "默认",
+        "ink": "纸墨",
+        "jade": "青竹",
+        "amber": "琥珀",
+        "rose": "胭脂"
+      }
     },
     "editor": {
       "title": "编辑器",
@@ -1107,6 +1103,7 @@
       "capability": {
         "image": "支持图像输入",
         "video": "支持视频输入",
+        "audio": "支持音频输入",
         "reasoning": "支持推理"
       }
     },

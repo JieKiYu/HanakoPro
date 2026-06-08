@@ -9,6 +9,7 @@
  */
 import registry, { type ThemeId } from './theme-registry';
 import {
+  applyMarkdownCodeStylePreference,
   loadPaperTexturePreference,
   setPaperTexturePreference,
 } from './appearance-preferences';
@@ -25,6 +26,7 @@ function applyConcreteTheme(concrete: string): void {
   document.documentElement.setAttribute('data-theme', concrete);
   if (themeSheet) themeSheet.href = entry.cssPath;
   loadPaperTexturePreference();
+  applyMarkdownCodeStylePreference(concrete);
   (window as unknown as { hana?: { syncWindowTheme?: (theme: string) => void } }).hana?.syncWindowTheme?.(concrete);
 }
 

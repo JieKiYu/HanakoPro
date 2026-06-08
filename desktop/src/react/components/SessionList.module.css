@@ -317,51 +317,6 @@
     flex-shrink: 0;
 }
 
-/* ── View mode toggle ── */
-.sessionViewModeToggle {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    margin: 0 6px 8px;
-    padding: 2px;
-    background: var(--bg-subtle, rgba(var(--accent-rgb, 100, 100, 100), 0.04));
-    border-radius: var(--radius-sm);
-}
-.sessionViewModeBtn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    flex: 1;
-    padding: 5px 8px;
-    background: none;
-    border: none;
-    border-radius: var(--radius-sm);
-    color: var(--text-muted);
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 0.7rem;
-    font-weight: 500;
-    transition: all var(--duration-fast);
-    white-space: nowrap;
-}
-.sessionViewModeBtn:hover {
-    color: var(--text);
-    background: rgba(var(--accent-rgb), 0.06);
-}
-.sessionViewModeBtnActive {
-    color: var(--accent);
-    background: var(--bg);
-    box-shadow: 0 1px 2px rgba(0,0,0,0.08);
-    font-weight: 600;
-}
-.sessionViewModeBtn svg {
-    flex-shrink: 0;
-}
-.sessionViewModeBtn span {
-    font-size: 0.68rem;
-}
-
 /* ── Project section (collapsible) ── */
 .projectSection {
     margin: 0;
@@ -424,56 +379,8 @@
     padding: 0;
 }
 
-/* ── Project sub-section (date grouping) ── */
-
-.projectSubSection {
-    /* wrapper for collapsible sub-group */
-}
-
-.projectSubHeader {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    width: 100%;
-    padding: 4px 12px 4px 14px;
-    background: none;
-    border: none;
-    color: var(--text-secondary);
-    font-size: 0.7rem;
-    font-weight: 500;
-    cursor: pointer;
-    user-select: none;
-    transition: background 100ms;
-}
-
-.projectSubHeader:hover {
-    background: var(--overlay-light);
-}
-
-.projectSubChevron {
-    flex-shrink: 0;
-    transition: transform 150ms;
-}
-
-.projectSubTitle {
-    flex: 1;
-    text-align: left;
-    opacity: 0.7;
-    text-transform: uppercase;
-    letter-spacing: 0.02em;
-}
-
-.projectSubCount {
-    flex-shrink: 0;
-    font-size: 0.65rem;
-    background: var(--overlay-light);
-    padding: 1px 6px;
-    border-radius: 8px;
-    opacity: 0.6;
-}
-
-.projectSubBody {
-    padding: 0;
+.projectSectionBody .sessionItem {
+    padding-left: calc(var(--space-sm) + 14px);
 }
 
 .sessionSummaryCard {

@@ -28,11 +28,11 @@ describe('paper texture contract', () => {
     expect(content).not.toContain('body:not(.no-paper-texture)');
   });
 
-  it('turns off card texture brightness compensation in both dark themes', () => {
+  it('turns off card texture brightness compensation in the dark theme', () => {
     const styles = fs.readFileSync(path.join(ROOT, 'desktop/src/styles.css'), 'utf8');
 
     expect(styles).toContain('--paper-texture-card-blend-mode: lighten;');
-    expect(styles).toContain('html[data-theme="midnight"],\nhtml[data-theme="midnight-contrast"]');
+    expect(styles).toContain('html[data-theme="midnight"]');
     expect(styles).toContain('--paper-texture-card-blend-mode: normal;');
   });
 

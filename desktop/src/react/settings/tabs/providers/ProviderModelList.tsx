@@ -16,7 +16,7 @@ interface DiscoveredModel {
   maxOutput?: number | null;
 }
 
-type CapabilityKind = 'image' | 'video' | 'reasoning';
+type CapabilityKind = 'image' | 'video' | 'audio' | 'reasoning';
 
 function finitePositiveNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
@@ -47,6 +47,14 @@ function CapabilityIcon({ kind }: { kind: CapabilityKind }) {
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <rect x="3" y="5" width="13" height="14" rx="2" />
           <path d="m16 9 5-3v12l-5-3" />
+        </svg>
+      ) : kind === 'audio' ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M4 10v4" />
+          <path d="M8 7v10" />
+          <path d="M12 4v16" />
+          <path d="M16 8v8" />
+          <path d="M20 11v2" />
         </svg>
       ) : (
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -236,6 +244,7 @@ export function ProviderModelList({ providerId, summary, credentialDraft, onRefr
                   {showModelId && <span className={styles['pv-fav-item-id']} title={mid}>{mid}</span>}
                   {meta.image === true && <CapabilityIcon kind="image" />}
                   {meta.video === true && <CapabilityIcon kind="video" />}
+                  {meta.audio === true && <CapabilityIcon kind="audio" />}
                   {meta.reasoning === true && <CapabilityIcon kind="reasoning" />}
                   {meta.context && <span className={styles['pv-model-ctx']}>{formatContext(meta.context)}</span>}
                   <div className={styles['pv-fav-item-actions']}>

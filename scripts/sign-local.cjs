@@ -1,5 +1,5 @@
 /**
- * sign-local.cjs — 本地安装后的 ad-hoc 重签
+ * sign-local.cjs — 本地安装后的统一重签
  *
  * electron-builder 的 ad-hoc 签名和 Electron Framework 原始签名 Team ID 不同，
  * macOS 拒绝加载。这个脚本统一重签所有二进制，确保 Team ID 一致。
@@ -23,6 +23,10 @@ if (!fs.existsSync(APP)) {
 
 function shellQuote(value) {
   return `"${String(value).replace(/(["\\$`])/g, "\\$1")}"`;
+}
+
+function removeLaunchPolicyXattrs() {
+  execSync(`xattr -cr ${shellQuote(APP)}`, { stdio: "inherit" });
 }
 
 function resolveIdentity() {
@@ -69,6 +73,7 @@ function removeCodeSignTempFiles() {
 // 1. 签 server 里的所有 Mach-O 文件（node binary + .node addons）
 console.log(`Signing ${APP}`);
 console.log(`Using signing identity: ${SIGN_IDENTITY === "-" ? "ad-hoc (-)" : SIGN_IDENTITY}`);
+removeLaunchPolicyXattrs();
 removeCodeSignTempFiles();
 
 const serverDir = path.join(APP, "Contents", "Resources", "server");

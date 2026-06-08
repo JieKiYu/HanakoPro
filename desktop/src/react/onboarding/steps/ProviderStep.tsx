@@ -226,6 +226,7 @@ export function ProviderStep({
               />
             </div>
             <div className="custom-field">
+              <span className="ob-field-label">{t('settings.providers.apiType')}</span>
               <SelectWidget
                 className="ob-select-widget"
                 triggerClassName="ob-input"

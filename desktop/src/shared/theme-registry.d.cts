@@ -9,15 +9,7 @@ export type ThemeId =
   | 'warm-paper'
   | 'midnight'
   | 'high-contrast'
-  | 'mo-bai'
-  | 'indigo-porcelain'
-  | 'grass-aroma'
-  | 'contemplation'
-  | 'absolutely'
-  | 'delve'
-  | 'deep-think'
-  | 'new-warm-paper'
-  | 'midnight-contrast';
+  | 'mo-bai';
 
 export type StoredThemeSelection = ThemeId | 'auto';
 

@@ -5,7 +5,7 @@
  * 不用 Virtuoso，不用 Activity，不用快照，不用任何花活。
  */
 
-import { memo, useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import { memo, useRef, useEffect, useState, useCallback, useMemo, type WheelEvent as ReactWheelEvent } from 'react';
 import { useStore } from '../../stores';
 import { loadMoreMessages } from '../../stores/session-actions';
 import { useContinuousBottomScroll } from '../../hooks/use-continuous-bottom-scroll';
@@ -99,6 +99,23 @@ const Panel = memo(function Panel({ path, active }: { path: string; active: bool
       messageElementsRef.current.delete(messageId);
     }
   }, []);
+  const handleWheelCapture = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
+    if (!active || event.defaultPrevented) return;
+    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+    const el = ref.current;
+    if (!el) return;
+
+    const deltaY = normalizeWheelDeltaY(event, el);
+    if (deltaY === 0) return;
+    if (targetCanScrollVertically(event.target, el, deltaY)) return;
+
+    if (deltaY < 0) bottomScroll.cancelFollow();
+    const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    const nextTop = Math.max(0, Math.min(maxTop, el.scrollTop + deltaY));
+    if (nextTop === el.scrollTop) return;
+    el.scrollTop = nextTop;
+    event.preventDefault();
+  }, [active, bottomScroll]);
 
   // scroll 事件维护 sticky 标志 + 上滑加载更多 + 滚动中显现 scrollbar
   useEffect(() => {
@@ -305,7 +322,7 @@ const Panel = memo(function Panel({ path, active }: { path: string; active: bool
           useStore.getState().setChatSearchQuery(null);
         }}
       />
-      <div ref={ref} className={styles.sessionPanel}>
+      <div ref={ref} className={styles.sessionPanel} onWheelCapture={handleWheelCapture}>
         <div ref={contentRef} className={styles.sessionMessages}>
           {hasMore && (
             <div className={styles.loadMoreHint}>
@@ -349,6 +366,30 @@ function setScrollButton(el: HTMLElement | null, visible: boolean, scrollToBotto
   _scrollBtn.visible = visible;
   _scrollBtn.scrollToBottom = scrollToBottom;
   _scrollBtn.listeners.forEach(listener => listener());
+}
+
+function normalizeWheelDeltaY(event: ReactWheelEvent<HTMLElement>, panel: HTMLElement): number {
+  if (event.deltaMode === 1) return event.deltaY * 16;
+  if (event.deltaMode === 2) return event.deltaY * panel.clientHeight;
+  return event.deltaY;
+}
+
+function targetCanScrollVertically(target: EventTarget | null, boundary: HTMLElement, deltaY: number): boolean {
+  if (!(target instanceof Element)) return false;
+  let node: Element | null = target;
+  while (node && node !== boundary) {
+    if (node instanceof HTMLElement && canElementScrollVertically(node, deltaY)) return true;
+    node = node.parentElement;
+  }
+  return false;
+}
+
+function canElementScrollVertically(el: HTMLElement, deltaY: number): boolean {
+  if (el.scrollHeight <= el.clientHeight + 1) return false;
+  const overflowY = window.getComputedStyle(el).overflowY;
+  if (overflowY !== 'auto' && overflowY !== 'scroll' && overflowY !== 'overlay') return false;
+  if (deltaY < 0) return el.scrollTop > 0;
+  return el.scrollTop + el.clientHeight < el.scrollHeight - 1;
 }
 
 function ScrollToBottomBtn() {

@@ -115,4 +115,22 @@ describe('ChatArea continuous bottom scroll', () => {
 
     expect(metrics.scrollTop).toBe(500);
   });
+
+  it('lets wheel scrolling move an old session upward from the bottom', async () => {
+    const metrics = { scrollHeight: 1600, clientHeight: 400, scrollTop: 1200 };
+    const { container } = render(<ChatArea />);
+
+    await waitFor(() => {
+      expect(container.querySelector('[class*="sessionPanel"]')).toBeTruthy();
+    });
+
+    const panel = container.querySelector('[class*="sessionPanel"]') as HTMLElement;
+    setScrollMetrics(panel, metrics);
+
+    act(() => {
+      fireEvent.wheel(panel, { deltaY: -180 });
+    });
+
+    expect(metrics.scrollTop).toBe(1020);
+  });
 });

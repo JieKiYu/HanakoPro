@@ -6,6 +6,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { InterfaceTab } from '../InterfaceTab';
 import { useSettingsStore } from '../../store';
 import registry from '../../../../shared/theme-registry';
+import { MARKDOWN_CODE_STYLE_STORAGE_KEY } from '../../../../shared/appearance-preferences';
+
+const MO_BAI_THEME = Object.entries(registry.THEMES).find(([, entry]) => entry.i18nName === 'settings.appearance.moBai')?.[0]
+  || registry.DEFAULT_THEME;
 
 type AppearanceGlobals = typeof globalThis & {
   setTheme?: (theme: string) => void;
@@ -100,5 +104,51 @@ describe('InterfaceTab appearance state', () => {
 
     expect(paperSwitch().getAttribute('aria-checked')).toBe('false');
     expect(paperSwitch().disabled).toBe(true);
+  });
+
+  it('saves markdown code style presets for the current concrete theme', () => {
+    document.documentElement.setAttribute('data-theme', MO_BAI_THEME);
+    localStorage.setItem('hana-theme', MO_BAI_THEME);
+
+    render(React.createElement(InterfaceTab));
+
+    fireEvent.click(screen.getAllByTitle('settings.appearance.markdownCodeStyle.default')[0]);
+    fireEvent.click(screen.getByRole('option', { name: 'settings.appearance.markdownCodeStyle.jade' }));
+
+    fireEvent.click(screen.getAllByTitle('settings.appearance.markdownCodeStyle.default')[0]);
+    fireEvent.click(screen.getByRole('option', { name: 'settings.appearance.markdownCodeStyle.rose' }));
+
+    const stored = JSON.parse(localStorage.getItem(MARKDOWN_CODE_STYLE_STORAGE_KEY) || '{}');
+    expect(stored[MO_BAI_THEME]).toEqual({ inline: 'jade', strong: 'rose' });
+    expect(document.documentElement.style.getPropertyValue('--markdown-inline-code-bg')).toBe('rgba(var(--green-rgb), 0.105)');
+    expect(document.documentElement.style.getPropertyValue('--markdown-strong-code-bg')).toBe('rgba(var(--danger-rgb), 0.15)');
+    expect(document.documentElement.style.getPropertyValue('--markdown-bold-text')).toBe('');
+  });
+
+  it('switches markdown code style controls when theme changes and resets only that theme', () => {
+    localStorage.setItem(MARKDOWN_CODE_STYLE_STORAGE_KEY, JSON.stringify({
+      [MO_BAI_THEME]: { inline: 'jade', strong: 'rose', bold: 'amber' },
+      [registry.AUTO_DARK_DEFAULT]: { inline: 'amber', strong: 'ink', bold: 'jade' },
+    }));
+    localStorage.setItem('hana-theme', MO_BAI_THEME);
+    document.documentElement.setAttribute('data-theme', MO_BAI_THEME);
+
+    render(React.createElement(InterfaceTab));
+
+    expect(screen.getByTitle('settings.appearance.markdownCodeStyle.jade')).toBeTruthy();
+    expect(screen.getByTitle('settings.appearance.markdownCodeStyle.rose')).toBeTruthy();
+
+    const midnightTheme = screen.getByText('settings.appearance.midnight').closest('button');
+    fireEvent.click(midnightTheme!);
+
+    expect(screen.getByTitle('settings.appearance.markdownCodeStyle.amber')).toBeTruthy();
+    expect(screen.getByTitle('settings.appearance.markdownCodeStyle.ink')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('settings.appearance.resetMarkdownCodeStyle'));
+
+    const stored = JSON.parse(localStorage.getItem(MARKDOWN_CODE_STYLE_STORAGE_KEY) || '{}');
+    expect(stored[MO_BAI_THEME]).toEqual({ inline: 'jade', strong: 'rose', bold: 'amber' });
+    expect(stored[registry.AUTO_DARK_DEFAULT]).toBeUndefined();
+    expect(screen.getAllByTitle('settings.appearance.markdownCodeStyle.default')).toHaveLength(2);
   });
 });

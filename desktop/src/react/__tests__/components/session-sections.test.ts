@@ -3,11 +3,20 @@ import type { Session } from '../../types';
 import { buildSessionSections, type SessionSection } from '../../components/session-sections';
 
 type ListSection = Extract<SessionSection, { kind: 'pinned' | 'date' }>;
+type ProjectSection = Extract<SessionSection, { kind: 'project' }>;
 
 function expectListSection(section: SessionSection | undefined, kind: ListSection['kind']): ListSection {
   expect(section?.kind).toBe(kind);
   if (!section || (section.kind !== 'pinned' && section.kind !== 'date')) {
     throw new Error(`Expected ${kind} session section`);
+  }
+  return section;
+}
+
+function expectProjectSection(section: SessionSection | undefined): ProjectSection {
+  expect(section?.kind).toBe('project');
+  if (!section || section.kind !== 'project') {
+    throw new Error('Expected project session section');
   }
   return section;
 }
@@ -147,5 +156,37 @@ describe('buildSessionSections', () => {
       '/sessions/z-same-time.jsonl',
     ]);
     expect(expectListSection(earlierSection, 'date').items.map(i => i.path)).toEqual(['/sessions/bad-date.jsonl']);
+  });
+
+  it('groups project mode by project only without nested date sections', () => {
+    const sections = buildSessionSections([
+      makeSession({
+        path: '/sessions/project-old.jsonl',
+        cwd: '/Users/jieki/Projects/HanakoPro-mac',
+        modified: '2026-04-20T07:00:00.000Z',
+      }),
+      makeSession({
+        path: '/sessions/other.jsonl',
+        cwd: '/Users/jieki/Projects/Other',
+        modified: '2026-04-28T07:00:00.000Z',
+      }),
+      makeSession({
+        path: '/sessions/project-new.jsonl',
+        cwd: '/Users/jieki/Projects/HanakoPro-mac',
+        modified: '2026-04-29T07:00:00.000Z',
+      }),
+    ], {
+      mode: 'project',
+      now: new Date('2026-04-29T12:00:00.000Z'),
+    });
+
+    expect(sections.map(section => section.kind)).toEqual(['pinned', 'project', 'project']);
+    const hanakoSection = expectProjectSection(sections[1]);
+    expect(hanakoSection.title).toBe('HanakoPro-mac');
+    expect(hanakoSection.items.map(item => item.path)).toEqual([
+      '/sessions/project-new.jsonl',
+      '/sessions/project-old.jsonl',
+    ]);
+    expect(hanakoSection).not.toHaveProperty('subSections');
   });
 });

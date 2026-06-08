@@ -4,11 +4,18 @@
   "autoLightDefault": "warm-paper",
   "autoDarkDefault": "midnight",
   "legacyThemeAliases": {
-    "claude-design": "new-warm-paper"
+    "claude-design": "warm-paper",
+    "indigo-porcelain": "warm-paper",
+    "grass-aroma": "warm-paper",
+    "contemplation": "warm-paper",
+    "absolutely": "warm-paper",
+    "delve": "warm-paper",
+    "deep-think": "warm-paper",
+    "new-warm-paper": "warm-paper",
+    "midnight-contrast": "midnight"
   },
   "paperTextureBlockedThemeIds": [
-    "midnight",
-    "midnight-contrast"
+    "midnight"
   ],
   "autoOption": {
     "id": "auto",
@@ -39,54 +46,6 @@
       "backgroundColor": "#F1EFEA",
       "i18nName": "settings.appearance.moBai",
       "i18nMode": "settings.appearance.moBaiMode"
-    },
-    "indigo-porcelain": {
-      "cssPath": "themes/indigo-porcelain.css",
-      "backgroundColor": "#F1F3F5",
-      "i18nName": "settings.appearance.indigoPorcelain",
-      "i18nMode": "settings.appearance.indigoPorcelainMode"
-    },
-    "grass-aroma": {
-      "cssPath": "themes/grass-aroma.css",
-      "backgroundColor": "#F5F8F3",
-      "i18nName": "settings.appearance.grassAroma",
-      "i18nMode": "settings.appearance.grassAromaMode"
-    },
-    "contemplation": {
-      "cssPath": "themes/contemplation.css",
-      "backgroundColor": "#F3F5F7",
-      "i18nName": "settings.appearance.contemplation",
-      "i18nMode": "settings.appearance.contemplationMode"
-    },
-    "absolutely": {
-      "cssPath": "themes/absolutely.css",
-      "backgroundColor": "#F4F3EE",
-      "i18nName": "settings.appearance.absolutely",
-      "i18nMode": "settings.appearance.absolutelyMode"
-    },
-    "delve": {
-      "cssPath": "themes/delve.css",
-      "backgroundColor": "#FFFFFF",
-      "i18nName": "settings.appearance.delve",
-      "i18nMode": "settings.appearance.delveMode"
-    },
-    "deep-think": {
-      "cssPath": "themes/deep-think.css",
-      "backgroundColor": "#FCFCFD",
-      "i18nName": "settings.appearance.deepThink",
-      "i18nMode": "settings.appearance.deepThinkMode"
-    },
-    "new-warm-paper": {
-      "cssPath": "themes/new-warm-paper.css",
-      "backgroundColor": "#F5EFE4",
-      "i18nName": "settings.appearance.newWarmPaper",
-      "i18nMode": "settings.appearance.newWarmPaperMode"
-    },
-    "midnight-contrast": {
-      "cssPath": "themes/midnight-contrast.css",
-      "backgroundColor": "#26343D",
-      "i18nName": "settings.appearance.midnightContrast",
-      "i18nMode": "settings.appearance.midnightContrastMode"
     }
   }
 }

@@ -1,5 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { toSlash, baseName, parseCSV, isImageFile, parseMoodFromContent } from '../../utils/format';
+// @vitest-environment jsdom
+
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { toSlash, baseName, parseCSV, isImageFile, formatSessionDate, parseMoodFromContent } from '../../utils/format';
 
 describe('toSlash', () => {
   it('反斜杠转正斜杠', () => {
@@ -74,6 +76,37 @@ describe('isImageFile', () => {
   it('大小写不敏感', () => {
     expect(isImageFile('PHOTO.PNG')).toBe(true);
     expect(isImageFile('Photo.Jpg')).toBe(true);
+  });
+});
+
+describe('formatSessionDate', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-07T12:00:00.000Z'));
+    window.t = ((key: string, vars?: Record<string, string | number>) => {
+      if (key === 'time.justNow') return '刚刚';
+      if (key === 'time.minutesAgo') return `${vars?.n} 分钟前`;
+      if (key === 'time.hoursAgo') return `${vars?.n} 小时前`;
+      if (key === 'time.daysAgo') return `${vars?.n} 天前`;
+      if (key === 'time.weeksAgo') return `${vars?.n} 周前`;
+      if (key === 'time.monthsAgo') return `${vars?.n} 个月前`;
+      return key;
+    }) as typeof window.t;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('shows week labels for one to three weeks', () => {
+    expect(formatSessionDate('2026-05-31T12:00:00.000Z')).toBe('1 周前');
+    expect(formatSessionDate('2026-05-24T12:00:00.000Z')).toBe('2 周前');
+    expect(formatSessionDate('2026-05-17T12:00:00.000Z')).toBe('3 周前');
+  });
+
+  it('switches to month labels from the fourth week onward', () => {
+    expect(formatSessionDate('2026-05-10T12:00:00.000Z')).toBe('1 个月前');
+    expect(formatSessionDate('2026-04-12T12:00:00.000Z')).toBe('2 个月前');
   });
 });
 

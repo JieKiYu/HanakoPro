@@ -3531,110 +3531,6 @@
     color: #2F5061;
 }
 
-/* 靛瓷：深靛蓝 + 瓷白 */
-.theme-card[data-theme="indigo-porcelain"] {
-    background: #F1F3F5;
-}
-
-.theme-card[data-theme="indigo-porcelain"] .theme-card-name {
-    color: #0A1F3D;
-}
-
-.theme-card[data-theme="indigo-porcelain"] .theme-card-mode {
-    color: #0E5A8F;
-}
-
-/* 草香：Butter 青草绿 */
-.theme-card[data-theme="grass-aroma"] {
-    background: #F5F8F3;
-}
-
-.theme-card[data-theme="grass-aroma"] .theme-card-name {
-    color: #2E3832;
-}
-
-.theme-card[data-theme="grass-aroma"] .theme-card-mode {
-    color: #5BA88C;
-}
-
-/* 沉思：Ming 灰蓝 */
-.theme-card[data-theme="contemplation"] {
-    background: #F3F5F7;
-}
-
-.theme-card[data-theme="contemplation"] .theme-card-name {
-    color: #2C3238;
-}
-
-.theme-card[data-theme="contemplation"] .theme-card-mode {
-    color: #7E99A8;
-}
-
-/* Absolutely：暖奶油底 + 哑光赤陶 */
-.theme-card[data-theme="absolutely"] {
-    background: #F4F3EE;
-}
-
-.theme-card[data-theme="absolutely"] .theme-card-name {
-    color: #2D2B28;
-}
-
-.theme-card[data-theme="absolutely"] .theme-card-mode {
-    color: #B5846E;
-}
-
-/* Delve：ChatGPT 冷白 + 哑光绿 */
-.theme-card[data-theme="delve"] {
-    background: #FFFFFF;
-}
-
-.theme-card[data-theme="delve"] .theme-card-name {
-    color: #1A1A1A;
-}
-
-.theme-card[data-theme="delve"] .theme-card-mode {
-    color: #1A1A1A;
-}
-
-/* Deep Think：DeepSeek 白底 + 电光蓝 */
-.theme-card[data-theme="deep-think"] {
-    background: #FCFCFD;
-}
-
-.theme-card[data-theme="deep-think"] .theme-card-name {
-    color: #1D1D1F;
-}
-
-.theme-card[data-theme="deep-think"] .theme-card-mode {
-    color: #636AE8;
-}
-
-/* 新暖纸：手账宣纸 + 印章青蓝 */
-.theme-card[data-theme="new-warm-paper"] {
-    background: #F5EFE4;
-}
-
-.theme-card[data-theme="new-warm-paper"] .theme-card-name {
-    color: #2A2622;
-}
-
-.theme-card[data-theme="new-warm-paper"] .theme-card-mode {
-    color: #537D96;
-}
-
-/* 青夜高对比：更深青蓝 + 亮玫瑰 */
-.theme-card[data-theme="midnight-contrast"] {
-    background: #26343D;
-}
-
-.theme-card[data-theme="midnight-contrast"] .theme-card-name {
-    color: #F0F6FA;
-}
-
-.theme-card[data-theme="midnight-contrast"] .theme-card-mode {
-    color: #E6B1C4;
-}
-
 /* 自动：左暖纸右蓝调，硬拼色 */
 .theme-card[data-theme="auto"] {
     background: #F4F0E4;
@@ -4509,6 +4405,13 @@ a.about-link:hover {
 .pv-status-dot.on {
     background: var(--success, #5a9);
     opacity: 1;
+}
+
+.pv-list-item-icon {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+    opacity: 0.85;
 }
 
 .pv-config-alert {

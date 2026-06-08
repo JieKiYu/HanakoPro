@@ -82,9 +82,7 @@
     "bridgeShort": "연결",
     "pinned": "고정",
     "noProject": "미분류",
-    "projects": "프로젝트",
-    "byTime": "시간순",
-    "byProject": "프로젝트순"
+    "projects": "프로젝트"
   },
   "session": {
     "untitled": "새 대화",
@@ -185,6 +183,8 @@
     "minutesAgo": "{n}분 전",
     "hoursAgo": "{n}시간 전",
     "daysAgo": "{n}일 전",
+    "weeksAgo": "{n}주 전",
+    "monthsAgo": "{n}개월 전",
     "dateFormat": "{m}/{d}",
     "today": "오늘",
     "yesterday": "어제",
@@ -740,22 +740,6 @@
       "highContrastMode": "고대비",
       "moBai": "먹빛 흰색",
       "moBaiMode": "종이 먹",
-      "indigoPorcelain": "남빛 도자기",
-      "indigoPorcelainMode": "깊은 읽기",
-      "grassAroma": "풀 향기",
-      "grassAromaMode": "Butter",
-      "contemplation": "사색",
-      "contemplationMode": "Ming",
-      "absolutely": "Absolutely",
-      "absolutelyMode": "어디서 본 듯한",
-      "delve": "Delve",
-      "delveMode": "탐험해 봐요",
-      "deepThink": "Deep Think",
-      "deepThinkMode": "작은 고래",
-      "newWarmPaper": "새 따뜻한 종이",
-      "newWarmPaperMode": "종이",
-      "midnightContrast": "아오이 밤 고대비",
-      "midnightContrastMode": "선명",
       "auto": "자동",
       "autoMode": "시스템",
       "serifFont": "명조 글꼴",
@@ -764,7 +748,19 @@
       "paperTextureHint": "배경에 한지 질감을 추가해요",
       "paperTextureDarkDisabledHint": "야간 테마에서는 종이 질감을 사용할 수 없고, 밝은 테마로 돌아오면 저장된 설정대로 복원돼요",
       "leavesOverlay": "맑은 날 모드",
-      "leavesOverlayHint": "가끔은 햇볕도 쬐어요"
+      "leavesOverlayHint": "가끔은 햇볕도 쬐어요",
+      "inlineCodeStyle": "인라인 코드 스타일",
+      "markdownCodeStyleHint": "현재 테마의 Markdown 인라인 코드에만 적용돼요.",
+      "strongCodeStyle": "강조 인라인 코드 스타일",
+      "strongCodeStyleHint": "**`중요 코드`** 같은 강조 조각에 사용돼요.",
+      "resetMarkdownCodeStyle": "현재 테마 코드 스타일 기본값 복원",
+      "markdownCodeStyle": {
+        "default": "기본",
+        "ink": "먹",
+        "jade": "청죽",
+        "amber": "호박",
+        "rose": "연지"
+      }
     },
     "editor": {
       "title": "편집기",
@@ -1056,6 +1052,7 @@
       "capability": {
         "image": "이미지 입력 지원",
         "video": "비디오 입력 지원",
+        "audio": "오디오 입력 지원",
         "reasoning": "추론 지원"
       }
     },

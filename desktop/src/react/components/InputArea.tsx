@@ -36,6 +36,7 @@ import {
 import { useSkillSlashItems } from '../hooks/use-slash-items';
 import { notifyPasteUploadFailure } from '../utils/paste-upload-feedback';
 import { extractPlainUrlPaste } from '../utils/plain-url-paste';
+import { prepareChatImageUpload } from '../utils/chat-image-upload-compression';
 import { createInputEditorExtensions } from './input/input-editor-extensions';
 import {
   evaluateChatImageSendPreflight,
@@ -931,20 +932,26 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
           const ext = mimeType.split('/')[1] === 'jpeg' ? 'jpg' : (mimeType.split('/')[1] || 'png');
           const name = `${t('input.pastedImage')}.${ext}`;
           try {
+            const uploadPayload = await prepareChatImageUpload({
+              file,
+              name,
+              base64Data,
+              mimeType,
+            });
             const res = await hanaFetch('/api/upload-blob', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                name,
-                base64Data,
-                mimeType,
+                name: uploadPayload.name,
+                base64Data: uploadPayload.base64Data,
+                mimeType: uploadPayload.mimeType,
                 ...(useStore.getState().currentSessionPath ? { sessionPath: useStore.getState().currentSessionPath } : {}),
               }),
             });
             const data = await res.json();
             const upload = data?.uploads?.[0];
             if (upload?.dest) {
-              addAttachedFile({ fileId: upload.fileId, path: upload.dest, name: upload.name || name, isDirectory: false });
+              addAttachedFile({ fileId: upload.fileId, path: upload.dest, name: upload.name || uploadPayload.name, isDirectory: false });
             } else {
               notifyPasteUploadFailure(t, upload?.error);
               console.warn('[paste] upload-blob failed', upload?.error || data);

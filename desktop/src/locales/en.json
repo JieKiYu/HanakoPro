@@ -83,9 +83,7 @@
     "bridgeShort": "Bridge",
     "pinned": "Pinned",
     "noProject": "No Project",
-    "projects": "Projects",
-    "byTime": "By Time",
-    "byProject": "By Project"
+    "projects": "Projects"
   },
   "session": {
     "untitled": "New Chat",
@@ -202,6 +200,8 @@
     "minutesAgo": "{n}m ago",
     "hoursAgo": "{n}h ago",
     "daysAgo": "{n}d ago",
+    "weeksAgo": "{n}w ago",
+    "monthsAgo": "{n}mo ago",
     "dateFormat": "{m}/{d}",
     "today": "Today",
     "yesterday": "Yesterday",
@@ -733,22 +733,6 @@
       "highContrastMode": "High Contrast",
       "moBai": "Ink White",
       "moBaiMode": "Paper Ink",
-      "indigoPorcelain": "Indigo Porcelain",
-      "indigoPorcelainMode": "Deep Read",
-      "grassAroma": "Grass Aroma",
-      "grassAromaMode": "Butter",
-      "contemplation": "Contemplation",
-      "contemplationMode": "Ming",
-      "absolutely": "Absolutely",
-      "absolutelyMode": "A bit familiar",
-      "delve": "Delve",
-      "delveMode": "Let's explore",
-      "deepThink": "Deep Think",
-      "deepThinkMode": "Little Whale",
-      "newWarmPaper": "New Warm Paper",
-      "newWarmPaperMode": "Paper",
-      "midnightContrast": "Aoi Night Contrast",
-      "midnightContrastMode": "Clear",
       "auto": "Auto",
       "autoMode": "System",
       "serifFont": "Serif Font",
@@ -757,7 +741,19 @@
       "paperTextureHint": "Add a rice paper texture to the background",
       "paperTextureDarkDisabledHint": "Paper texture is unavailable in night themes and will return with your saved setting in light themes",
       "leavesOverlay": "Sunny Mode",
-      "leavesOverlayHint": "Go touch some grass (and sunlight)"
+      "leavesOverlayHint": "Go touch some grass (and sunlight)",
+      "inlineCodeStyle": "Inline Code Style",
+      "markdownCodeStyleHint": "Applies only to Markdown inline code in the current theme.",
+      "strongCodeStyle": "Emphasized Inline Code Style",
+      "strongCodeStyleHint": "Used for emphasized snippets like **`important`**.",
+      "resetMarkdownCodeStyle": "Restore Current Theme Code Defaults",
+      "markdownCodeStyle": {
+        "default": "Default",
+        "ink": "Ink",
+        "jade": "Jade",
+        "amber": "Amber",
+        "rose": "Rose"
+      }
     },
     "editor": {
       "title": "Editor",
@@ -1099,6 +1095,7 @@
       "capability": {
         "image": "Supports image input",
         "video": "Supports video input",
+        "audio": "Supports audio input",
         "reasoning": "Supports reasoning"
       }
     },

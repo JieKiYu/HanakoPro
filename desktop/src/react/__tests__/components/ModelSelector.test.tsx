@@ -114,7 +114,7 @@ describe('ModelSelector', () => {
 
     render(<ModelSelector models={models} sessionModel={storeState.sessionModelsByPath['/sessions/a.jsonl'] as any} />);
     fireEvent.click(screen.getByRole('button', { name: /DeepSeek V4 Flash/ }));
-    fireEvent.click(screen.getByRole('button', { name: /MiMo V2 Omni/ }));
+    fireEvent.click(screen.getByRole('option', { name: /MiMo V2 Omni/ }));
 
     await waitFor(() => {
       expect(addToast).toHaveBeenCalledWith('model.switchWhileStreaming', 'warning', 4000, {

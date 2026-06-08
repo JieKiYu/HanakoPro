@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useState, type CSSProperties, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 
 interface UseAnchoredDropdownOptions {
   open: boolean;
@@ -22,6 +22,7 @@ export function useAnchoredDropdown({
   zIndex = 9999,
 }: UseAnchoredDropdownOptions): CSSProperties {
   const [panelStyle, setPanelStyle] = useState<CSSProperties>({});
+  const openedAtRef = useRef(0);
 
   const updatePosition = useCallback(() => {
     const trigger = triggerRef.current;
@@ -48,6 +49,11 @@ export function useAnchoredDropdown({
 
   useEffect(() => {
     if (!open) return;
+    openedAtRef.current = performance.now();
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
     window.addEventListener('resize', updatePosition);
     return () => window.removeEventListener('resize', updatePosition);
   }, [open, updatePosition]);
@@ -55,9 +61,9 @@ export function useAnchoredDropdown({
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (triggerRef.current?.contains(target)) return;
-      if (panelRef.current?.contains(target)) return;
+      const target = e.target;
+      if (target instanceof Node && triggerRef.current?.contains(target)) return;
+      if (target instanceof Node && panelRef.current?.contains(target)) return;
       onClose();
     };
     document.addEventListener('mousedown', handler);
@@ -67,14 +73,18 @@ export function useAnchoredDropdown({
   useEffect(() => {
     if (!open) return;
     const handler = (e: Event) => {
-      const target = e.target as Node;
-      if (triggerRef.current?.contains(target)) return;
-      if (panelRef.current?.contains(target)) return;
+      const target = e.target;
+      if (target instanceof Node && triggerRef.current?.contains(target)) return;
+      if (target instanceof Node && panelRef.current?.contains(target)) return;
+      if (performance.now() - openedAtRef.current < 160) {
+        updatePosition();
+        return;
+      }
       onClose();
     };
     window.addEventListener('scroll', handler, true);
     return () => window.removeEventListener('scroll', handler, true);
-  }, [onClose, open, panelRef, triggerRef]);
+  }, [onClose, open, panelRef, triggerRef, updatePosition]);
 
   return panelStyle;
 }

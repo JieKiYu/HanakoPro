@@ -8,6 +8,7 @@ import { ProviderDetail } from './providers/ProviderDetail';
 import { AddCustomButton, AddProviderOverlay } from './providers/ProviderList';
 import { OtherModelsSection } from './providers/OtherModelsSection';
 import { SettingsSection } from '../components/SettingsSection';
+import { ProviderIcon } from '@/ui';
 import styles from '../Settings.module.css';
 
 export function ProvidersTab() {
@@ -58,6 +59,7 @@ export function ProvidersTab() {
         onClick={() => selectProvider(id)}
       >
         <span className={`${styles['pv-status-dot']}${p.has_credentials  ? ' ' + styles['on'] : ''}`} />
+        <ProviderIcon provider={id} className={styles['pv-list-item-icon']} />
         <span className={styles['pv-list-item-name']}>{preset?.label || p.display_name || id}</span>
         <span className={styles['pv-list-item-count']}>{modelCount}</span>
       </button>
@@ -71,6 +73,7 @@ export function ProvidersTab() {
       onClick={() => selectProvider(preset.value)}
     >
       <span className={styles['pv-status-dot']} />
+      <ProviderIcon provider={preset.value} className={styles['pv-list-item-icon']} />
       <span className={styles['pv-list-item-name']}>{preset.label}</span>
     </button>
   );

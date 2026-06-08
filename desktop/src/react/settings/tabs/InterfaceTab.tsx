@@ -13,8 +13,14 @@ import {
   type EditorMarkdownTypography,
 } from '../../editor/typography';
 import {
+  MARKDOWN_INLINE_CODE_STYLE_IDS,
+  MARKDOWN_STRONG_CODE_STYLE_IDS,
+  readMarkdownCodeStylePreference,
+  resetMarkdownCodeStylePreference,
+  setMarkdownCodeStylePreference,
   isPaperTextureBlockedTheme,
   isPaperTextureEnabled,
+  type MarkdownCodeStylePreference,
 } from '../../../shared/appearance-preferences';
 import styles from '../Settings.module.css';
 import registry from '../../../shared/theme-registry';
@@ -36,20 +42,24 @@ type MarkdownTypographyKey = keyof EditorMarkdownTypography;
 
 interface AppearancePrefs {
   currentTheme: string;
+  concreteTheme: string;
   serifEnabled: boolean;
   paperTextureEnabled: boolean;
   paperTextureBlocked: boolean;
   leavesOverlayEnabled: boolean;
+  markdownCodeStyle: MarkdownCodeStylePreference;
 }
 
 function readAppearancePrefs(): AppearancePrefs {
-  const concreteTheme = document.documentElement.getAttribute('data-theme');
+  const concreteTheme = document.documentElement.getAttribute('data-theme') || registry.DEFAULT_THEME;
   return {
     currentTheme: registry.migrateSavedTheme(localStorage.getItem(registry.STORAGE_KEY)),
+    concreteTheme,
     serifEnabled: localStorage.getItem('hana-font-serif') !== '0',
     paperTextureEnabled: isPaperTextureEnabled(localStorage),
     paperTextureBlocked: isPaperTextureBlockedTheme(concreteTheme),
     leavesOverlayEnabled: localStorage.getItem('hana-leaves-overlay') === '1',
+    markdownCodeStyle: readMarkdownCodeStylePreference(concreteTheme, localStorage),
   };
 }
 
@@ -77,15 +87,25 @@ export function InterfaceTab() {
   }, []);
   const {
     currentTheme,
+    concreteTheme,
     serifEnabled,
     paperTextureEnabled,
     paperTextureBlocked,
     leavesOverlayEnabled,
+    markdownCodeStyle,
   } = appearancePrefs;
   const editorTypography = useMemo(
     () => normalizeEditorTypography(settingsConfig?.editor),
     [settingsConfig?.editor],
   );
+  const inlineCodeStyleOptions = MARKDOWN_INLINE_CODE_STYLE_IDS.map(value => ({
+    value,
+    label: t(`settings.appearance.markdownCodeStyle.${value}`),
+  }));
+  const strongCodeStyleOptions = MARKDOWN_STRONG_CODE_STYLE_IDS.map(value => ({
+    value,
+    label: t(`settings.appearance.markdownCodeStyle.${value}`),
+  }));
 
   const saveEditorTypography = async (patch: Partial<EditorMarkdownTypography>) => {
     const previousConfig = useSettingsStore.getState().settingsConfig || {};
@@ -206,6 +226,49 @@ export function InterfaceTab() {
             />
           }
         />
+        <SettingsRow
+          label={t('settings.appearance.inlineCodeStyle')}
+          hint={t('settings.appearance.markdownCodeStyleHint')}
+          control={
+            <SelectWidget
+              options={inlineCodeStyleOptions}
+              value={markdownCodeStyle.inline}
+              onChange={(value) => {
+                setMarkdownCodeStylePreference({ inline: value as MarkdownCodeStylePreference['inline'] }, concreteTheme, localStorage);
+                platform?.settingsChanged?.('markdown-code-style-changed', { theme: concreteTheme, inline: value });
+                refreshAppearancePrefs();
+              }}
+            />
+          }
+        />
+        <SettingsRow
+          label={t('settings.appearance.strongCodeStyle')}
+          hint={t('settings.appearance.strongCodeStyleHint')}
+          control={
+            <SelectWidget
+              options={strongCodeStyleOptions}
+              value={markdownCodeStyle.strong}
+              onChange={(value) => {
+                setMarkdownCodeStylePreference({ strong: value as MarkdownCodeStylePreference['strong'] }, concreteTheme, localStorage);
+                platform?.settingsChanged?.('markdown-code-style-changed', { theme: concreteTheme, strong: value });
+                refreshAppearancePrefs();
+              }}
+            />
+          }
+        />
+        <SettingsSection.Footer>
+          <button
+            type="button"
+            className={styles['settings-save-btn-ghost']}
+            onClick={() => {
+              resetMarkdownCodeStylePreference(concreteTheme, localStorage);
+              platform?.settingsChanged?.('markdown-code-style-changed', { theme: concreteTheme, reset: true });
+              refreshAppearancePrefs();
+            }}
+          >
+            {t('settings.appearance.resetMarkdownCodeStyle')}
+          </button>
+        </SettingsSection.Footer>
       </SettingsSection>
 
       <SettingsSection title={t('settings.editor.title')}>
