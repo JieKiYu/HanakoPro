@@ -383,7 +383,8 @@
 /* 助手消息 */
 .messageAssistant {
     --chat-message-action-safe-area: 7rem;
-    --chat-code-block-width: calc(100% - var(--chat-message-action-safe-area));
+    --chat-message-content-width: calc(100% - var(--chat-message-action-safe-area));
+    --chat-code-block-width: var(--chat-message-content-width);
     --chat-module-card-inset: 0.75rem;
     --chat-module-inner-x: 0.75rem;
     color: var(--hana-text);
@@ -397,9 +398,25 @@
 /* 助手回答正文用宋体 */
 .messageAssistant :global(.md-content) {
     font-family: var(--font-serif);
-    width: 100%;
-    max-width: 100%;
+    width: var(--chat-message-content-width, 100%);
+    max-width: var(--chat-message-content-width, 100%);
     min-width: 0;
+    box-sizing: border-box;
+    overflow-wrap: break-word;
+    --chat-code-block-width: 100%;
+}
+
+.messageAssistant :global(.md-content table) {
+    display: block;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.messageAssistant :global(.md-content th),
+.messageAssistant :global(.md-content td) {
+    overflow-wrap: anywhere;
 }
 
 .markdownCodeScrollbar {
