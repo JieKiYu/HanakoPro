@@ -598,6 +598,44 @@ describe("normalizeProviderPayload — DeepSeek Anthropic 模式", () => {
 });
 
 describe("normalizeProviderContextMessages — assistant native image replay", () => {
+  it("发送给 provider 前剥离 assistant 普通 commentary 草稿文本", () => {
+    const messages = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "<mood>气：安静</mood>",
+            textSignature: JSON.stringify({ v: 1, id: "msg_mood", phase: "commentary" }),
+          },
+          {
+            type: "text",
+            text: "Need answer user asks port/address.",
+            textSignature: JSON.stringify({ v: 1, id: "msg_draft", phase: "commentary" }),
+          },
+          {
+            type: "text",
+            text: "端口是 8123。",
+            textSignature: JSON.stringify({ v: 1, id: "msg_final", phase: "final_answer" }),
+          },
+        ],
+      },
+    ];
+
+    const result = normalizeProviderContextMessages(messages, {
+      id: "gpt-5.5",
+      provider: "k+",
+      api: "openai-responses",
+      input: ["text"],
+    });
+
+    expect(result).not.toBe(messages);
+    expect(result[0].content.map(block => block.text)).toEqual([
+      "<mood>气：安静</mood>",
+      "端口是 8123。",
+    ]);
+  });
+
   it("发送给 provider 前剥离 assistant 原生生图 base64 和 Responses replay 签名", () => {
     const messages = [
       { role: "user", content: [{ type: "text", text: "生成头像" }] },

@@ -16,6 +16,7 @@ import { modelSupportsDirectVideoInput, modelSupportsVideoInput } from "../share
 const IMAGE_PLACEHOLDER_TEXT = "[图片已省略：当前模型不支持图像输入]";
 const VIDEO_PLACEHOLDER_TEXT = "[视频已省略：当前模型不支持视频输入]";
 const ASSISTANT_GENERATED_IMAGE_PLACEHOLDER_TEXT = "[生成图片已省略：图片文件已保存到本次对话，不会把图片二进制重放进模型上下文]";
+const VISIBLE_COMMENTARY_TAG_PATTERN = /<(?:mood|pulse|reflect)(?:\s|>|\/)/i;
 
 /**
  * 模型是否支持 image 输入（Pi SDK 标准字段 input 数组）。
@@ -178,6 +179,72 @@ export function sanitizeAssistantGeneratedImagesForContext(messages) {
   };
 }
 
+/**
+ * Responses textSignature 中 phase=commentary 的普通 text block 是过程态文本，
+ * 不应进入可见正文或下一轮模型上下文。保留 mood/pulse/reflect 这类已声明的
+ * 可见结构块；签名缺失、签名解析失败或未知 phase 时保守放行。
+ *
+ * @param {any} block
+ * @returns {boolean}
+ */
+export function isVisibleAssistantTextBlock(block) {
+  if (!block || typeof block !== "object") return true;
+  if (block.type !== "text") return true;
+  if (!Object.prototype.hasOwnProperty.call(block, "textSignature")) return true;
+
+  const signature = parseTextSignature(block.textSignature);
+  if (!signature || signature.phase !== "commentary") return true;
+
+  const text = typeof block.text === "string" ? block.text : "";
+  return VISIBLE_COMMENTARY_TAG_PATTERN.test(text);
+}
+
+/**
+ * @param {any} content
+ * @returns {any}
+ */
+export function sanitizeVisibleAssistantTextBlocks(content) {
+  if (!Array.isArray(content)) return content;
+  let changed = false;
+  const out = [];
+  for (const block of content) {
+    if (isVisibleAssistantTextBlock(block)) {
+      out.push(block);
+    } else {
+      changed = true;
+    }
+  }
+  return changed ? out : content;
+}
+
+/**
+ * 过滤上下文中不该 replay 给模型的 assistant commentary 文本。
+ *
+ * @param {ReadonlyArray<any>} messages
+ * @returns {{ messages: any[], stripped: number }}
+ */
+export function sanitizeAssistantCommentaryForContext(messages) {
+  if (!Array.isArray(messages)) return { messages, stripped: 0 };
+  let stripped = 0;
+  let changed = false;
+  const out = messages.map((msg) => {
+    if (!msg || typeof msg !== "object") return msg;
+    if (msg.role !== "assistant" || !Array.isArray(msg.content)) return msg;
+    const nextContent = [];
+    for (const block of msg.content) {
+      if (isVisibleAssistantTextBlock(block)) {
+        nextContent.push(block);
+      } else {
+        stripped++;
+        changed = true;
+      }
+    }
+    if (nextContent.length === msg.content.length) return msg;
+    return { ...msg, content: nextContent };
+  });
+  return { messages: changed ? out : messages, stripped };
+}
+
 function emptySanitizeResult(messages) {
   return { messages, stripped: 0, strippedImages: 0, strippedVideos: 0 };
 }
@@ -229,4 +296,14 @@ function isInlineImageBlock(block) {
 function appendAssistantContextTextPart(parts, text) {
   const value = typeof text === "string" ? text.trim() : "";
   if (value) parts.push(value);
+}
+
+function parseTextSignature(value) {
+  if (!value || typeof value !== "string") return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }

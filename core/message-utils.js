@@ -7,6 +7,7 @@ import fs from "fs/promises";
 import path from "path";
 import { isToolCallBlock, getToolArgs } from "./llm-utils.js";
 import { SessionManager } from "../lib/pi-sdk/index.js";
+import { isVisibleAssistantTextBlock } from "./message-sanitizer.js";
 
 /**
  * 工具调用参数摘要键列表
@@ -44,7 +45,7 @@ export function extractTextContent(content, { stripThink = false } = {}) {
   }
   if (!Array.isArray(content)) return { text: "", thinking: "", toolUses: [], images: [] };
   const rawText = content
-    .filter(block => block.type === "text" && block.text)
+    .filter(block => block.type === "text" && block.text && isVisibleAssistantTextBlock(block))
     .map(block => block.text)
     .join("");
   const images = content

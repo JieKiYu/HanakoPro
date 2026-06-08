@@ -30,7 +30,10 @@ import {
   getReasoningProfile as getDeclaredReasoningProfile,
   getThinkingFormat as getDeclaredThinkingFormat,
 } from "../shared/model-capabilities.js";
-import { sanitizeAssistantGeneratedImagesForContext } from "./message-sanitizer.js";
+import {
+  sanitizeAssistantCommentaryForContext,
+  sanitizeAssistantGeneratedImagesForContext,
+} from "./message-sanitizer.js";
 
 /**
  * 子模块注册表。顺序敏感：first-match-wins。
@@ -143,7 +146,8 @@ export function normalizeProviderPayload(payload, model, options = {}) {
 export function normalizeProviderContextMessages(messages, model, options = {}) {
   if (!Array.isArray(messages)) return messages;
 
-  let result = sanitizeAssistantGeneratedImagesForContext(messages).messages;
+  let result = sanitizeAssistantCommentaryForContext(messages).messages;
+  result = sanitizeAssistantGeneratedImagesForContext(result).messages;
 
   for (const mod of PROVIDER_MODULES) {
     if (mod.matches(model)) {

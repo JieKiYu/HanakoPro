@@ -11,6 +11,8 @@
  */
 import { describe, it, expect } from "vitest";
 import {
+  isVisibleAssistantTextBlock,
+  sanitizeAssistantCommentaryForContext,
   sanitizeMessagesForModel,
   sanitizeAssistantGeneratedImagesForContext,
   modelSupportsImage,
@@ -20,6 +22,14 @@ import {
 const IMG_BLOCK = { type: "image", data: "BASE64DATA", mimeType: "image/png" };
 const VIDEO_BLOCK = { type: "video", data: "BASE64VIDEO", mimeType: "video/mp4" };
 const TEXT_BLOCK = (text) => ({ type: "text", text });
+
+function signedText(text, phase) {
+  return {
+    type: "text",
+    text,
+    textSignature: JSON.stringify({ v: 1, id: `msg_${phase}`, phase }),
+  };
+}
 
 describe("modelSupportsImage", () => {
   it("input 含 image → true", () => {
@@ -202,6 +212,38 @@ describe("sanitizeMessagesForModel", () => {
     expect(res.messages[0]).toBe(pure);  // 纯文本未复制
     expect(res.messages[1]).not.toBe(dirty);  // 脏消息已复制
     expect(res.messages[2]).not.toBe(tr);
+  });
+});
+
+describe("assistant commentary text block visibility", () => {
+  it("filters non-mood commentary text while keeping final answer text", () => {
+    const messages = [
+      {
+        role: "assistant",
+        content: [
+          signedText("<mood>气：安静</mood>", "commentary"),
+          signedText("Need answer user asks port/address.", "commentary"),
+          signedText("端口是 8123。", "final_answer"),
+        ],
+      },
+    ];
+
+    const res = sanitizeAssistantCommentaryForContext(messages);
+
+    expect(res.stripped).toBe(1);
+    expect(res.messages[0].content).toEqual([
+      signedText("<mood>气：安静</mood>", "commentary"),
+      signedText("端口是 8123。", "final_answer"),
+    ]);
+  });
+
+  it("keeps unsigned and legacy-signed text blocks conservatively", () => {
+    expect(isVisibleAssistantTextBlock({ type: "text", text: "普通文本" })).toBe(true);
+    expect(isVisibleAssistantTextBlock({
+      type: "text",
+      text: "legacy",
+      textSignature: "not-json",
+    })).toBe(true);
   });
 });
 

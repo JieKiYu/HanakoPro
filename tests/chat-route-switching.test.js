@@ -443,6 +443,85 @@ describe("chat route streaming error lifecycle", () => {
     expect(statusFalseIndex).toBeGreaterThan(turnEndIndex);
     expect(contextUsageIndex).toBeGreaterThan(statusFalseIndex);
   });
+
+  it("filters non-mood commentary text deltas from the visible stream", () => {
+    let createHandlers;
+    let subscriber;
+    const upgradeWebSocket = vi.fn((factory) => {
+      createHandlers = factory;
+      return () => new Response(null);
+    });
+    const hub = {
+      subscribe: vi.fn((cb) => {
+        subscriber = cb;
+      }),
+      send: vi.fn(async () => {}),
+    };
+    const engine = {
+      agentName: "Hana",
+      abortAllStreaming: vi.fn(async () => {}),
+      getSessionByPath: vi.fn(() => null),
+      isSessionStreaming: vi.fn(() => false),
+      isSessionSwitching: vi.fn(() => false),
+      steerSession: vi.fn(() => false),
+      slashDispatcher: null,
+    };
+
+    createChatRoute(engine, hub, { upgradeWebSocket });
+    const handlers = createHandlers({});
+    const ws = {
+      readyState: 1,
+      send: vi.fn(),
+    };
+
+    handlers.onOpen({}, ws);
+    subscriber({ type: "session_status", isStreaming: true }, "/tmp/session.jsonl");
+    subscriber({
+      type: "message_update",
+      assistantMessageEvent: {
+        type: "text_delta",
+        contentIndex: 0,
+        delta: "Need answer user asks port/address.",
+        partial: {
+          content: [{
+            type: "text",
+            text: "Need answer user asks port/address.",
+            textSignature: JSON.stringify({ v: 1, id: "msg_draft", phase: "commentary" }),
+          }],
+        },
+      },
+    }, "/tmp/session.jsonl");
+    subscriber({
+      type: "message_update",
+      assistantMessageEvent: {
+        type: "text_delta",
+        contentIndex: 1,
+        delta: "<mood>气：安静</mood>",
+        partial: {
+          content: [
+            {
+              type: "text",
+              text: "Need answer user asks port/address.",
+              textSignature: JSON.stringify({ v: 1, id: "msg_draft", phase: "commentary" }),
+            },
+            {
+              type: "text",
+              text: "<mood>气：安静</mood>",
+              textSignature: JSON.stringify({ v: 1, id: "msg_mood", phase: "commentary" }),
+            },
+          ],
+        },
+      },
+    }, "/tmp/session.jsonl");
+
+    const sent = ws.send.mock.calls.map(([raw]) => JSON.parse(raw));
+    expect(sent.some(msg => msg.type === "text_delta" && String(msg.delta).includes("Need answer"))).toBe(false);
+    expect(sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "mood_start", sessionPath: "/tmp/session.jsonl" }),
+      expect.objectContaining({ type: "mood_text", delta: "气：安静", sessionPath: "/tmp/session.jsonl" }),
+      expect.objectContaining({ type: "mood_end", sessionPath: "/tmp/session.jsonl" }),
+    ]));
+  });
 });
 
 describe("chat route interrupt prompt", () => {

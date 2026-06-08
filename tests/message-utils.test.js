@@ -94,6 +94,28 @@ describe("extractTextContent", () => {
     expect(result.images).toEqual([]);
   });
 
+  it("content block 数组过滤非 mood 的 commentary textSignature 文本", () => {
+    const content = [
+      {
+        type: "text",
+        text: "<mood>气：安静</mood>",
+        textSignature: JSON.stringify({ v: 1, id: "msg_mood", phase: "commentary" }),
+      },
+      {
+        type: "text",
+        text: "Need answer user asks port/address.",
+        textSignature: JSON.stringify({ v: 1, id: "msg_draft", phase: "commentary" }),
+      },
+      {
+        type: "text",
+        text: "端口是 8123。",
+        textSignature: JSON.stringify({ v: 1, id: "msg_final", phase: "final_answer" }),
+      },
+    ];
+    const result = extractTextContent(content);
+    expect(result.text).toBe("<mood>气：安静</mood>端口是 8123。");
+  });
+
   it("content block 数组提取 thinking block", () => {
     const content = [
       { type: "text", text: "answer" },

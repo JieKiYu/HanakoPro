@@ -1769,6 +1769,7 @@
     "browserError": "エラー: {msg}",
     "browserAlreadyRunning": "ブラウザは既に実行中です",
     "browserLaunched": "ブラウザを起動しました",
+    "browserStartNeedsNavigation": "ブラウザは起動していますが、具体的なページはまだ開いていません。キャンバス、ページ、ダッシュボード、プレビュー、dev server を起動するタスクの場合は、対応するサービスを見つけるか起動し、実際の URL を取得して browser.navigate を呼び出してください。",
     "browserNotRunning": "ブラウザは実行されていません",
     "browserClosed": "ブラウザを閉じました",
     "browserNavigateNeedUrl": "navigate には url パラメータが必要です",

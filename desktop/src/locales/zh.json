@@ -1834,6 +1834,7 @@
     "browserError": "错误: {msg}",
     "browserAlreadyRunning": "浏览器已在运行中",
     "browserLaunched": "浏览器已启动",
+    "browserStartNeedsNavigation": "浏览器已启动，但还没有打开具体页面。若任务是启动画布、页面、仪表盘、预览或 dev server，请继续找到或启动对应服务，拿到真实 URL，并调用 browser.navigate 打开。",
     "browserNotRunning": "浏览器未在运行",
     "browserClosed": "浏览器已关闭",
     "browserNavigateNeedUrl": "navigate 需要 url 参数",

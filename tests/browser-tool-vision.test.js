@@ -11,10 +11,12 @@ const snapshotMock = vi.fn();
 const isRunningMock = vi.fn();
 const currentUrlMock = vi.fn();
 const thumbnailMock = vi.fn();
+const launchMock = vi.fn();
 
 vi.mock("../lib/browser/browser-manager.js", () => ({
   BrowserManager: {
     instance: () => ({
+      launch: launchMock,
       screenshot: screenshotMock,
       snapshot: snapshotMock,
       isRunning: isRunningMock,
@@ -43,6 +45,7 @@ describe("browser screenshot vision adaptation", () => {
     isRunningMock.mockReturnValue(true);
     currentUrlMock.mockReturnValue("https://example.test/page");
     thumbnailMock.mockResolvedValue("THUMBNAIL_BASE64");
+    launchMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -175,6 +178,25 @@ describe("browser screenshot vision adaptation", () => {
       error: expect.stringContaining("浏览器实例已不可用"),
     }));
     expect(thumbnailMock).not.toHaveBeenCalled();
+  });
+
+  it("marks browser start as needing a follow-up navigate for page-launch tasks", async () => {
+    isRunningMock.mockReturnValue(false);
+    currentUrlMock.mockReturnValue("");
+    const tool = createBrowserTool(() => "/tmp/session.jsonl");
+
+    const result = await tool.execute("call-1", { action: "start" }, null, null, makeCtx());
+
+    expect(launchMock).toHaveBeenCalledWith("/tmp/session.jsonl");
+    expect(result.content[0]).toEqual(expect.objectContaining({
+      type: "text",
+      text: expect.stringContaining("browser.navigate"),
+    }));
+    expect(result.details).toEqual(expect.objectContaining({
+      status: "launched",
+      needsNavigation: true,
+      navigationHint: expect.stringContaining("真实 URL"),
+    }));
   });
 
   it("allows text-only browser screenshots when auxiliary vision is enabled", async () => {

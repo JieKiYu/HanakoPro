@@ -308,6 +308,43 @@ describe('PromptTab dao prompt editor', () => {
     }));
   });
 
+  it('saves the editable module dialog from the header button', async () => {
+    seedSettings({
+      mode: 'origin',
+      origin: {
+        root: '# 核\n\n初始核',
+        mood: '# 照\n\n初始照',
+        conduct: '# 德\n\n初始德',
+        includeMood: true,
+      },
+    });
+
+    render(<PromptTab />);
+
+    fireEvent.click(screen.getByRole('button', { name: /编辑 德/ }));
+    const dialog = await screen.findByRole('dialog', { name: /德/ });
+    fireEvent.change(within(dialog).getByLabelText('德内容'), {
+      target: { value: '# 德\n\n保存按钮写入的德' },
+    });
+    mocks.autoSaveConfig.mockClear();
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }));
+
+    await waitFor(() => {
+      expect(mocks.autoSaveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          promptComposer: expect.objectContaining({
+            mode: 'origin',
+            origin: expect.objectContaining({
+              conduct: '# 德\n\n保存按钮写入的德',
+              anchor: '',
+            }),
+          }),
+        }),
+        {},
+      );
+    });
+  });
+
   it('does not backfill 核 from legacy simpleContent', async () => {
     seedSettings({
       mode: 'origin',

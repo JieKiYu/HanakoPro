@@ -1771,6 +1771,7 @@
     "browserError": "錯誤: {msg}",
     "browserAlreadyRunning": "瀏覽器已在執行中",
     "browserLaunched": "瀏覽器已啟動",
+    "browserStartNeedsNavigation": "瀏覽器已啟動，但尚未開啟具體頁面。若任務是啟動畫布、頁面、儀表板、預覽或 dev server，請繼續找到或啟動對應服務，取得真實 URL，並呼叫 browser.navigate 開啟。",
     "browserNotRunning": "瀏覽器未在執行",
     "browserClosed": "瀏覽器已關閉",
     "browserNavigateNeedUrl": "navigate 需要 url 參數",

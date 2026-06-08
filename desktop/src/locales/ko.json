@@ -1761,6 +1761,7 @@
     "browserError": "오류: {msg}",
     "browserAlreadyRunning": "브라우저가 이미 실행 중이에요",
     "browserLaunched": "브라우저를 시작했어요",
+    "browserStartNeedsNavigation": "브라우저는 시작됐지만 아직 특정 페이지를 열지는 않았어요. 캔버스, 페이지, 대시보드, 프리뷰 또는 dev server를 시작하는 작업이라면 해당 서비스를 찾거나 실행하고 실제 URL을 얻은 뒤 browser.navigate를 호출해 주세요.",
     "browserNotRunning": "브라우저가 실행되고 있지 않아요",
     "browserClosed": "브라우저를 닫았어요",
     "browserNavigateNeedUrl": "navigate에는 url 파라미터가 필요해요",

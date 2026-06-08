@@ -28,6 +28,7 @@ import { isAbortLikeError, isAbortLikeMessage } from "../../shared/abort-errors.
 import { resolveContextConfig } from "../../core/context-compressor.js";
 import { MANUAL_CONTEXT_COMPRESSION_THRESHOLD } from "../../shared/context-compression.js";
 import { errorBus } from "../../shared/error-bus.js";
+import { isVisibleAssistantTextBlock } from "../../core/message-sanitizer.js";
 import { waitTimingDetails } from "../../lib/tools/wait-contract.js";
 import { MAX_CHAT_IMAGE_BASE64_CHARS, isAllowedChatImageMime, isChatImageBase64WithinLimit } from "../../shared/image-mime.js";
 import { isAllowedChatVideoMime, isChatVideoBase64WithinLimit } from "../../shared/video-mime.js";
@@ -63,9 +64,20 @@ function extractText(content) {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return content
-    .filter(b => b.type === "text" && b.text)
+    .filter(b => b.type === "text" && b.text && isVisibleAssistantTextBlock(b))
     .map(b => b.text)
     .join("");
+}
+
+function textBlockFromAssistantEvent(event) {
+  const content = event?.partial?.content;
+  if (!Array.isArray(content) || typeof event.contentIndex !== "number") return null;
+  return content[event.contentIndex] || null;
+}
+
+function isVisibleTextDeltaEvent(event) {
+  const block = textBlockFromAssistantEvent(event);
+  return !block || isVisibleAssistantTextBlock(block);
 }
 
 function zeroUsage() {
@@ -709,6 +721,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       const sub = event.assistantMessageEvent?.type;
 
       if (sub === "text_delta") {
+        if (!isVisibleTextDeltaEvent(event.assistantMessageEvent)) return;
         ss.hasOutput = true;
         if (ss.isThinking) {
           ss.isThinking = false;

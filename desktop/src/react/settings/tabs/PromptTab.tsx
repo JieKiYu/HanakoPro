@@ -314,6 +314,14 @@ export function PromptTab() {
     void saveDraft(normalized);
   };
 
+  const saveCurrentDraft = () => {
+    if (autosaveTimerRef.current) {
+      window.clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+    void saveDraft(normalizeDraft(draft));
+  };
+
   const updateToolOverride = (name: string, patch: Partial<ToolOverride>) => {
     const existing = getToolOverride(name);
     setAndSaveDraft({
@@ -653,7 +661,12 @@ export function PromptTab() {
               </div>
               <div className={styles['prompt-preview-actions']}>
                 {isEditableModuleKey(activeModule.key) && (
-                  <button type="button" className={styles['settings-save-btn-sm']} onClick={() => resetModule(activeModule.key)}>恢复默认</button>
+                  <>
+                    <button type="button" className={styles['settings-save-btn-sm']} onClick={saveCurrentDraft} disabled={saving}>
+                      {saving ? '保存中…' : '保存'}
+                    </button>
+                    <button type="button" className={styles['settings-save-btn-sm']} onClick={() => resetModule(activeModule.key)}>恢复默认</button>
+                  </>
                 )}
                 <button type="button" className={styles['prompt-preview-close']} onClick={() => setModuleDialogKey(null)}>×</button>
               </div>
