@@ -77,37 +77,22 @@ function applyTailFade(root: HTMLElement, count: number): void {
   }
 }
 
-function enhanceHorizontalScrollbars(root: HTMLElement): () => void {
+function enhanceCodeBlockScrollbars(root: HTMLElement): () => void {
   const oldBars = Array.from(root.querySelectorAll<HTMLElement>('[data-md-horizontal-scrollbar="true"]'));
   for (const bar of oldBars) bar.remove();
 
   const cleanups: Array<() => void> = [];
   const updates: Array<() => void> = [];
-  const codeBlocks = Array.from(root.querySelectorAll<HTMLPreElement>('pre'));
-  const tableWrappers = Array.from(root.querySelectorAll<HTMLElement>('.md-table-wrapper'));
-  const scrollers = [
-    ...codeBlocks.map(scroller => ({
-      scroller,
-      trackClassName: styles.markdownCodeScrollbar,
-      thumbClassName: styles.markdownCodeScrollbarThumb,
-      insertAfter: scroller,
-    })),
-    ...tableWrappers.map(scroller => ({
-      scroller,
-      trackClassName: styles.markdownTableScrollbar,
-      thumbClassName: styles.markdownTableScrollbarThumb,
-      insertAfter: scroller,
-    })),
-  ];
+  const scrollers = Array.from(root.querySelectorAll<HTMLPreElement>('pre'));
 
-  for (const { scroller, trackClassName, thumbClassName, insertAfter } of scrollers) {
+  for (const scroller of scrollers) {
     const track = document.createElement('div');
     const thumb = document.createElement('div');
-    track.className = trackClassName;
+    track.className = styles.markdownCodeScrollbar;
     track.dataset.mdHorizontalScrollbar = 'true';
-    thumb.className = thumbClassName;
+    thumb.className = styles.markdownCodeScrollbarThumb;
     track.appendChild(thumb);
-    insertAfter.insertAdjacentElement('afterend', track);
+    scroller.insertAdjacentElement('afterend', track);
 
     const update = () => {
       const canScrollX = scroller.scrollWidth > scroller.clientWidth + 1;
@@ -191,12 +176,129 @@ function enhanceHorizontalScrollbars(root: HTMLElement): () => void {
     observer = new ResizeObserverCtor(() => {
       for (const update of updates) update();
     });
-    for (const { scroller } of scrollers) observer.observe(scroller);
+    for (const scroller of scrollers) observer.observe(scroller);
     observer.observe(root);
   }
 
   return () => {
     observer?.disconnect();
+    for (const cleanup of cleanups) cleanup();
+  };
+}
+
+function enhanceTableCellTooltips(root: HTMLElement): () => void {
+  const wrappers = Array.from(root.querySelectorAll<HTMLElement>('.md-table-wrapper'));
+  if (wrappers.length === 0) return () => {};
+
+  const tooltip = document.createElement('div');
+  tooltip.className = styles.markdownCellTooltip;
+  tooltip.dataset.mdCellTooltip = 'true';
+  tooltip.hidden = true;
+  document.body.appendChild(tooltip);
+
+  let activeCell: HTMLElement | null = null;
+  let frame = 0;
+
+  const cells = wrappers.flatMap(wrapper => (
+    Array.from(wrapper.querySelectorAll<HTMLElement>('th, td'))
+  ));
+
+  const positionTooltip = (cell: HTMLElement) => {
+    const cellRect = cell.getBoundingClientRect();
+    const tooltipRect = tooltip.getBoundingClientRect();
+    const viewportPadding = 12;
+    const left = Math.min(
+      window.innerWidth - tooltipRect.width - viewportPadding,
+      Math.max(viewportPadding, cellRect.left),
+    );
+    let top = cellRect.bottom + 6;
+    if (top + tooltipRect.height > window.innerHeight - viewportPadding) {
+      top = Math.max(viewportPadding, cellRect.top - tooltipRect.height - 6);
+    }
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+  };
+
+  const hideTooltip = () => {
+    activeCell = null;
+    tooltip.hidden = true;
+  };
+
+  const showTooltip = (cell: HTMLElement) => {
+    if (cell.dataset.mdCellTruncated !== 'true') return;
+    const text = (cell.textContent || '').trim();
+    if (!text) return;
+    activeCell = cell;
+    tooltip.textContent = text;
+    tooltip.hidden = false;
+    tooltip.style.visibility = 'hidden';
+    tooltip.style.left = '0px';
+    tooltip.style.top = '0px';
+    window.requestAnimationFrame(() => {
+      if (activeCell !== cell) return;
+      positionTooltip(cell);
+      tooltip.style.visibility = 'visible';
+    });
+  };
+
+  const update = () => {
+    hideTooltip();
+    for (const wrapper of wrappers) {
+      const table = wrapper.querySelector<HTMLTableElement>('table');
+      if (!table) continue;
+      wrapper.classList.remove('md-table-overflowing');
+      const isOverflowing = table.scrollWidth > wrapper.clientWidth + 1;
+      wrapper.classList.toggle('md-table-overflowing', isOverflowing);
+    }
+    for (const cell of cells) {
+      const isTruncated = cell.closest('.md-table-overflowing') && cell.scrollWidth > cell.clientWidth + 1;
+      if (isTruncated) {
+        cell.dataset.mdCellTruncated = 'true';
+      } else {
+        delete cell.dataset.mdCellTruncated;
+      }
+    }
+  };
+
+  const scheduleUpdate = () => {
+    window.cancelAnimationFrame(frame);
+    frame = window.requestAnimationFrame(update);
+  };
+
+  const cleanups: Array<() => void> = [];
+  for (const cell of cells) {
+    const mouseEnter = () => showTooltip(cell);
+    const mouseMove = () => {
+      if (activeCell === cell) positionTooltip(cell);
+    };
+    cell.addEventListener('mouseenter', mouseEnter);
+    cell.addEventListener('mousemove', mouseMove);
+    cell.addEventListener('mouseleave', hideTooltip);
+    cleanups.push(() => {
+      cell.removeEventListener('mouseenter', mouseEnter);
+      cell.removeEventListener('mousemove', mouseMove);
+      cell.removeEventListener('mouseleave', hideTooltip);
+      delete cell.dataset.mdCellTruncated;
+    });
+  }
+
+  const ResizeObserverCtor = window.ResizeObserver;
+  let observer: ResizeObserver | null = null;
+  if (ResizeObserverCtor) {
+    observer = new ResizeObserverCtor(scheduleUpdate);
+    observer.observe(root);
+    for (const wrapper of wrappers) observer.observe(wrapper);
+  }
+  window.addEventListener('resize', scheduleUpdate);
+  frame = window.requestAnimationFrame(update);
+
+  return () => {
+    window.cancelAnimationFrame(frame);
+    window.removeEventListener('resize', scheduleUpdate);
+    observer?.disconnect();
+    hideTooltip();
+    tooltip.remove();
+    for (const wrapper of wrappers) wrapper.classList.remove('md-table-overflowing');
     for (const cleanup of cleanups) cleanup();
   };
 }
@@ -213,7 +315,12 @@ export const MarkdownContent = memo(function MarkdownContent({ html, className, 
   useEffect(() => {
     if (!ref.current) return;
     injectCopyButtons(ref.current);
-    return enhanceHorizontalScrollbars(ref.current);
+    const cleanupCodeBlockScrollbars = enhanceCodeBlockScrollbars(ref.current);
+    const cleanupTableCellTooltips = enhanceTableCellTooltips(ref.current);
+    return () => {
+      cleanupTableCellTooltips();
+      cleanupCodeBlockScrollbars();
+    };
   }, [html]);
   useMermaidDiagrams(ref, [html]);
 

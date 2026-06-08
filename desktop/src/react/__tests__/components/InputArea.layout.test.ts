@@ -43,7 +43,13 @@ describe('InputArea layout', () => {
     const toolIndicatorBlock = cssBlock(chatCss, String.raw`\.toolIndicator`);
     const toolProgressRowBlock = cssBlock(chatCss, String.raw`\.toolProgressRow`);
     const markdownTableWrapperBlock = cssBlock(globalCss, String.raw`\.md-content \.md-table-wrapper`);
+    const markdownTableOverflowingWrapperBlock = cssBlock(globalCss, String.raw`\.md-content \.md-table-wrapper\.md-table-overflowing`);
     const markdownTableBlock = cssBlock(globalCss, String.raw`\.md-content table`);
+    const markdownOverflowingTableBlock = cssBlock(globalCss, String.raw`\.md-content \.md-table-wrapper\.md-table-overflowing table`);
+    const markdownOverflowingCellBlock = cssBlock(
+      globalCss,
+      String.raw`\.md-content \.md-table-wrapper\.md-table-overflowing th,\s*\.md-content \.md-table-wrapper\.md-table-overflowing td`,
+    );
     const assistantMarkdownTableWrapperBlock = cssBlock(chatCss, String.raw`\.messageAssistant :global\(\.md-content \.md-table-wrapper\)`);
     const liveFileWriteCardBlock = cssBlock(chatCss, String.raw`\.liveFileWriteCard`);
     const toolGroupLiveFileWriteCardBlock = cssBlock(chatCss, String.raw`\.toolGroupWithCode \.liveFileWriteCard`);
@@ -67,7 +73,7 @@ describe('InputArea layout', () => {
     const diffLineTextBlock = cssBlock(chatCss, String.raw`\.diffLineText`);
     const diffHorizontalScrollbarBlock = cssBlock(chatCss, String.raw`\.diffHorizontalScrollbar`);
     const markdownCodeScrollbarBlock = cssBlock(chatCss, String.raw`\.markdownCodeScrollbar`);
-    const markdownTableScrollbarBlock = cssBlock(chatCss, String.raw`\.markdownTableScrollbar`);
+    const markdownCellTooltipBlock = cssBlock(chatCss, String.raw`\.markdownCellTooltip`);
     const markdownPreBlock = cssBlock(globalCss, String.raw`\.md-content pre`);
     const markdownPreScrollbarBlock = cssBlock(globalCss, String.raw`\.md-content pre::-webkit-scrollbar`);
     const markdownPreCodeBlock = cssBlock(globalCss, String.raw`\.md-content pre code`);
@@ -102,8 +108,8 @@ describe('InputArea layout', () => {
     expect(markdownTableWrapperBlock).toMatch(/max-width:\s*100%/);
     expect(markdownTableWrapperBlock).toMatch(/border:\s*1px solid var\(--border\)/);
     expect(markdownTableWrapperBlock).toMatch(/border-radius:\s*var\(--radius-sm\)/);
-    expect(markdownTableWrapperBlock).toMatch(/overflow-x:\s*auto/);
-    expect(markdownTableWrapperBlock).toMatch(/overflow-y:\s*hidden/);
+    expect(markdownTableWrapperBlock).toMatch(/overflow:\s*visible/);
+    expect(markdownTableOverflowingWrapperBlock).toMatch(/width:\s*100%/);
     expect(markdownTableBlock).toMatch(/border-collapse:\s*separate/);
     expect(markdownTableBlock).toMatch(/border-spacing:\s*0/);
     expect(markdownTableBlock).toMatch(/width:\s*max-content/);
@@ -111,6 +117,12 @@ describe('InputArea layout', () => {
     expect(markdownTableBlock).toMatch(/margin:\s*0/);
     expect(markdownTableBlock).not.toMatch(/width:\s*100%/);
     expect(markdownTableBlock).not.toMatch(/display:\s*block/);
+    expect(markdownOverflowingTableBlock).toMatch(/width:\s*100%/);
+    expect(markdownOverflowingTableBlock).toMatch(/table-layout:\s*fixed/);
+    expect(markdownOverflowingCellBlock).toMatch(/overflow:\s*hidden/);
+    expect(markdownOverflowingCellBlock).toMatch(/text-overflow:\s*ellipsis/);
+    expect(markdownOverflowingCellBlock).toMatch(/white-space:\s*nowrap/);
+    expect(globalCss).not.toMatch(/cursor:\s*help/);
     expect(assistantMarkdownTableWrapperBlock).toMatch(/max-width:\s*100%/);
     expect(globalCss).toMatch(/\.md-content th\s*\{[\s\S]*background:\s*var\(--markdown-table-head-bg,\s*var\(--overlay-subtle\)\)/);
     expect(chatCss).toMatch(/\.messageAssistant :global\(\.md-content th\),\s*\.messageAssistant :global\(\.md-content td\)\s*\{[\s\S]*overflow-wrap:\s*anywhere/);
@@ -215,11 +227,9 @@ describe('InputArea layout', () => {
     expect(markdownCodeScrollbarBlock).toMatch(/height:\s*12px/);
     expect(markdownCodeScrollbarBlock).toMatch(/touch-action:\s*none/);
     expect(chatCss).toMatch(/\.markdownCodeScrollbarThumb/);
-    expect(markdownTableScrollbarBlock).toMatch(/width:\s*100%/);
-    expect(markdownTableScrollbarBlock).toMatch(/max-width:\s*100%/);
-    expect(markdownTableScrollbarBlock).toMatch(/height:\s*12px/);
-    expect(markdownTableScrollbarBlock).toMatch(/touch-action:\s*none/);
-    expect(chatCss).toMatch(/\.markdownTableScrollbarThumb/);
+    expect(markdownCellTooltipBlock).toMatch(/position:\s*fixed/);
+    expect(markdownCellTooltipBlock).toMatch(/pointer-events:\s*none/);
+    expect(markdownCellTooltipBlock).toMatch(/white-space:\s*normal/);
     expect(markdownPreBlock).toMatch(/width:\s*calc\(var\(--chat-code-block-width,\s*100%\) - var\(--chat-module-card-inset,\s*0\.75rem\) - var\(--chat-module-card-inset,\s*0\.75rem\)\)/);
     expect(markdownPreBlock).toMatch(/max-width:\s*calc\(100% - var\(--chat-module-card-inset,\s*0\.75rem\) - var\(--chat-module-card-inset,\s*0\.75rem\)\)/);
     expect(markdownPreBlock).toMatch(/margin:\s*var\(--space-sm\)\s+var\(--chat-module-card-inset,\s*0\.75rem\)/);
@@ -334,21 +344,23 @@ describe('InputArea layout', () => {
     expect(css).not.toMatch(/\.goal-editor\s*\{/);
   });
 
-  it('keeps markdown code blocks and tables wired to the visible horizontal scrollbar enhancer', () => {
+  it('keeps markdown code blocks wired to scrollbars and tables wired to clipped-cell tooltips', () => {
     const source = fs.readFileSync(
       path.join(process.cwd(), 'desktop/src/react/components/chat/MarkdownContent.tsx'),
       'utf8',
     );
 
-    expect(source).toMatch(/enhanceHorizontalScrollbars/);
+    expect(source).toMatch(/enhanceCodeBlockScrollbars/);
+    expect(source).toMatch(/enhanceTableCellTooltips/);
     expect(source).toMatch(/data-md-horizontal-scrollbar/);
     expect(source).toMatch(/styles\.markdownCodeScrollbar/);
     expect(source).toMatch(/styles\.markdownCodeScrollbarThumb/);
-    expect(source).toMatch(/styles\.markdownTableScrollbar/);
-    expect(source).toMatch(/styles\.markdownTableScrollbarThumb/);
-    expect(source).toMatch(/const tableWrappers = Array\.from/);
+    expect(source).toMatch(/styles\.markdownCellTooltip/);
+    expect(source).toMatch(/md-table-overflowing/);
+    expect(source).toMatch(/mdCellTruncated/);
     expect(source).toContain("root.querySelectorAll<HTMLElement>('.md-table-wrapper')");
     expect(source).toMatch(/scroller\.scrollWidth\s*>\s*scroller\.clientWidth\s*\+\s*1/);
     expect(source).toMatch(/scroller\.scrollLeft\s*=/);
+    expect(source).toMatch(/cell\.scrollWidth\s*>\s*cell\.clientWidth\s*\+\s*1/);
   });
 });

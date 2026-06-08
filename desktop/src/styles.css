@@ -1221,9 +1221,12 @@ html[data-platform="linux"] .tb-toggle-right {
     box-sizing: border-box;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    overflow-x: auto;
-    overflow-y: hidden;
+    overflow: visible;
     vertical-align: top;
+}
+
+.md-content .md-table-wrapper.md-table-overflowing {
+    width: 100%;
 }
 
 .md-content table {
@@ -1235,6 +1238,11 @@ html[data-platform="linux"] .tb-toggle-right {
     font-size: 0.9em;
 }
 
+.md-content .md-table-wrapper.md-table-overflowing table {
+    width: 100%;
+    table-layout: fixed;
+}
+
 .md-content th, .md-content td {
     border: 0;
     border-right: 1px solid var(--border);
@@ -1242,6 +1250,13 @@ html[data-platform="linux"] .tb-toggle-right {
     padding: 0.45em 0.68em;
     text-align: left;
     line-height: 1.65;
+}
+
+.md-content .md-table-wrapper.md-table-overflowing th,
+.md-content .md-table-wrapper.md-table-overflowing td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .md-content th {

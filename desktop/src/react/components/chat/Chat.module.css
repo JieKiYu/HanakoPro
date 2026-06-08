@@ -438,26 +438,22 @@
     background: rgba(var(--accent-rgb), 0.38);
 }
 
-.markdownTableScrollbar {
-    position: relative;
-    width: 100%;
-    max-width: 100%;
-    box-sizing: border-box;
-    height: 12px;
-    margin: calc(-1 * var(--space-xs)) 0 var(--space-sm);
-    border-radius: 999px;
-    background: rgba(0, 0, 0, 0.045);
-    cursor: pointer;
-    touch-action: none;
-}
-
-.markdownTableScrollbarThumb {
-    position: absolute;
-    top: 2px;
-    bottom: 2px;
-    min-width: 32px;
-    border-radius: 999px;
-    background: rgba(var(--accent-rgb), 0.38);
+.markdownCellTooltip {
+    position: fixed;
+    z-index: 2200;
+    max-width: min(34rem, calc(100vw - 24px));
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-card, #fff);
+    color: var(--text);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+    font-family: var(--font-ui);
+    font-size: 0.8rem;
+    line-height: 1.55;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    pointer-events: none;
 }
 
 /* ── Message action buttons (shared by user & assistant) ── */
