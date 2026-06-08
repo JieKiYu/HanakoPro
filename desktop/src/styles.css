@@ -1214,21 +1214,36 @@ html[data-platform="linux"] .tb-toggle-right {
 
 /* 表格 */
 .md-content table {
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     width: 100%;
     margin: var(--space-sm) 0;
     font-size: 0.9em;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
 }
 
 .md-content th, .md-content td {
-    border: 1px solid var(--border);
-    padding: 0.3em 0.6em;
+    border: 0;
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    padding: 0.45em 0.68em;
     text-align: left;
+    line-height: 1.65;
 }
 
 .md-content th {
-    background: var(--overlay-subtle);
+    background: var(--markdown-table-head-bg, var(--overlay-subtle));
     font-weight: 600;
+}
+
+.md-content th:last-child, .md-content td:last-child {
+    border-right: 0;
+}
+
+.md-content tr:last-child td {
+    border-bottom: 0;
 }
 
 /* 加粗、斜体 */

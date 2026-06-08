@@ -96,7 +96,12 @@ describe('InputArea layout', () => {
     expect(assistantMarkdownBlock).toMatch(/--chat-code-block-width:\s*100%/);
     expect(assistantMarkdownTableBlock).toMatch(/display:\s*block/);
     expect(assistantMarkdownTableBlock).toMatch(/max-width:\s*100%/);
+    expect(assistantMarkdownTableBlock).toMatch(/border-collapse:\s*separate/);
+    expect(assistantMarkdownTableBlock).toMatch(/border-spacing:\s*0/);
+    expect(assistantMarkdownTableBlock).toMatch(/border:\s*1px solid var\(--border\)/);
+    expect(assistantMarkdownTableBlock).toMatch(/border-radius:\s*var\(--radius-sm\)/);
     expect(assistantMarkdownTableBlock).toMatch(/overflow-x:\s*auto/);
+    expect(globalCss).toMatch(/\.md-content th\s*\{[\s\S]*background:\s*var\(--markdown-table-head-bg,\s*var\(--overlay-subtle\)\)/);
     expect(chatCss).toMatch(/\.messageAssistant :global\(\.md-content th\),\s*\.messageAssistant :global\(\.md-content td\)\s*\{[\s\S]*overflow-wrap:\s*anywhere/);
     expect(moodWrapperBlock).toMatch(/--mood-psych-color:\s*#8F1D4F/);
     expect(moodBlock).toMatch(/width:\s*var\(--chat-code-block-width,\s*100%\)/);

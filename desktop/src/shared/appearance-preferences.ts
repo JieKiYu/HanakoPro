@@ -26,6 +26,7 @@ type MarkdownCodeStylePalette = Partial<Record<
   '--markdown-inline-code-text'
   | '--markdown-inline-code-bg'
   | '--markdown-inline-code-border'
+  | '--markdown-table-head-bg'
   | '--markdown-strong-code-text'
   | '--markdown-strong-code-bg'
   | '--markdown-strong-code-border'
@@ -37,6 +38,7 @@ const MARKDOWN_CODE_STYLE_PROPERTIES = [
   '--markdown-inline-code-text',
   '--markdown-inline-code-bg',
   '--markdown-inline-code-border',
+  '--markdown-table-head-bg',
   '--markdown-strong-code-text',
   '--markdown-strong-code-bg',
   '--markdown-strong-code-border',
@@ -55,21 +57,25 @@ const INLINE_CODE_STYLE_PALETTES: Record<MarkdownInlineCodeStyleId, MarkdownCode
     '--markdown-inline-code-text': 'var(--text)',
     '--markdown-inline-code-bg': 'color-mix(in srgb, var(--text) 7%, transparent)',
     '--markdown-inline-code-border': 'color-mix(in srgb, var(--text) 13%, transparent)',
+    '--markdown-table-head-bg': 'color-mix(in srgb, var(--text) 5.5%, transparent)',
   },
   jade: {
     '--markdown-inline-code-text': 'var(--green)',
     '--markdown-inline-code-bg': 'rgba(var(--green-rgb), 0.105)',
     '--markdown-inline-code-border': 'rgba(var(--green-rgb), 0.22)',
+    '--markdown-table-head-bg': 'rgba(var(--green-rgb), 0.085)',
   },
   amber: {
     '--markdown-inline-code-text': 'var(--markdown-amber-text)',
     '--markdown-inline-code-bg': 'rgba(var(--markdown-amber-rgb), 0.12)',
     '--markdown-inline-code-border': 'rgba(var(--markdown-amber-rgb), 0.25)',
+    '--markdown-table-head-bg': 'rgba(var(--markdown-amber-rgb), 0.095)',
   },
   rose: {
     '--markdown-inline-code-text': 'var(--danger)',
     '--markdown-inline-code-bg': 'rgba(var(--danger-rgb), 0.095)',
     '--markdown-inline-code-border': 'rgba(var(--danger-rgb), 0.21)',
+    '--markdown-table-head-bg': 'rgba(var(--danger-rgb), 0.078)',
   },
 };
 

@@ -110,6 +110,7 @@ describe('markdown code style preferences', () => {
     applyMarkdownCodeStylePreference(MO_BAI_THEME, storage);
 
     expect(document.documentElement.style.getPropertyValue('--markdown-inline-code-bg')).toBe('');
+    expect(document.documentElement.style.getPropertyValue('--markdown-table-head-bg')).toBe('');
     expect(document.documentElement.style.getPropertyValue('--markdown-strong-code-bg')).toBe('');
     expect(document.documentElement.style.getPropertyValue('--markdown-bold-text')).toBe('');
   });
@@ -136,6 +137,7 @@ describe('markdown code style preferences', () => {
     setMarkdownCodeStylePreference({ inline: 'amber', strong: 'rose' }, MO_BAI_THEME, storage);
 
     expect(document.documentElement.style.getPropertyValue('--markdown-inline-code-bg')).toBe('rgba(var(--markdown-amber-rgb), 0.12)');
+    expect(document.documentElement.style.getPropertyValue('--markdown-table-head-bg')).toBe('rgba(var(--markdown-amber-rgb), 0.095)');
     expect(document.documentElement.style.getPropertyValue('--markdown-strong-code-bg')).toBe('rgba(var(--danger-rgb), 0.15)');
 
     resetMarkdownCodeStylePreference(MO_BAI_THEME, storage);
@@ -145,6 +147,7 @@ describe('markdown code style preferences', () => {
       strong: 'default',
     });
     expect(document.documentElement.style.getPropertyValue('--markdown-inline-code-bg')).toBe('');
+    expect(document.documentElement.style.getPropertyValue('--markdown-table-head-bg')).toBe('');
     expect(document.documentElement.style.getPropertyValue('--markdown-strong-code-bg')).toBe('');
     expect(document.documentElement.style.getPropertyValue('--markdown-bold-text')).toBe('');
   });
@@ -163,6 +166,7 @@ describe('markdown code style preferences', () => {
     applyMarkdownCodeStylePreference(MO_BAI_THEME, storage);
 
     expect(document.documentElement.style.getPropertyValue('--markdown-inline-code-bg')).toBe('rgba(var(--green-rgb), 0.105)');
+    expect(document.documentElement.style.getPropertyValue('--markdown-table-head-bg')).toBe('rgba(var(--green-rgb), 0.085)');
     expect(document.documentElement.style.getPropertyValue('--markdown-strong-code-bg')).toBe('rgba(var(--danger-rgb), 0.15)');
     expect(document.documentElement.style.getPropertyValue('--markdown-bold-text')).toBe('');
   });

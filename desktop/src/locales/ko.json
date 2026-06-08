@@ -750,7 +750,7 @@
       "leavesOverlay": "맑은 날 모드",
       "leavesOverlayHint": "가끔은 햇볕도 쬐어요",
       "inlineCodeStyle": "인라인 코드 스타일",
-      "markdownCodeStyleHint": "현재 테마의 Markdown 인라인 코드에만 적용돼요.",
+      "markdownCodeStyleHint": "현재 테마의 Markdown 인라인 코드와 표 머리글의 은은한 배경에 적용돼요.",
       "strongCodeStyle": "강조 인라인 코드 스타일",
       "strongCodeStyleHint": "**`중요 코드`** 같은 강조 조각에 사용돼요.",
       "resetMarkdownCodeStyle": "현재 테마 코드 스타일 기본값 복원",

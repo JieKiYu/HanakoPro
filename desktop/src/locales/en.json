@@ -743,7 +743,7 @@
       "leavesOverlay": "Sunny Mode",
       "leavesOverlayHint": "Go touch some grass (and sunlight)",
       "inlineCodeStyle": "Inline Code Style",
-      "markdownCodeStyleHint": "Applies only to Markdown inline code in the current theme.",
+      "markdownCodeStyleHint": "Applies to Markdown inline code and subtle table headers in the current theme.",
       "strongCodeStyle": "Emphasized Inline Code Style",
       "strongCodeStyleHint": "Used for emphasized snippets like **`important`**.",
       "resetMarkdownCodeStyle": "Restore Current Theme Code Defaults",

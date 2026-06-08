@@ -121,6 +121,7 @@ describe('InterfaceTab appearance state', () => {
     const stored = JSON.parse(localStorage.getItem(MARKDOWN_CODE_STYLE_STORAGE_KEY) || '{}');
     expect(stored[MO_BAI_THEME]).toEqual({ inline: 'jade', strong: 'rose' });
     expect(document.documentElement.style.getPropertyValue('--markdown-inline-code-bg')).toBe('rgba(var(--green-rgb), 0.105)');
+    expect(document.documentElement.style.getPropertyValue('--markdown-table-head-bg')).toBe('rgba(var(--green-rgb), 0.085)');
     expect(document.documentElement.style.getPropertyValue('--markdown-strong-code-bg')).toBe('rgba(var(--danger-rgb), 0.15)');
     expect(document.documentElement.style.getPropertyValue('--markdown-bold-text')).toBe('');
   });

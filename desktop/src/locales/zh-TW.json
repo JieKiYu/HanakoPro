@@ -750,7 +750,7 @@
       "leavesOverlay": "晴天模式",
       "leavesOverlayHint": "沒事兒曬曬太陽",
       "inlineCodeStyle": "行內程式碼風格",
-      "markdownCodeStyleHint": "僅作用於目前主題的 Markdown 行內程式碼。",
+      "markdownCodeStyleHint": "作用於目前主題的 Markdown 行內程式碼和表格表頭淺底。",
       "strongCodeStyle": "強調行內程式碼風格",
       "strongCodeStyleHint": "用於 **`重點程式碼`** 這類強調片段。",
       "resetMarkdownCodeStyle": "恢復目前主題預設程式碼風格",

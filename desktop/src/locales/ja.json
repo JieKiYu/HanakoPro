@@ -750,7 +750,7 @@
       "leavesOverlay": "晴れモード",
       "leavesOverlayHint": "たまには日向ぼっこしよう",
       "inlineCodeStyle": "インラインコードのスタイル",
-      "markdownCodeStyleHint": "現在のテーマの Markdown インラインコードだけに適用します。",
+      "markdownCodeStyleHint": "現在のテーマの Markdown インラインコードと表ヘッダーの淡い背景に適用します。",
       "strongCodeStyle": "強調インラインコードのスタイル",
       "strongCodeStyleHint": "**`重要なコード`** のような強調片段に使います。",
       "resetMarkdownCodeStyle": "現在のテーマのコードスタイルを既定に戻す",

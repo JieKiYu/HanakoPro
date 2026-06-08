@@ -748,7 +748,7 @@
       "leavesOverlay": "晴天模式",
       "leavesOverlayHint": "没事儿晒晒太阳",
       "inlineCodeStyle": "行内代码风格",
-      "markdownCodeStyleHint": "仅作用于当前主题的 Markdown 行内代码。",
+      "markdownCodeStyleHint": "作用于当前主题的 Markdown 行内代码和表格表头浅底。",
       "strongCodeStyle": "强调行内代码风格",
       "strongCodeStyleHint": "用于 **`重点代码`** 这类强调片段。",
       "resetMarkdownCodeStyle": "恢复当前主题默认代码风格",
