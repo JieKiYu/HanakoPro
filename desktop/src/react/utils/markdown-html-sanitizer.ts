@@ -45,6 +45,7 @@ const ALLOWED_CLASS_NAMES = new Set([
   'markdown-callout-bug',
   'markdown-callout-example',
   'markdown-callout-quote',
+  'md-table-wrapper',
   'mermaid-diagram',
   'mermaid-source',
   'mermaid-rendered',

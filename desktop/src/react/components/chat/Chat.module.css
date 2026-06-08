@@ -406,16 +406,9 @@
     --chat-code-block-width: 100%;
 }
 
-.messageAssistant :global(.md-content table) {
-    display: block;
+.messageAssistant :global(.md-content .md-table-wrapper) {
     max-width: 100%;
     box-sizing: border-box;
-    border-collapse: separate;
-    border-spacing: 0;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    overflow-x: auto;
-    overflow-y: hidden;
 }
 
 .messageAssistant :global(.md-content th),

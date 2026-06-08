@@ -559,6 +559,7 @@ function applyMarkdownPlugins(md: MarkdownItInstance): void {
   md.use(obsidianImageEmbeds);
   md.use(obsidianHighlights);
   md.use(obsidianCallouts);
+  md.use(markdownTableWrapper);
   md.use(mermaidFences);
   md.use(markdownImageRenderer);
 }
@@ -585,6 +586,20 @@ function mermaidFences(md: MarkdownItInstance): void {
       '</div>\n',
     ].join('');
   };
+}
+
+function markdownTableWrapper(md: MarkdownItInstance): void {
+  const defaultTableOpen = md.renderer.rules.table_open
+    ?? ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+  const defaultTableClose = md.renderer.rules.table_close
+    ?? ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+
+  md.renderer.rules.table_open = (tokens, idx, options, env, self) => (
+    `<div class="md-table-wrapper">${defaultTableOpen(tokens, idx, options, env, self)}`
+  );
+  md.renderer.rules.table_close = (tokens, idx, options, env, self) => (
+    `${defaultTableClose(tokens, idx, options, env, self)}</div>\n`
+  );
 }
 
 function markdownImageRenderer(md: MarkdownItInstance): void {

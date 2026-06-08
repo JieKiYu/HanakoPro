@@ -64,6 +64,17 @@ describe('renderMarkdown', () => {
     expect(html).not.toContain('<code class="language-mermaid"');
   });
 
+  it('wraps markdown tables so layout chrome stays separate from table sizing', () => {
+    const html = renderMarkdown([
+      '| 项目 | 值 |',
+      '| --- | --- |',
+      '| 大盘 | 震荡 |',
+    ].join('\n'));
+
+    expect(html).toContain('<div class="md-table-wrapper"><table>');
+    expect(html).toMatch(/<\/table>\s*<\/div>/);
+  });
+
   it('renders filtered HTML in markdown preview mode', () => {
     const html = renderMarkdownPreview([
       '<div style="background: #f0f7ff; border: 1px solid #bee1e6; border-radius: 8px; padding: 16px; margin: 12px 0;">',
@@ -183,6 +194,17 @@ describe('renderMarkdown', () => {
     expect(html).toContain('class="mermaid-source"');
     expect(html).toContain('class="mermaid-rendered"');
     expect(html).toContain('sequenceDiagram');
+  });
+
+  it('preserves generated table wrappers in markdown preview mode', () => {
+    const html = renderMarkdownPreview([
+      '| 项目 | 值 |',
+      '| --- | --- |',
+      '| 大盘 | 震荡 |',
+    ].join('\n'));
+
+    expect(html).toContain('<div class="md-table-wrapper"><table>');
+    expect(html).toMatch(/<\/table>\s*<\/div>/);
   });
 
   it('preserves generated KaTeX markup in markdown preview mode', () => {

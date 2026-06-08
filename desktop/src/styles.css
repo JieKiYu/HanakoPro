@@ -1213,15 +1213,26 @@ html[data-platform="linux"] .tb-toggle-right {
 }
 
 /* 表格 */
+.md-content .md-table-wrapper {
+    display: block;
+    width: fit-content;
+    max-width: 100%;
+    margin: var(--space-sm) 0;
+    box-sizing: border-box;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow-x: auto;
+    overflow-y: hidden;
+    vertical-align: top;
+}
+
 .md-content table {
     border-collapse: separate;
     border-spacing: 0;
-    width: 100%;
-    margin: var(--space-sm) 0;
+    width: max-content;
+    max-width: none;
+    margin: 0;
     font-size: 0.9em;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    overflow: hidden;
 }
 
 .md-content th, .md-content td {
