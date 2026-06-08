@@ -56,8 +56,9 @@ const log = createModuleLogger("session");
 /** 巡检/定时任务默认工具白名单（"*" = 与 chat 一致，全部放行） */
 export const PATROL_TOOLS_DEFAULT = "*";
 
-const SESSION_GOAL_STATUSES = new Set(["active", "complete", "blocked"]);
+const SESSION_GOAL_STATUSES = new Set(["active", "paused", "complete", "blocked"]);
 const SESSION_GOAL_MAX_CHARS = 2000;
+const SESSION_GOAL_AUTO_REVIEW_CUSTOM_TYPE = "hana-session-goal-auto-review";
 
 function isoOr(value, fallback) {
   return typeof value === "string" && value.trim() ? value : fallback;
@@ -81,6 +82,7 @@ export function normalizeSessionGoal(value) {
     createdAt,
     updatedAt,
   };
+  if (status === "paused") goal.pausedAt = isoOr(raw.pausedAt, updatedAt);
   if (status === "complete") goal.completedAt = isoOr(raw.completedAt, updatedAt);
   if (status === "blocked") goal.blockedAt = isoOr(raw.blockedAt, updatedAt);
   if (typeof raw.note === "string" && raw.note.trim()) {
@@ -100,6 +102,7 @@ export function makeSessionGoal(objective, { previousGoal = null, status = "acti
     createdAt: normalizedPrevious?.createdAt || now,
     updatedAt: now,
   };
+  if (goal.status === "paused") goal.pausedAt = now;
   if (goal.status === "complete") goal.completedAt = now;
   if (goal.status === "blocked") goal.blockedAt = now;
   if (typeof note === "string" && note.trim()) goal.note = note.trim().slice(0, 1000);
@@ -116,7 +119,9 @@ export function buildSessionGoalText(goal, { locale = getLocale() } = {}) {
       "",
       `目标：${normalized.objective}`,
       "",
-      "这是当前对话的主线任务。回答和行动要持续围绕它推进；路径清楚就直接做，路径分叉就先问清楚。只有完成并验证后，才把目标视为完成。",
+      "这是当前对话的主线任务。回答和行动要持续围绕它推进；路径清楚就直接做，路径分叉就先问清楚。",
+      "普通代码检查只是基础层。交付后必须进入用户视角验收：像用户一样打开、查看、点击、运行或操作结果；需要 UI/网页/桌面确认时使用 Computer Use、浏览器或对应工具实际验证，而不是只做静态代码审查。",
+      "只有目标已完成且通过这种用户视角验收后，才把目标视为完成并调用 session_goal complete。若验收不通过，把发现的问题当作内部反馈继续修复并再次验收；确认无法继续推进时才调用 session_goal blocked。",
     ].join("\n").trim();
   }
   return [
@@ -124,7 +129,47 @@ export function buildSessionGoalText(goal, { locale = getLocale() } = {}) {
     "",
     `Goal: ${normalized.objective}`,
     "",
-    "This is the main task for the current conversation. Keep replies and actions oriented around it; act when the path is clear, ask when the path forks, and only treat the goal as complete after it has been completed and verified.",
+    "This is the main task for the current conversation. Keep replies and actions oriented around it; act when the path is clear and ask only when the path forks.",
+    "Ordinary code review is only the baseline. After delivery, run user-perspective acceptance: open, inspect, click, run, or operate the result as a user would. When UI, browser, or desktop behavior matters, use Computer Use, the browser, or the relevant tool to verify it in practice, not just static code review.",
+    "Only treat the goal as complete and call session_goal complete after the goal is finished and passes that user-perspective acceptance. If acceptance fails, use the findings as internal feedback, keep fixing, and verify again; call session_goal blocked only when you confirm progress is impossible.",
+  ].join("\n").trim();
+}
+
+function buildSessionGoalAutoReviewText(goal, { locale = getLocale() } = {}) {
+  const normalized = normalizeSessionGoal(goal);
+  if (!normalized || normalized.status !== "active") return "";
+  const isZh = String(locale || "").startsWith("zh");
+  if (isZh) {
+    return [
+      "## 目标模式自动验收",
+      "",
+      `目标：${normalized.objective}`,
+      "",
+      "你刚完成了一轮输出。现在不要把普通交付当成结束，先做目标模式的用户视角验收：",
+      "- 像用户一样打开、查看、点击、运行或操作结果。",
+      "- 如果涉及界面、网页或桌面应用，优先使用 Computer Use、浏览器或对应工具实际确认可见、可点、可用。",
+      "- 代码测试、类型检查和静态审查只是基础层，不能替代用户视角验收。",
+      "- 如果验收通过且目标已经完成，调用 session_goal complete 并简要写明验收证据。",
+      "- 如果验收不通过，把问题当作内部反馈继续修复，然后再次验收。",
+      "- 如果确认无法继续推进，调用 session_goal blocked 并写明原因。",
+      "",
+      "这条消息是内部目标审查续跑，不需要向用户解释触发机制。",
+    ].join("\n").trim();
+  }
+  return [
+    "## Goal Mode Automatic Acceptance",
+    "",
+    `Goal: ${normalized.objective}`,
+    "",
+    "You just finished one assistant turn. Do not treat ordinary delivery as the end; first perform goal-mode user-perspective acceptance:",
+    "- Open, inspect, click, run, or operate the result as a user would.",
+    "- If UI, web, or desktop behavior matters, prefer Computer Use, the browser, or the relevant tool to confirm it is visible, clickable, and usable.",
+    "- Tests, type checks, and static code review are only the baseline; they do not replace user-perspective acceptance.",
+    "- If acceptance passes and the goal is complete, call session_goal complete with brief evidence.",
+    "- If acceptance fails, use the findings as internal feedback, keep fixing, and verify again.",
+    "- If you confirm progress is impossible, call session_goal blocked with the reason.",
+    "",
+    "This is an internal goal-review continuation. Do not explain the trigger mechanism to the user.",
   ].join("\n").trim();
 }
 
@@ -1628,6 +1673,35 @@ export class SessionCoordinator {
     agent?._memoryTicker?.notifyTurn(sessionPath);
   }
 
+  async triggerSessionGoalAutoReview(sessionPath) {
+    if (!sessionPath) return { ok: false, error: "sessionPath required" };
+    const entry = this._sessions.get(sessionPath);
+    if (!entry?.session) return { ok: false, error: "session not found" };
+    if (entry.session.isStreaming) return { ok: false, error: "session is streaming", skipped: true };
+    const goal = this.getSessionGoal(sessionPath);
+    if (!goal || goal.status !== "active") return { ok: true, skipped: true, reason: "no active goal" };
+    const content = buildSessionGoalAutoReviewText(goal, { locale: getLocale() });
+    if (!content) return { ok: true, skipped: true, reason: "empty review prompt" };
+    entry.lastTouchedAt = Date.now();
+    this._d.emitEvent?.({ type: "session_status", isStreaming: true, internal: true, reason: "goal_auto_review" }, sessionPath);
+    try {
+      await entry.session.sendCustomMessage({
+        customType: SESSION_GOAL_AUTO_REVIEW_CUSTOM_TYPE,
+        content,
+        display: false,
+        details: {
+          objective: goal.objective,
+          triggeredAt: new Date().toISOString(),
+        },
+      }, { triggerTurn: true });
+      const agent = this._d.getAgentById(entry.agentId) || this._d.getAgent();
+      agent?._memoryTicker?.notifyTurn(sessionPath);
+      return { ok: true };
+    } finally {
+      this._d.emitEvent?.({ type: "session_status", isStreaming: false, internal: true, reason: "goal_auto_review" }, sessionPath);
+    }
+  }
+
   steerSession(sessionPath, text) {
     const entry = this._sessions.get(sessionPath);
     if (!entry?.session.isStreaming) return false;
@@ -1980,6 +2054,32 @@ export class SessionCoordinator {
     const goal = makeSessionGoal(current.objective, {
       previousGoal: current,
       status: "blocked",
+      note,
+    });
+    return this._applySessionGoal(sessionPath, goal);
+  }
+
+  pauseSessionGoal(sessionPath = this.currentSessionPath, note = null) {
+    const current = this.getSessionGoal(sessionPath);
+    if (!current) return { ok: false, error: "session goal not found", goal: null };
+    if (current.status !== "active") return { ok: true, goal: current };
+    const goal = makeSessionGoal(current.objective, {
+      previousGoal: current,
+      status: "paused",
+      note,
+    });
+    return this._applySessionGoal(sessionPath, goal);
+  }
+
+  resumeSessionGoal(sessionPath = this.currentSessionPath, note = null) {
+    const current = this.getSessionGoal(sessionPath);
+    if (!current) return { ok: false, error: "session goal not found", goal: null };
+    if (current.status === "complete" || current.status === "blocked") {
+      return { ok: false, error: "session goal is no longer resumable", goal: current };
+    }
+    const goal = makeSessionGoal(current.objective, {
+      previousGoal: current,
+      status: "active",
       note,
     });
     return this._applySessionGoal(sessionPath, goal);

@@ -100,6 +100,53 @@ describe("SessionCoordinator", () => {
     expect(createAgentSessionMock.mock.calls[0][0].resourceLoader.getSystemPrompt()).toBe("MEMORY OFF");
   });
 
+  it("pauses and resumes pending session goals before a session exists", () => {
+    const emitted = [];
+    const coordinator = new SessionCoordinator({
+      agentsDir: tempDir,
+      getAgent: () => ({ id: "hana" }),
+      getActiveAgentId: () => "hana",
+      getModels: () => ({ authStorage: {}, modelRegistry: {}, resolveThinkingLevel: () => "medium" }),
+      getResourceLoader: () => ({ getSystemPrompt: () => "prompt" }),
+      getSkills: () => null,
+      buildTools: () => ({ tools: [], customTools: [] }),
+      emitEvent: (event, sessionPath) => emitted.push({ event, sessionPath }),
+      getHomeCwd: () => tempDir,
+      agentIdFromSessionPath: () => "hana",
+      switchAgentOnly: async () => {},
+      getConfig: () => ({}),
+      getPrefs: () => ({ getThinkingLevel: () => "medium" }),
+      getAgents: () => new Map(),
+      getActivityStore: () => null,
+      getAgentById: () => null,
+      listAgents: () => [],
+    });
+
+    expect(coordinator.setPendingSessionGoal("ship goal controls").goal).toMatchObject({
+      objective: "ship goal controls",
+      status: "active",
+    });
+
+    expect(coordinator.pauseSessionGoal(null, "user paused").goal).toMatchObject({
+      objective: "ship goal controls",
+      status: "paused",
+      note: "user paused",
+    });
+    expect(coordinator.getSessionGoal(null)).toMatchObject({ status: "paused" });
+
+    expect(coordinator.resumeSessionGoal(null, "user resumed").goal).toMatchObject({
+      objective: "ship goal controls",
+      status: "active",
+      note: "user resumed",
+    });
+
+    expect(emitted).toEqual([
+      expect.objectContaining({ sessionPath: null, event: expect.objectContaining({ type: "session_goal", goal: expect.objectContaining({ status: "active" }) }) }),
+      expect.objectContaining({ sessionPath: null, event: expect.objectContaining({ type: "session_goal", goal: expect.objectContaining({ status: "paused" }) }) }),
+      expect.objectContaining({ sessionPath: null, event: expect.objectContaining({ type: "session_goal", goal: expect.objectContaining({ status: "active" }) }) }),
+    ]);
+  });
+
   it("builds session tools with sandbox workspace pinned to the effective cwd", async () => {
     const agent = {
       id: "hana",
@@ -1634,6 +1681,60 @@ describe("SessionCoordinator", () => {
         },
       },
     });
+  });
+
+  it("triggers goal auto review as a hidden custom message", async () => {
+    const sessionFile = path.join(tempDir, "goal-auto-review.jsonl");
+    const sendCustomMessage = vi.fn(async () => {});
+    const notifyTurn = vi.fn();
+    const emitted = [];
+    const coordinator = new SessionCoordinator({
+      agentsDir: tempDir,
+      getAgent: () => ({ id: "hana", _memoryTicker: { notifyTurn } }),
+      getActiveAgentId: () => "hana",
+      getModels: () => ({ authStorage: {}, modelRegistry: {}, resolveThinkingLevel: () => "medium" }),
+      getResourceLoader: () => ({ getSystemPrompt: () => "prompt" }),
+      getSkills: () => null,
+      buildTools: () => ({ tools: [], customTools: [] }),
+      emitEvent: (event, sessionPath) => emitted.push({ event, sessionPath }),
+      getHomeCwd: () => tempDir,
+      agentIdFromSessionPath: () => "hana",
+      switchAgentOnly: async () => {},
+      getConfig: () => ({}),
+      getPrefs: () => ({ getThinkingLevel: () => "medium" }),
+      getAgents: () => new Map(),
+      getActivityStore: () => null,
+      getAgentById: () => null,
+      listAgents: () => [],
+    });
+    coordinator.sessions.set(sessionFile, {
+      session: { isStreaming: false, sendCustomMessage },
+      agentId: "hana",
+      goal: {
+        objective: "finish goal mode",
+        status: "active",
+        createdAt: "2026-06-06T00:00:00.000Z",
+        updatedAt: "2026-06-06T00:00:00.000Z",
+      },
+      lastTouchedAt: Date.now(),
+      unsub: vi.fn(),
+    });
+
+    await coordinator.triggerSessionGoalAutoReview(sessionFile);
+
+    expect(sendCustomMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customType: "hana-session-goal-auto-review",
+        display: false,
+        content: expect.stringContaining("用户视角验收"),
+      }),
+      { triggerTurn: true },
+    );
+    expect(notifyTurn).toHaveBeenCalledWith(sessionFile);
+    expect(emitted.map(({ event }) => event)).toEqual([
+      expect.objectContaining({ type: "session_status", isStreaming: true, reason: "goal_auto_review" }),
+      expect.objectContaining({ type: "session_status", isStreaming: false, reason: "goal_auto_review" }),
+    ]);
   });
 
   it("executeIsolated builds non-session tools from the master memory switch, not the focused session switch", async () => {

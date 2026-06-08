@@ -87,11 +87,11 @@ describe('InputArea layout', () => {
     expect(inputAreaBlock).toMatch(/max-width:\s*var\(--chat-input-column-width\)/);
     expect(welcomeInputAreaBlock).toMatch(/max-width:\s*var\(--welcome-chat-input-column-width\)/);
     expect(sessionMessagesBlock).toMatch(/max-width:\s*var\(--chat-column-width\)/);
-    expect(sessionShellBlock).toMatch(/--chat-input-occlusion-height:\s*calc\(var\(--input-card-h,\s*0px\) \+ var\(--space-lg\) \+ 1\.5rem\)/);
+    expect(sessionShellBlock).toMatch(/--chat-input-occlusion-height:\s*calc\(var\(--input-stack-h,\s*var\(--input-card-h,\s*0px\)\) \+ var\(--space-lg\) \+ 1\.5rem\)/);
     expect(sessionShellAfterBlock).toMatch(/pointer-events:\s*none/);
     expect(sessionShellAfterBlock).toMatch(/height:\s*var\(--chat-input-occlusion-height\)/);
     expect(sessionShellAfterBlock).toMatch(/linear-gradient/);
-    expect(sessionFooterBlock).toMatch(/height:\s*calc\(var\(--input-card-h,\s*0px\) \+ var\(--space-lg\) \+ 5rem\)/);
+    expect(sessionFooterBlock).toMatch(/height:\s*calc\(var\(--input-stack-h,\s*var\(--input-card-h,\s*0px\)\) \+ var\(--space-lg\) \+ 5rem\)/);
     expect(assistantMessageBlock).toMatch(/width:\s*100%/);
     expect(assistantMessageBlock).toMatch(/max-width:\s*100%/);
     expect(messageAssistantBlock).toMatch(/--chat-message-action-safe-area:\s*7rem/);
@@ -261,7 +261,7 @@ describe('InputArea layout', () => {
     expect(inputWrapperBlock).toMatch(/padding:\s*var\(--space-md\)\s+var\(--space-md\)\s+var\(--space-sm\)/);
   });
 
-  it('uses the main composer for goal editing instead of nesting a second textbox', () => {
+  it('keeps goal editing and controls inside the active goal bar', () => {
     const inputAreaSource = fs.readFileSync(
       path.join(process.cwd(), 'desktop/src/react/components/InputArea.tsx'),
       'utf8',
@@ -276,11 +276,15 @@ describe('InputArea layout', () => {
     );
 
     expect(inputAreaSource).not.toMatch(/<textarea/);
-    expect(inputAreaSource).not.toMatch(/goal-editor/);
-    expect(inputAreaSource).toMatch(/if \(goalEditing\) return t\('input\.goalPlaceholder'\)/);
-    expect(inputAreaSource).toMatch(/sendGoalSubmitPrompt\(await saveGoalFromEditor\(\)\)/);
+    expect(inputAreaSource).not.toMatch(/saveGoalFromEditor/);
+    expect(inputAreaSource).not.toMatch(/chatDraftBeforeGoalRef/);
+    expect(inputAreaSource).not.toMatch(/if \(goalEditing\) return t\('input\.goalPlaceholder'\)/);
+    expect(inputAreaSource).toMatch(/styles\['goal-active-edit-form'\]/);
+    expect(inputAreaSource).toMatch(/styles\['goal-active-edit-input'\]/);
+    expect(inputAreaSource).toMatch(/sendGoalSubmitPrompt\(await saveGoalDraft\(\)\)/);
     expect(inputAreaSource).toMatch(/buildGoalStartPrompt\(result\.objective, t\)/);
     expect(inputAreaSource).toMatch(/buildGoalUpdatePrompt\(result\.objective, t\)/);
+    expect(inputAreaSource).toMatch(/buildGoalResumePrompt\(objective, t\)/);
     expect(inputAreaSource).toMatch(/type:\s*allowStreaming && isStreaming \? 'interrupt_prompt' : 'prompt'/);
     expect(inputAreaSource).toMatch(/styles\['goal-active-bar'\]/);
     expect(inputAreaSource.indexOf("styles['goal-active-bar']")).toBeLessThan(
@@ -291,24 +295,29 @@ describe('InputArea layout', () => {
     expect(inputAreaSource).toMatch(/goal\.status === 'paused'[\s\S]*'input\.pausedGoal'/);
     expect(inputAreaSource).toMatch(/styles\['goal-active-main'\]/);
     expect(inputAreaSource).toMatch(/styles\['goal-active-actions'\]/);
+    expect(inputAreaSource).toMatch(/styles\['goal-active-elapsed'\]/);
     expect(inputAreaSource).toMatch(/GoalActionIcon kind="edit"/);
-    expect(inputAreaSource).toMatch(/GoalActionIcon kind="review"/);
+    expect(inputAreaSource).toMatch(/GoalActionIcon kind=\{running \? 'pause' : 'play'\}/);
     expect(inputAreaSource).toMatch(/GoalActionIcon kind="delete"/);
     expect(inputAreaSource).toMatch(/onClear=\{manuallyClearGoal\}/);
-    expect(inputAreaSource).toMatch(/onReview=\{askAgentToReviewGoal\}/);
+    expect(inputAreaSource).toMatch(/onToggleRunning=\{toggleGoalRunning\}/);
+    expect(inputAreaSource).not.toMatch(/onReview=\{/);
     expect(inputAreaSource).not.toMatch(/sendLabel=\{goalEditing/);
     expect(inputAreaSource).not.toMatch(/sendTitle=\{goalEditing/);
-    expect(inputAreaSource).not.toMatch(/t\('input\.goalSave'\)/);
+    expect(inputAreaSource).toMatch(/t\('input\.goalSave'\)/);
+    expect(inputAreaSource).toMatch(/t\('input\.goalPause'\)/);
+    expect(inputAreaSource).toMatch(/t\('input\.goalResume'\)/);
     expect(inputAreaSource).toMatch(/onGoalClose=\{cancelGoalEditing\}/);
-    expect(controlBarSource).toMatch(/styles\['goal-chip'\]/);
-    expect(controlBarSource).toMatch(/forceSend=\{goalEditing\}/);
+    expect(controlBarSource).not.toMatch(/styles\['goal-chip'\]/);
+    expect(controlBarSource).not.toMatch(/forceSend/);
+    expect(controlBarSource).toMatch(/goalRunning=\{goalRunning\}/);
+    expect(controlBarSource).toMatch(/disabled=\{isStreaming && !goalRunning \? false : !canSend\}/);
     expect(controlBarSource).not.toMatch(/add-menu-item'\]\}\s+\$\{goalActive/);
     expect(controlBarSource).toMatch(/aria-pressed=\{goalEditing\}/);
     expect(controlBarSource).toMatch(/if \(goalEditing\) onGoalClose\(\);[\s\S]*else onGoalOpen\(\);/);
     expect(controlBarSource).toMatch(/styles\['add-menu-switch'\][\s\S]*goalEditing \? styles\.on/);
-    expect(controlBarSource).toMatch(/title=\{goalSaving \? t\('input\.goalSaving'\) : t\('input\.goalCancel'\)\}/);
-    expect(controlBarSource).toMatch(/onClick=\{onGoalClose\}/);
-    expect(controlBarSource).toMatch(/styles\['goal-chip-icon-stack'\]/);
+    expect(controlBarSource).not.toMatch(/title=\{goalSaving/);
+    expect(controlBarSource).not.toMatch(/styles\['goal-chip-icon-stack'\]/);
     expect(controlBarSource).toMatch(/function AttachFileIcon\(\)/);
     expect(controlBarSource).toMatch(/<AttachFileIcon \/>[\s\S]*t\('input\.attachFiles'\)/);
     expect(controlBarSource).toMatch(/M9\.85 4\.25v6\.08/);
@@ -318,30 +327,25 @@ describe('InputArea layout', () => {
     expect(controlBarSource).toMatch(/<circle className=\{styles\['goal-icon-target-center'\]\} cx="7" cy="9" r="1\.05" \/>/);
     expect(controlBarSource).not.toMatch(/A5\.75|A3\.18/);
     expect(controlBarSource).toMatch(/styles\['add-menu-icon'\][\s\S]*<GoalIcon tone="plain" \/>[\s\S]*t\('input\.goalMode'\)/);
-    expect(controlBarSource).toMatch(/<GoalIcon tone="active" \/>[\s\S]*<GoalCancelIcon \/>/);
     expect(controlBarSource.indexOf('<PlanModeButton')).toBeLessThan(
-      controlBarSource.indexOf("styles['goal-chip']"),
-    );
-    expect(controlBarSource.indexOf("styles['goal-chip']")).toBeLessThan(
       controlBarSource.indexOf('<ContextRing />'),
     );
-    expect(css).toMatch(/\.goal-chip\s*\{/);
+    expect(css).not.toMatch(/\.goal-chip\s*\{/);
     expect(css).toMatch(/\.goal-active-bar\s*\{/);
     expect(css).toMatch(/\.goal-active-main\s*\{/);
+    expect(css).toMatch(/\.goal-active-edit-form\s*\{/);
+    expect(css).toMatch(/\.goal-active-edit-input\s*\{/);
     expect(css).toMatch(/\.goal-active-actions\s*\{/);
+    expect(css).toMatch(/\.goal-active-elapsed\s*\{/);
     expect(css).toMatch(/\.goal-active-action-danger:hover/);
     expect(css).toMatch(/\.add-menu-icon\s*\{[\s\S]*width:\s*16px[\s\S]*height:\s*16px/);
     expect(css).toMatch(/\.add-menu-item\.active \.add-menu-icon\s*\{[\s\S]*color:\s*var\(--text\)/);
     expect(css).toMatch(/\.goal-icon-target-outer,[\s\S]*\.goal-icon-arrow\s*\{[\s\S]*fill:\s*none/);
     expect(css).toMatch(/\.goal-icon-active\s*\{/);
     expect(css).toMatch(/\.goal-icon-active\s*\{[\s\S]*color:\s*#2130b5/);
-    expect(css).toMatch(/\.goal-chip\s*\{[\s\S]*background:\s*transparent/);
     expect(css).not.toMatch(/#9fc0ff/);
     expect(css).toMatch(/\.add-menu-switch\.on/);
     expect(css).toMatch(/\.add-menu-switch\.on\s*\{[\s\S]*background:\s*#2130b5/);
-    expect(css).toMatch(/\.goal-chip-icon-stack\s+\.goal-chip-close-icon\s*\{[\s\S]*opacity:\s*0/);
-    expect(css).toMatch(/\.goal-chip:hover:not\(:disabled\) \.goal-chip-icon-stack \.goal-chip-close-icon\s*\{[\s\S]*opacity:\s*1/);
-    expect(css).not.toMatch(/\.goal-editor\s*\{/);
   });
 
   it('keeps markdown code blocks wired to scrollbars and tables wired to clipped-cell tooltips', () => {

@@ -97,7 +97,7 @@ function App() {
     });
   }, []);
 
-  // 只测量稳定的输入卡片本体；附件/提示条等浮动状态不参与 chat panel 切点，避免把正文顶上去。
+  // 测量完整输入栈：目标条属于会话主流程，必须参与 chat panel 底部切点，避免正文钻到目标条下方。
   const inputCardRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = inputCardRef.current;
@@ -106,7 +106,7 @@ function App() {
     if (!parent) return;
     const ro = new ResizeObserver(([entry]) => {
       const h = entry.borderBoxSize?.[0]?.blockSize ?? el.offsetHeight;
-      parent.style.setProperty('--input-card-h', `${h}px`);
+      parent.style.setProperty('--input-stack-h', `${h}px`);
     });
     ro.observe(el);
     return () => ro.disconnect();

@@ -184,9 +184,9 @@ function buildGoalUpdatePrompt(objective: string, t: (key: string) => string): s
   ].join('\n').trim();
 }
 
-function buildGoalReviewPrompt(objective: string, t: (key: string) => string): string {
+function buildGoalResumePrompt(objective: string, t: (key: string) => string): string {
   return [
-    t('input.goalReviewPrompt'),
+    t('input.goalResumePrompt'),
     '',
     objective.trim(),
   ].join('\n').trim();
@@ -208,7 +208,19 @@ interface InputAreaProps {
   cardRef?: Ref<HTMLDivElement>;
 }
 
-function GoalActionIcon({ kind }: { kind: 'edit' | 'review' | 'delete' }) {
+function formatGoalElapsed(startedAt?: string | null, nowMs = Date.now()): string {
+  const startMs = startedAt ? Date.parse(startedAt) : NaN;
+  if (!Number.isFinite(startMs)) return '0m';
+  const totalSeconds = Math.max(0, Math.floor((nowMs - startMs) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
+function GoalActionIcon({ kind }: { kind: 'edit' | 'pause' | 'play' | 'delete' | 'save' | 'cancel' | 'clock' }) {
   if (kind === 'edit') {
     return (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -217,11 +229,41 @@ function GoalActionIcon({ kind }: { kind: 'edit' | 'review' | 'delete' }) {
       </svg>
     );
   }
-  if (kind === 'review') {
+  if (kind === 'pause') {
     return (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="8" />
-        <path d="M12 8v4l2.6 2.2" />
+        <rect x="6" y="5" width="4" height="14" rx="1" />
+        <rect x="14" y="5" width="4" height="14" rx="1" />
+      </svg>
+    );
+  }
+  if (kind === 'play') {
+    return (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M8 5v14l11-7-11-7Z" />
+      </svg>
+    );
+  }
+  if (kind === 'save') {
+    return (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="m5 12 4 4L19 6" />
+      </svg>
+    );
+  }
+  if (kind === 'cancel') {
+    return (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M6 6l12 12" />
+        <path d="M18 6 6 18" />
+      </svg>
+    );
+  }
+  if (kind === 'clock') {
+    return (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v5l3 2" />
       </svg>
     );
   }
@@ -241,16 +283,28 @@ function ActiveGoalBar({
   t,
   busy,
   running,
+  elapsed,
+  editing,
+  draft,
+  onDraftChange,
   onEdit,
-  onReview,
+  onSaveEdit,
+  onCancelEdit,
+  onToggleRunning,
   onClear,
 }: {
   goal: SessionGoal;
   t: (key: string) => string;
   busy: boolean;
   running: boolean;
+  elapsed: string;
+  editing: boolean;
+  draft: string;
+  onDraftChange: (value: string) => void;
   onEdit: () => void;
-  onReview: () => void;
+  onSaveEdit: () => void;
+  onCancelEdit: () => void;
+  onToggleRunning: () => void;
   onClear: () => void;
 }) {
   const labelKey = goal.status === 'blocked'
@@ -261,18 +315,71 @@ function ActiveGoalBar({
         ? 'input.runningGoal'
         : 'input.pausedGoal';
   const visualStatus = goal.status === 'blocked' ? 'blocked' : running ? 'active' : 'paused';
+  const elapsedTitle = `${t('input.goalElapsed')}: ${elapsed}`;
   return (
     <div className={styles['goal-active-bar']} data-status={visualStatus} title={goal.objective}>
-      <button
-        type="button"
-        className={styles['goal-active-main']}
-        onClick={onEdit}
-      >
-        <GoalIcon tone="active" />
-        <span className={styles['goal-active-label']}>{t(labelKey)}</span>
-        <span className={styles['goal-active-text']}>{goal.objective}</span>
-      </button>
+      {editing ? (
+        <form
+          className={styles['goal-active-edit-form']}
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSaveEdit();
+          }}
+        >
+          <GoalIcon tone="active" />
+          <input
+            className={styles['goal-active-edit-input']}
+            value={draft}
+            onChange={(event) => onDraftChange(event.currentTarget.value)}
+            placeholder={t('input.goalPlaceholder')}
+            disabled={busy}
+            autoFocus
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                onCancelEdit();
+              }
+            }}
+          />
+          <button
+            type="submit"
+            className={styles['goal-active-action']}
+            title={t('input.goalSave')}
+            aria-label={t('input.goalSave')}
+            disabled={busy || !draft.trim()}
+          >
+            <GoalActionIcon kind="save" />
+          </button>
+          <button
+            type="button"
+            className={styles['goal-active-action']}
+            title={t('input.goalCancel')}
+            aria-label={t('input.goalCancel')}
+            disabled={busy}
+            onClick={onCancelEdit}
+          >
+            <GoalActionIcon kind="cancel" />
+          </button>
+        </form>
+      ) : (
+        <button
+          type="button"
+          className={styles['goal-active-main']}
+          onClick={onEdit}
+        >
+          <GoalIcon tone="active" />
+          <span className={styles['goal-active-label']}>{t(labelKey)}</span>
+          <span className={styles['goal-active-text']}>{goal.objective}</span>
+        </button>
+      )}
       <div className={styles['goal-active-actions']}>
+        <span
+          className={`${styles['goal-active-action']} ${styles['goal-active-elapsed']}`}
+          title={elapsedTitle}
+          aria-label={elapsedTitle}
+        >
+          <GoalActionIcon kind="clock" />
+        </span>
         <button
           type="button"
           className={styles['goal-active-action']}
@@ -286,12 +393,12 @@ function ActiveGoalBar({
         <button
           type="button"
           className={styles['goal-active-action']}
-          title={t('input.goalReviewStatus')}
-          aria-label={t('input.goalReviewStatus')}
+          title={running ? t('input.goalPause') : t('input.goalResume')}
+          aria-label={running ? t('input.goalPause') : t('input.goalResume')}
           disabled={busy}
-          onClick={onReview}
+          onClick={onToggleRunning}
         >
-          <GoalActionIcon kind="review" />
+          <GoalActionIcon kind={running ? 'pause' : 'play'} />
         </button>
         <button
           type="button"
@@ -404,8 +511,10 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
   const [fileMentionBusy, setFileMentionBusy] = useState(false);
   const [completingTodos, setCompletingTodos] = useState(false);
   const [goalEditing, setGoalEditing] = useState(false);
+  const [goalDraft, setGoalDraft] = useState('');
+  const [goalElapsedNow, setGoalElapsedNow] = useState(() => Date.now());
   const [goalSaving, setGoalSaving] = useState(false);
-  const chatDraftBeforeGoalRef = useRef<string | null>(null);
+  const goalDraftStartedAtRef = useRef(new Date().toISOString());
 
   useEffect(() => {
     if (pendingSessionConfirmation) {
@@ -486,7 +595,6 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
   const placeholderRef = useRef('');
   const getEditorPlaceholder = useCallback(() => placeholderRef.current, []);
   const placeholder = (() => {
-    if (goalEditing) return t('input.goalPlaceholder');
     if (welcomeVisible && welcomeTip) return welcomeTip;
     const yuanPh = t(`yuan.placeholder.${agentYuan}`);
     return (yuanPh && !yuanPh.startsWith('yuan.')) ? yuanPh : t('input.placeholder');
@@ -690,6 +798,23 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
   const visibleGoal = sessionGoal?.status === 'active' || sessionGoal?.status === 'blocked' || sessionGoal?.status === 'paused'
     ? sessionGoal
     : null;
+  const goalIsRunning = visibleGoal?.status === 'active';
+  const displayGoal = visibleGoal || (goalEditing ? {
+    objective: goalDraft,
+    status: 'active' as const,
+    createdAt: goalDraftStartedAtRef.current,
+    updatedAt: goalDraftStartedAtRef.current,
+  } : null);
+  const goalElapsed = useMemo(() => (
+    displayGoal ? formatGoalElapsed(displayGoal.createdAt, goalElapsedNow) : '0s'
+  ), [displayGoal, goalElapsedNow]);
+
+  useEffect(() => {
+    if (!displayGoal) return;
+    setGoalElapsedNow(Date.now());
+    const timer = window.setInterval(() => setGoalElapsedNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [displayGoal?.createdAt, !!displayGoal]);
 
   const handleSlashToggle = useCallback(() => {
     if (slashMenuOpen) dismissSlashMenu();
@@ -708,7 +833,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
   }, []);
 
   const updateSessionGoal = useCallback(async (
-    action: 'set' | 'clear' | 'complete' | 'blocked',
+    action: 'set' | 'clear' | 'complete' | 'blocked' | 'pause' | 'resume',
     objective?: string,
     note?: string,
   ): Promise<SessionGoal | null> => {
@@ -731,42 +856,27 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     return goal;
   }, [applyGoalResponse]);
 
-  const restoreChatDraftAfterGoal = useCallback(() => {
-    if (!editor || editor.isDestroyed) return;
-    const draft = chatDraftBeforeGoalRef.current ?? currentDraft;
-    setEditorPlainText(editor, draft, false);
-    setInputText(draft);
-    chatDraftBeforeGoalRef.current = null;
-    window.requestAnimationFrame(() => editor.commands.focus('end'));
-  }, [currentDraft, editor]);
-
   const openGoalEditor = useCallback(() => {
-    if (!editor || editor.isDestroyed) return;
-    if (!goalEditing) {
-      chatDraftBeforeGoalRef.current = editor.getText();
-    }
     setGoalEditing(true);
+    setGoalDraft(visibleGoal?.objective || '');
+    if (!visibleGoal) goalDraftStartedAtRef.current = new Date().toISOString();
     setSlashMenuOpen(false);
     setFileMenuOpen(false);
     slashDismissedTextRef.current = null;
-    const goalText = visibleGoal?.objective || '';
-    setEditorPlainText(editor, goalText, false);
-    setInputText(goalText);
-    window.requestAnimationFrame(() => editor.commands.focus('end'));
-  }, [visibleGoal?.objective, editor, goalEditing]);
+  }, [visibleGoal]);
 
   const cancelGoalEditing = useCallback(() => {
     setGoalEditing(false);
-    restoreChatDraftAfterGoal();
-  }, [restoreChatDraftAfterGoal]);
+    setGoalDraft('');
+  }, []);
 
-  const saveGoalFromEditor = useCallback(async (): Promise<GoalSubmitResult | null> => {
-    if (!editor || editor.isDestroyed || goalSaving) return null;
-    const objective = editor.getText().trim();
+  const saveGoalDraft = useCallback(async (): Promise<GoalSubmitResult | null> => {
+    if (goalSaving) return null;
+    const objective = goalDraft.trim();
     const wasActive = !!visibleGoal;
     if (!objective) {
       setGoalEditing(false);
-      restoreChatDraftAfterGoal();
+      setGoalDraft('');
       return null;
     }
     setGoalSaving(true);
@@ -774,7 +884,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
       const previous = visibleGoal?.objective?.trim() || '';
       await updateSessionGoal('set', objective);
       setGoalEditing(false);
-      restoreChatDraftAfterGoal();
+      setGoalDraft('');
       return { objective, changed: objective !== previous, wasActive };
     } catch (err) {
       addToast(t('input.goalSetFailed'), 'error', 5000);
@@ -783,7 +893,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     } finally {
       setGoalSaving(false);
     }
-  }, [visibleGoal, addToast, editor, goalSaving, restoreChatDraftAfterGoal, t, updateSessionGoal]);
+  }, [visibleGoal, addToast, goalDraft, goalSaving, t, updateSessionGoal]);
 
   const manuallyClearGoal = useCallback(async () => {
     if (!visibleGoal || goalSaving) return;
@@ -792,7 +902,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
       await updateSessionGoal('clear');
       if (goalEditing) {
         setGoalEditing(false);
-        restoreChatDraftAfterGoal();
+        setGoalDraft('');
       }
     } catch (err) {
       addToast(t('input.goalSetFailed'), 'error', 5000);
@@ -800,7 +910,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     } finally {
       setGoalSaving(false);
     }
-  }, [visibleGoal, addToast, goalEditing, goalSaving, restoreChatDraftAfterGoal, t, updateSessionGoal]);
+  }, [visibleGoal, addToast, goalEditing, goalSaving, t, updateSessionGoal]);
 
   // Sync editor text to React state (drives hasInput / canSend) + slash menu detection + draft save
   useEffect(() => {
@@ -808,14 +918,6 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     const handler = () => {
       const text = editor.getText();
       setInputText(text);
-      if (goalEditing) {
-        setSlashMenuOpen(false);
-        setFileMenuOpen(false);
-        setFileMentionRange(null);
-        setFileMentionQuery('');
-        requestAnimationFrame(() => editor.commands.scrollIntoView());
-        return;
-      }
       if (slashDismissedTextRef.current && slashDismissedTextRef.current !== text.trim()) {
         slashDismissedTextRef.current = null;
       }
@@ -847,12 +949,11 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     };
     editor.on('update', handler);
     return () => { editor.off('update', handler); };
-  }, [editor, currentSessionPath, goalEditing, setDraft, slashCommands]);
+  }, [editor, currentSessionPath, setDraft, slashCommands]);
 
   // 切换 session 时恢复草稿
   useEffect(() => {
     if (!editor || !currentSessionPath) return;
-    if (goalEditing) return;
     if (typeof editor.setEditable === 'function' && !editor.isEditable) {
       editor.setEditable(true);
     }
@@ -862,7 +963,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     if (draft !== current) {
       setEditorPlainText(editor, draft, false);
     }
-  }, [editor, currentDraft, currentSessionPath, goalEditing]);
+  }, [editor, currentDraft, currentSessionPath]);
 
   // 点击外部关闭斜杠菜单
   useEffect(() => {
@@ -891,9 +992,8 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     || editorHasInlineNode(editor, 'skillBadge')
     || editorHasInlineNode(editor, 'fileBadge');
   const hasUsableModel = !!currentModelInfo;
-  const canSend = goalEditing
-    ? inputText.trim().length > 0 && connected && !modelSwitching && !pendingSessionSwitchPath && !goalSaving && hasUsableModel && !compressForking
-    : hasContent && connected && !isStreaming && !modelSwitching && !pendingSessionSwitchPath && hasUsableModel && !compressForking;
+  const canSend = hasContent && connected && !isStreaming && !modelSwitching && !pendingSessionSwitchPath && hasUsableModel && !compressForking;
+  const canGoalControl = connected && !modelSwitching && !pendingSessionSwitchPath && hasUsableModel && !compressForking && !goalSaving;
   const modelNoticeText = modelsLoadState === 'error'
     ? t('model.loadFailedHint')
     : (modelsLoadState === 'empty' || (modelsLoadState === 'idle' && models.length === 0))
@@ -1087,22 +1187,52 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     );
   }, [sendPlainPrompt, t]);
 
-  const askAgentToReviewGoal = useCallback(async () => {
+  const pauseGoal = useCallback(async () => {
     if (!visibleGoal || goalSaving) return;
-    await sendPlainPrompt(
-      buildGoalReviewPrompt(visibleGoal.objective, t),
-      t('input.goalReviewDisplay'),
-      { allowStreaming: true },
-    );
-  }, [visibleGoal, goalSaving, sendPlainPrompt, t]);
+    setGoalSaving(true);
+    try {
+      await updateSessionGoal('pause');
+      if (isStreaming) {
+        const ws = getWebSocket();
+        ws?.send(JSON.stringify({ type: 'abort', sessionPath: useStore.getState().currentSessionPath }));
+      }
+    } catch (err) {
+      addToast(t('input.goalSetFailed'), 'error', 5000);
+      console.warn('[goal] pause failed', err);
+    } finally {
+      setGoalSaving(false);
+    }
+  }, [visibleGoal, addToast, goalSaving, isStreaming, t, updateSessionGoal]);
+
+  const resumeGoal = useCallback(async () => {
+    if (!visibleGoal || goalSaving) return;
+    setGoalSaving(true);
+    try {
+      const goal = await updateSessionGoal('resume');
+      const objective = (goal?.objective || visibleGoal.objective || '').trim();
+      if (objective) {
+        await sendPlainPrompt(
+          buildGoalResumePrompt(objective, t),
+          t('input.goalResumeDisplay'),
+          { allowStreaming: true },
+        );
+      }
+    } catch (err) {
+      addToast(t('input.goalSetFailed'), 'error', 5000);
+      console.warn('[goal] resume failed', err);
+    } finally {
+      setGoalSaving(false);
+    }
+  }, [visibleGoal, addToast, goalSaving, sendPlainPrompt, t, updateSessionGoal]);
+
+  const toggleGoalRunning = useCallback(() => {
+    if (visibleGoal?.status === 'active') void pauseGoal();
+    else if (visibleGoal?.status === 'paused') void resumeGoal();
+  }, [pauseGoal, resumeGoal, visibleGoal?.status]);
 
   // ── Send message ──
   const handleSend = useCallback(async () => {
     if (!editor) return;
-    if (goalEditing) {
-      await sendGoalSubmitPrompt(await saveGoalFromEditor());
-      return;
-    }
     const editorJson = editor.getJSON();
     const { text: rawText, skills, fileRefs } = serializeEditor(editorJson);
     const text = rawText.trim();
@@ -1281,46 +1411,42 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     } finally {
       setSending(false);
     }
-  }, [editor, goalEditing, saveGoalFromEditor, sendGoalSubmitPrompt, attachedFiles, docContextAttached, connected, isStreaming, sending, pendingNewSession, currentDoc, clearAttachedFiles, clearDraft, currentSessionPath, setDocContextAttached, slashCommands, slashSelected, handleSlashSelect, supportsVision, currentModelInfo, loadVisionAuxiliaryConfig, modelSwitching, t]);
+  }, [editor, attachedFiles, docContextAttached, connected, isStreaming, sending, pendingNewSession, currentDoc, clearAttachedFiles, clearDraft, currentSessionPath, setDocContextAttached, slashCommands, slashSelected, handleSlashSelect, supportsVision, currentModelInfo, loadVisionAuxiliaryConfig, modelSwitching, t]);
 
   // ── Steer ──
   const handleSteer = useCallback(async () => {
     if (!editor) return;
     const text = editor.getText().trim();
-    if (!text || !isStreaming) return;
+    if (!text || (!isStreaming && !goalIsRunning)) return;
     const ws = getWebSocket();
     if (!ws) return;
     editor.commands.clearContent();
     const sp = useStore.getState().currentSessionPath;
     if (sp) clearDraft(sp);
-    ws.send(JSON.stringify({ type: 'interrupt_prompt', text, sessionPath: sp, uiContext: collectUiContext(useStore.getState()), displayMessage: { text } }));
-  }, [editor, isStreaming, clearDraft]);
+    ws.send(JSON.stringify({
+      type: isStreaming ? 'interrupt_prompt' : 'prompt',
+      text,
+      sessionPath: sp,
+      uiContext: collectUiContext(useStore.getState()),
+      displayMessage: { text },
+    }));
+  }, [editor, isStreaming, goalIsRunning, clearDraft]);
 
   // ── Stop ──
   const handleStop = useCallback(() => {
+    if (goalIsRunning && !isStreaming) {
+      void pauseGoal();
+      return;
+    }
     const ws = getWebSocket();
     if (!isStreaming || !ws) return;
     ws.send(JSON.stringify({ type: 'abort', sessionPath: useStore.getState().currentSessionPath }));
-  }, [isStreaming]);
+    if (goalIsRunning) void updateSessionGoal('pause');
+  }, [goalIsRunning, isStreaming, pauseGoal, updateSessionGoal]);
 
   // ── Key handler ──
   const handleEditorKeyDown = useCallback((e: InputKeyEvent): boolean => {
     if (e.defaultPrevented) return false;
-    if (goalEditing) {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        cancelGoalEditing();
-        return true;
-      }
-      if (e.key === 'Enter' && !e.shiftKey && !isComposing.current && !e.isComposing) {
-        e.preventDefault();
-        void (async () => {
-          await sendGoalSubmitPrompt(await saveGoalFromEditor());
-        })();
-        return true;
-      }
-      return false;
-    }
     if (fileMenuOpen && (fileMentionItems.length > 0 || fileMentionBusy)) {
       if (e.key === 'ArrowDown' && fileMentionItems.length > 0) {
         e.preventDefault();
@@ -1357,13 +1483,12 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     }
     if (e.key === 'Enter' && !e.shiftKey && !isComposing.current && !e.isComposing) {
       e.preventDefault();
-      if (isStreaming && (editor?.getText().trim())) handleSteer(); else handleSend();
+      if ((isStreaming || goalIsRunning) && (editor?.getText().trim())) handleSteer(); else handleSend();
       return true;
     }
     return false;
   }, [
     dismissSlashMenu,
-    cancelGoalEditing,
     fileMentionBusy,
     fileMentionItems,
     fileMenuOpen,
@@ -1373,11 +1498,9 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     handleSend,
     handleSteer,
     handleSlashSelect,
-    goalEditing,
+    goalIsRunning,
     isStreaming,
     editor,
-    saveGoalFromEditor,
-    sendGoalSubmitPrompt,
     slashMenuOpen,
     slashSelected,
   ]);
@@ -1469,25 +1592,35 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
           />
         )}
       </div>
-      <div className={styles['input-stack']}>
+      <div className={styles['input-stack']} ref={cardRef}>
         {visibleSessionConfirmation && (
           <SessionConfirmationPrompt
             block={visibleSessionConfirmation}
             exiting={sessionConfirmationExiting}
           />
         )}
-        {visibleGoal && !goalEditing ? (
+        {displayGoal ? (
           <ActiveGoalBar
-            goal={visibleGoal}
+            goal={displayGoal}
             t={t}
             busy={goalSaving}
-            running={isStreaming}
+            running={displayGoal.status === 'active'}
+            elapsed={goalElapsed}
+            editing={goalEditing}
+            draft={goalDraft}
+            onDraftChange={setGoalDraft}
             onEdit={openGoalEditor}
-            onReview={askAgentToReviewGoal}
+            onSaveEdit={() => {
+              void (async () => {
+                await sendGoalSubmitPrompt(await saveGoalDraft());
+              })();
+            }}
+            onCancelEdit={cancelGoalEditing}
+            onToggleRunning={toggleGoalRunning}
             onClear={manuallyClearGoal}
           />
         ) : null}
-        <div className={styles['input-wrapper']} ref={cardRef}>
+        <div className={styles['input-wrapper']}>
           {modelNoticeText && (
             <div className={styles['model-status-bar']}>
               <span className={styles['model-status-text']}>{modelNoticeText}</span>
@@ -1524,7 +1657,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
             onGoalOpen={openGoalEditor}
             onGoalClose={cancelGoalEditing}
             goalEditing={goalEditing}
-            goalSaving={goalSaving}
+            goalRunning={goalIsRunning}
             slashBtnRef={slashBtnRef}
             onSlashToggle={handleSlashToggle}
             permissionMode={permissionMode}
@@ -1539,7 +1672,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
             sessionModel={sessionModel}
             isStreaming={isStreaming}
             hasInput={!!inputText.trim()}
-            canSend={canSend}
+            canSend={goalIsRunning ? canGoalControl : canSend}
             onSend={handleSend}
             onSteer={handleSteer}
             onStop={handleStop}

@@ -113,8 +113,8 @@ function buildRuntimeFoundationPrompt({
   }
   if (hasTool("session_goal")) {
     interfaceAndFiles.push(isZh
-      ? "- 当前会话有目标时，完成并验证后用 session_goal 标记完成；若确认无法继续推进，用 session_goal 标记阻塞并写明原因。"
-      : "- When the current session has a goal, use session_goal to mark it complete after completion and verification; if you confirm you cannot make progress, mark it blocked with the reason.");
+      ? "- 当前会话有目标时，普通代码检查只是基础层；交付后必须像用户一样打开、查看、点击、运行或操作结果，必要时用 Computer Use/浏览器做用户视角验收。验收通过后用 session_goal 标记完成；验收不通过就继续修复并再次验收；确认无法推进时标记阻塞。"
+      : "- When the current session has a goal, ordinary code review is only the baseline; after delivery, open, inspect, click, run, or operate the result as a user would, using Computer Use/browser acceptance when needed. Mark complete only after that acceptance passes; if it fails, keep fixing and verify again; mark blocked only when progress is impossible.");
   }
   if (interfaceAndFiles.length) {
     sections.push([

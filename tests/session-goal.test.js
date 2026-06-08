@@ -17,12 +17,20 @@ describe("session goal", () => {
       status: "complete",
       completedAt: "2026-06-06T00:00:00.000Z",
     });
+    expect(normalizeSessionGoal({ objective: "wait", status: "paused", updatedAt: "2026-06-06T00:00:00.000Z" })).toMatchObject({
+      objective: "wait",
+      status: "paused",
+      pausedAt: "2026-06-06T00:00:00.000Z",
+    });
     expect(normalizeSessionGoal({ objective: "   " })).toBeNull();
   });
 
   it("only builds context for active goals", () => {
     const active = makeSessionGoal("Keep the session focused");
     expect(buildSessionGoalText(active, { locale: "en" })).toContain("Current Session Goal");
+    expect(buildSessionGoalText(active, { locale: "en" })).toContain("user-perspective acceptance");
+    expect(buildSessionGoalText(active, { locale: "zh-CN" })).toContain("用户视角验收");
+    expect(buildSessionGoalText({ ...active, status: "paused" }, { locale: "en" })).toBe("");
     expect(buildSessionGoalText({ ...active, status: "complete" }, { locale: "en" })).toBe("");
   });
 

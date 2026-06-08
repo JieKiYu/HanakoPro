@@ -505,6 +505,14 @@ app.post("/api/session-goal", async (c) => {
     } else {
       result = engine.markSessionGoalBlocked?.(targetSessionPath, note);
     }
+  } else if (action === "pause") {
+    result = usePending
+      ? engine.pauseSessionGoal?.(null, note)
+      : engine.pauseSessionGoal?.(targetSessionPath, note);
+  } else if (action === "resume") {
+    result = usePending
+      ? engine.resumeSessionGoal?.(null, note)
+      : engine.resumeSessionGoal?.(targetSessionPath, note);
   } else if (action === "set" || !action) {
     result = usePending
       ? engine.setPendingSessionGoal?.(objective)

@@ -748,6 +748,9 @@ export class HanaEngine {
   clearSessionGoal(sessionPath) { return this._sessionCoord.clearSessionGoal(sessionPath); }
   markSessionGoalComplete(sessionPath, note) { return this._sessionCoord.markSessionGoalComplete(sessionPath, note); }
   markSessionGoalBlocked(sessionPath, note) { return this._sessionCoord.markSessionGoalBlocked(sessionPath, note); }
+  pauseSessionGoal(sessionPath, note) { return this._sessionCoord.pauseSessionGoal(sessionPath, note); }
+  resumeSessionGoal(sessionPath, note) { return this._sessionCoord.resumeSessionGoal(sessionPath, note); }
+  triggerSessionGoalAutoReview(sessionPath) { return this._sessionCoord.triggerSessionGoalAutoReview(sessionPath); }
   setPendingSessionGoal(objective) { return this._sessionCoord.setPendingSessionGoal(objective); }
   clearPendingSessionGoal() { return this._sessionCoord.clearPendingSessionGoal(); }
   getSandbox() { return this._prefs.getSandbox(); }

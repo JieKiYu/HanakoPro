@@ -1,19 +1,21 @@
 import { useI18n } from '../../hooks/use-i18n';
 import styles from './InputArea.module.css';
 
-export function SendButton({ isStreaming, hasInput, disabled, onSend, onSteer, onStop, forceSend = false }: {
+export function SendButton({ isStreaming, goalRunning = false, hasInput, disabled, onSend, onSteer, onStop }: {
   isStreaming: boolean;
+  goalRunning?: boolean;
   hasInput: boolean;
   disabled: boolean;
   onSend: () => void;
   onSteer: () => void;
   onStop: () => void;
-  forceSend?: boolean;
 }) {
   const { t } = useI18n();
 
   // 三态：发送 / 插话 / 停止
-  const mode = forceSend ? 'send' : (isStreaming ? (hasInput ? 'steer' : 'stop') : 'send');
+  const mode = isStreaming || goalRunning
+    ? (hasInput ? 'steer' : 'stop')
+    : 'send';
 
   return (
     <button

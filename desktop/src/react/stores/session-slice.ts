@@ -7,6 +7,7 @@ export interface SessionGoal {
   status: SessionGoalStatus;
   createdAt: string;
   updatedAt: string;
+  pausedAt?: string | null;
   completedAt?: string | null;
   blockedAt?: string | null;
   note?: string | null;

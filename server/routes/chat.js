@@ -326,6 +326,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
         visibleAssistantText: "",
         fileWritePreviews: new Map(),
         deferredStatusFalseTimer: null,
+        goalAutoReviewTimer: null,
         pendingStatusFalseExtra: null,
         providerTurnEnded: false,
         lastAccessed: Date.now(),
@@ -588,6 +589,9 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
     debugLog()?.log("ws", `turn done (${sessionPath?.split("/").pop()})`);
     maybeGenerateFirstTurnTitle(sessionPath, ss);
     broadcastContextUsage(sessionPath);
+    if (!extra?.aborted && !extra?.reason) {
+      scheduleSessionGoalAutoReview(sessionPath, ss);
+    }
   }
 
   function emitNativeGeneratedImageBlocks(sessionPath, ss, message) {
@@ -613,6 +617,25 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
         debugLog()?.log("ws", `native image persistence failed: ${messageText}`);
       }
     }
+  }
+
+  function scheduleSessionGoalAutoReview(sessionPath, ss) {
+    if (!sessionPath || !ss || ss.isAborted || ss.hasError) return;
+    const goal = engine.getSessionGoal?.(sessionPath);
+    if (!goal || goal.status !== "active") return;
+    if (ss.goalAutoReviewTimer) clearTimeout(ss.goalAutoReviewTimer);
+    ss.goalAutoReviewTimer = setTimeout(async () => {
+      ss.goalAutoReviewTimer = null;
+      const latestGoal = engine.getSessionGoal?.(sessionPath);
+      if (!latestGoal || latestGoal.status !== "active") return;
+      if (engine.isSessionStreaming?.(sessionPath)) return;
+      try {
+        await engine.triggerSessionGoalAutoReview?.(sessionPath);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        debugLog()?.log("goal", `auto review failed: ${message}`);
+      }
+    }, 450);
   }
 
   // 单订阅：事件只写入一次，再按需广播到所有连接中的客户端。
