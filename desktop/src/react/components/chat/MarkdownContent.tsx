@@ -77,33 +77,48 @@ function applyTailFade(root: HTMLElement, count: number): void {
   }
 }
 
-function enhanceCodeBlockScrollbars(root: HTMLElement): () => void {
-  const oldBars = Array.from(root.querySelectorAll<HTMLElement>('[data-md-code-scrollbar="true"]'));
+function enhanceHorizontalScrollbars(root: HTMLElement): () => void {
+  const oldBars = Array.from(root.querySelectorAll<HTMLElement>('[data-md-horizontal-scrollbar="true"]'));
   for (const bar of oldBars) bar.remove();
 
   const cleanups: Array<() => void> = [];
   const updates: Array<() => void> = [];
-  const blocks = Array.from(root.querySelectorAll<HTMLPreElement>('pre'));
+  const codeBlocks = Array.from(root.querySelectorAll<HTMLPreElement>('pre'));
+  const tableWrappers = Array.from(root.querySelectorAll<HTMLElement>('.md-table-wrapper'));
+  const scrollers = [
+    ...codeBlocks.map(scroller => ({
+      scroller,
+      trackClassName: styles.markdownCodeScrollbar,
+      thumbClassName: styles.markdownCodeScrollbarThumb,
+      insertAfter: scroller,
+    })),
+    ...tableWrappers.map(scroller => ({
+      scroller,
+      trackClassName: styles.markdownTableScrollbar,
+      thumbClassName: styles.markdownTableScrollbarThumb,
+      insertAfter: scroller,
+    })),
+  ];
 
-  for (const pre of blocks) {
+  for (const { scroller, trackClassName, thumbClassName, insertAfter } of scrollers) {
     const track = document.createElement('div');
     const thumb = document.createElement('div');
-    track.className = styles.markdownCodeScrollbar;
-    track.dataset.mdCodeScrollbar = 'true';
-    thumb.className = styles.markdownCodeScrollbarThumb;
+    track.className = trackClassName;
+    track.dataset.mdHorizontalScrollbar = 'true';
+    thumb.className = thumbClassName;
     track.appendChild(thumb);
-    pre.insertAdjacentElement('afterend', track);
+    insertAfter.insertAdjacentElement('afterend', track);
 
     const update = () => {
-      const canScrollX = pre.scrollWidth > pre.clientWidth + 1;
+      const canScrollX = scroller.scrollWidth > scroller.clientWidth + 1;
       track.hidden = !canScrollX;
       if (!canScrollX) return;
       const trackWidth = track.clientWidth;
       if (trackWidth <= 0) return;
-      const thumbWidth = Math.min(trackWidth, Math.max(32, (pre.clientWidth / pre.scrollWidth) * trackWidth));
+      const thumbWidth = Math.min(trackWidth, Math.max(32, (scroller.clientWidth / scroller.scrollWidth) * trackWidth));
       const maxThumbLeft = Math.max(0, trackWidth - thumbWidth);
-      const maxScrollLeft = Math.max(1, pre.scrollWidth - pre.clientWidth);
-      const thumbLeft = (pre.scrollLeft / maxScrollLeft) * maxThumbLeft;
+      const maxScrollLeft = Math.max(1, scroller.scrollWidth - scroller.clientWidth);
+      const thumbLeft = (scroller.scrollLeft / maxScrollLeft) * maxThumbLeft;
       thumb.style.width = `${thumbWidth}px`;
       thumb.style.transform = `translateX(${thumbLeft}px)`;
     };
@@ -120,14 +135,14 @@ function enhanceCodeBlockScrollbars(root: HTMLElement): () => void {
     const pointerDown = (event: PointerEvent) => {
       if (event.button !== 0 || track.hidden) return;
       const rect = track.getBoundingClientRect();
-      const thumbWidth = Math.min(rect.width, Math.max(32, (pre.clientWidth / pre.scrollWidth) * rect.width));
+      const thumbWidth = Math.min(rect.width, Math.max(32, (scroller.clientWidth / scroller.scrollWidth) * rect.width));
       const maxThumbLeft = Math.max(1, rect.width - thumbWidth);
       const targetThumbLeft = Math.min(maxThumbLeft, Math.max(0, event.clientX - rect.left - thumbWidth / 2));
-      pre.scrollLeft = (targetThumbLeft / maxThumbLeft) * (pre.scrollWidth - pre.clientWidth);
+      scroller.scrollLeft = (targetThumbLeft / maxThumbLeft) * (scroller.scrollWidth - scroller.clientWidth);
       dragging = {
         pointerId: event.pointerId,
         startX: event.clientX,
-        scrollLeft: pre.scrollLeft,
+        scrollLeft: scroller.scrollLeft,
         trackWidth: rect.width,
         thumbWidth,
       };
@@ -139,8 +154,8 @@ function enhanceCodeBlockScrollbars(root: HTMLElement): () => void {
     const pointerMove = (event: PointerEvent) => {
       if (!dragging || dragging.pointerId !== event.pointerId) return;
       const maxThumbTravel = Math.max(1, dragging.trackWidth - dragging.thumbWidth);
-      const maxScrollLeft = Math.max(0, pre.scrollWidth - pre.clientWidth);
-      pre.scrollLeft = dragging.scrollLeft + ((event.clientX - dragging.startX) / maxThumbTravel) * maxScrollLeft;
+      const maxScrollLeft = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
+      scroller.scrollLeft = dragging.scrollLeft + ((event.clientX - dragging.startX) / maxThumbTravel) * maxScrollLeft;
       event.preventDefault();
       update();
     };
@@ -152,7 +167,7 @@ function enhanceCodeBlockScrollbars(root: HTMLElement): () => void {
       dragging = null;
     };
 
-    pre.addEventListener('scroll', update);
+    scroller.addEventListener('scroll', update);
     track.addEventListener('pointerdown', pointerDown);
     track.addEventListener('pointermove', pointerMove);
     track.addEventListener('pointerup', pointerEnd);
@@ -161,7 +176,7 @@ function enhanceCodeBlockScrollbars(root: HTMLElement): () => void {
 
     cleanups.push(() => {
       window.cancelAnimationFrame(frame);
-      pre.removeEventListener('scroll', update);
+      scroller.removeEventListener('scroll', update);
       track.removeEventListener('pointerdown', pointerDown);
       track.removeEventListener('pointermove', pointerMove);
       track.removeEventListener('pointerup', pointerEnd);
@@ -172,11 +187,11 @@ function enhanceCodeBlockScrollbars(root: HTMLElement): () => void {
 
   const ResizeObserverCtor = window.ResizeObserver;
   let observer: ResizeObserver | null = null;
-  if (ResizeObserverCtor && blocks.length > 0) {
+  if (ResizeObserverCtor && scrollers.length > 0) {
     observer = new ResizeObserverCtor(() => {
       for (const update of updates) update();
     });
-    for (const pre of blocks) observer.observe(pre);
+    for (const { scroller } of scrollers) observer.observe(scroller);
     observer.observe(root);
   }
 
@@ -198,7 +213,7 @@ export const MarkdownContent = memo(function MarkdownContent({ html, className, 
   useEffect(() => {
     if (!ref.current) return;
     injectCopyButtons(ref.current);
-    return enhanceCodeBlockScrollbars(ref.current);
+    return enhanceHorizontalScrollbars(ref.current);
   }, [html]);
   useMermaidDiagrams(ref, [html]);
 

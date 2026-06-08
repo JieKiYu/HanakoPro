@@ -438,6 +438,28 @@
     background: rgba(var(--accent-rgb), 0.38);
 }
 
+.markdownTableScrollbar {
+    position: relative;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    height: 12px;
+    margin: calc(-1 * var(--space-xs)) 0 var(--space-sm);
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.045);
+    cursor: pointer;
+    touch-action: none;
+}
+
+.markdownTableScrollbarThumb {
+    position: absolute;
+    top: 2px;
+    bottom: 2px;
+    min-width: 32px;
+    border-radius: 999px;
+    background: rgba(var(--accent-rgb), 0.38);
+}
+
 /* ── Message action buttons (shared by user & assistant) ── */
 
 .msgActions {

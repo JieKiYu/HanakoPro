@@ -67,6 +67,7 @@ describe('InputArea layout', () => {
     const diffLineTextBlock = cssBlock(chatCss, String.raw`\.diffLineText`);
     const diffHorizontalScrollbarBlock = cssBlock(chatCss, String.raw`\.diffHorizontalScrollbar`);
     const markdownCodeScrollbarBlock = cssBlock(chatCss, String.raw`\.markdownCodeScrollbar`);
+    const markdownTableScrollbarBlock = cssBlock(chatCss, String.raw`\.markdownTableScrollbar`);
     const markdownPreBlock = cssBlock(globalCss, String.raw`\.md-content pre`);
     const markdownPreScrollbarBlock = cssBlock(globalCss, String.raw`\.md-content pre::-webkit-scrollbar`);
     const markdownPreCodeBlock = cssBlock(globalCss, String.raw`\.md-content pre code`);
@@ -214,6 +215,11 @@ describe('InputArea layout', () => {
     expect(markdownCodeScrollbarBlock).toMatch(/height:\s*12px/);
     expect(markdownCodeScrollbarBlock).toMatch(/touch-action:\s*none/);
     expect(chatCss).toMatch(/\.markdownCodeScrollbarThumb/);
+    expect(markdownTableScrollbarBlock).toMatch(/width:\s*100%/);
+    expect(markdownTableScrollbarBlock).toMatch(/max-width:\s*100%/);
+    expect(markdownTableScrollbarBlock).toMatch(/height:\s*12px/);
+    expect(markdownTableScrollbarBlock).toMatch(/touch-action:\s*none/);
+    expect(chatCss).toMatch(/\.markdownTableScrollbarThumb/);
     expect(markdownPreBlock).toMatch(/width:\s*calc\(var\(--chat-code-block-width,\s*100%\) - var\(--chat-module-card-inset,\s*0\.75rem\) - var\(--chat-module-card-inset,\s*0\.75rem\)\)/);
     expect(markdownPreBlock).toMatch(/max-width:\s*calc\(100% - var\(--chat-module-card-inset,\s*0\.75rem\) - var\(--chat-module-card-inset,\s*0\.75rem\)\)/);
     expect(markdownPreBlock).toMatch(/margin:\s*var\(--space-sm\)\s+var\(--chat-module-card-inset,\s*0\.75rem\)/);
@@ -328,17 +334,21 @@ describe('InputArea layout', () => {
     expect(css).not.toMatch(/\.goal-editor\s*\{/);
   });
 
-  it('keeps markdown code blocks wired to the visible horizontal scrollbar enhancer', () => {
+  it('keeps markdown code blocks and tables wired to the visible horizontal scrollbar enhancer', () => {
     const source = fs.readFileSync(
       path.join(process.cwd(), 'desktop/src/react/components/chat/MarkdownContent.tsx'),
       'utf8',
     );
 
-    expect(source).toMatch(/enhanceCodeBlockScrollbars/);
-    expect(source).toMatch(/data-md-code-scrollbar/);
+    expect(source).toMatch(/enhanceHorizontalScrollbars/);
+    expect(source).toMatch(/data-md-horizontal-scrollbar/);
     expect(source).toMatch(/styles\.markdownCodeScrollbar/);
     expect(source).toMatch(/styles\.markdownCodeScrollbarThumb/);
-    expect(source).toMatch(/pre\.scrollWidth\s*>\s*pre\.clientWidth\s*\+\s*1/);
-    expect(source).toMatch(/pre\.scrollLeft\s*=/);
+    expect(source).toMatch(/styles\.markdownTableScrollbar/);
+    expect(source).toMatch(/styles\.markdownTableScrollbarThumb/);
+    expect(source).toMatch(/const tableWrappers = Array\.from/);
+    expect(source).toContain("root.querySelectorAll<HTMLElement>('.md-table-wrapper')");
+    expect(source).toMatch(/scroller\.scrollWidth\s*>\s*scroller\.clientWidth\s*\+\s*1/);
+    expect(source).toMatch(/scroller\.scrollLeft\s*=/);
   });
 });
