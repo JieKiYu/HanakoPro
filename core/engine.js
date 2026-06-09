@@ -744,14 +744,14 @@ export class HanaEngine {
   getSessionThinkingLevel(sessionPath) { return this._sessionCoord.getSessionThinkingLevel(sessionPath); }
   setSessionThinkingLevel(sessionPath, level) { return this._sessionCoord.setSessionThinkingLevel(sessionPath, level); }
   getSessionGoal(sessionPath) { return this._sessionCoord.getSessionGoal(sessionPath); }
-  setSessionGoal(sessionPath, objective) { return this._sessionCoord.setSessionGoal(sessionPath, objective); }
+  setSessionGoal(sessionPath, objective, options) { return this._sessionCoord.setSessionGoal(sessionPath, objective, options); }
   clearSessionGoal(sessionPath) { return this._sessionCoord.clearSessionGoal(sessionPath); }
   markSessionGoalComplete(sessionPath, note) { return this._sessionCoord.markSessionGoalComplete(sessionPath, note); }
   markSessionGoalBlocked(sessionPath, note) { return this._sessionCoord.markSessionGoalBlocked(sessionPath, note); }
   pauseSessionGoal(sessionPath, note) { return this._sessionCoord.pauseSessionGoal(sessionPath, note); }
   resumeSessionGoal(sessionPath, note) { return this._sessionCoord.resumeSessionGoal(sessionPath, note); }
   triggerSessionGoalAutoReview(sessionPath) { return this._sessionCoord.triggerSessionGoalAutoReview(sessionPath); }
-  setPendingSessionGoal(objective) { return this._sessionCoord.setPendingSessionGoal(objective); }
+  setPendingSessionGoal(objective, options) { return this._sessionCoord.setPendingSessionGoal(objective, options); }
   clearPendingSessionGoal() { return this._sessionCoord.clearPendingSessionGoal(); }
   getSandbox() { return this._prefs.getSandbox(); }
   setSandbox(v) { this._prefs.setSandbox(v); }

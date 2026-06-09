@@ -208,10 +208,24 @@ interface InputAreaProps {
   cardRef?: Ref<HTMLDivElement>;
 }
 
-function formatGoalElapsed(startedAt?: string | null, nowMs = Date.now()): string {
-  const startMs = startedAt ? Date.parse(startedAt) : NaN;
-  if (!Number.isFinite(startMs)) return '0m';
-  const totalSeconds = Math.max(0, Math.floor((nowMs - startMs) / 1000));
+function parseGoalTime(value?: string | null): number {
+  const ms = value ? Date.parse(value) : NaN;
+  return Number.isFinite(ms) ? ms : NaN;
+}
+
+function getGoalElapsedMs(goal: SessionGoal, nowMs = Date.now()): number {
+  const rawElapsedMs = goal.elapsedMs;
+  const base = typeof rawElapsedMs === 'number' && Number.isFinite(rawElapsedMs) && rawElapsedMs >= 0
+    ? rawElapsedMs
+    : 0;
+  if (goal.status !== 'active') return base;
+  const activeStartedMs = parseGoalTime(goal.activeStartedAt || goal.updatedAt || goal.createdAt);
+  if (!Number.isFinite(activeStartedMs)) return base;
+  return base + Math.max(0, nowMs - activeStartedMs);
+}
+
+function formatGoalElapsed(goal: SessionGoal, nowMs = Date.now()): string {
+  const totalSeconds = Math.max(0, Math.floor(getGoalElapsedMs(goal, nowMs) / 1000));
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
@@ -220,12 +234,12 @@ function formatGoalElapsed(startedAt?: string | null, nowMs = Date.now()): strin
   return `${seconds}s`;
 }
 
-function GoalActionIcon({ kind }: { kind: 'edit' | 'pause' | 'play' | 'delete' | 'save' | 'cancel' | 'clock' }) {
+function GoalActionIcon({ kind }: { kind: 'edit' | 'pause' | 'play' | 'delete' | 'save' }) {
   if (kind === 'edit') {
     return (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M12 20h9" />
-        <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" />
+        <path d="M15.4 4.6 19.4 8.6" />
+        <path d="M4 20l4.35-.82L19 8.53a2.82 2.82 0 0 0-3.99-3.99L4.82 14.74 4 20Z" />
       </svg>
     );
   }
@@ -248,22 +262,6 @@ function GoalActionIcon({ kind }: { kind: 'edit' | 'pause' | 'play' | 'delete' |
     return (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="m5 12 4 4L19 6" />
-      </svg>
-    );
-  }
-  if (kind === 'cancel') {
-    return (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M6 6l12 12" />
-        <path d="M18 6 6 18" />
-      </svg>
-    );
-  }
-  if (kind === 'clock') {
-    return (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="9" />
-        <path d="M12 7v5l3 2" />
       </svg>
     );
   }
@@ -341,25 +339,6 @@ function ActiveGoalBar({
               }
             }}
           />
-          <button
-            type="submit"
-            className={styles['goal-active-action']}
-            title={t('input.goalSave')}
-            aria-label={t('input.goalSave')}
-            disabled={busy || !draft.trim()}
-          >
-            <GoalActionIcon kind="save" />
-          </button>
-          <button
-            type="button"
-            className={styles['goal-active-action']}
-            title={t('input.goalCancel')}
-            aria-label={t('input.goalCancel')}
-            disabled={busy}
-            onClick={onCancelEdit}
-          >
-            <GoalActionIcon kind="cancel" />
-          </button>
         </form>
       ) : (
         <button
@@ -374,21 +353,21 @@ function ActiveGoalBar({
       )}
       <div className={styles['goal-active-actions']}>
         <span
-          className={`${styles['goal-active-action']} ${styles['goal-active-elapsed']}`}
+          className={styles['goal-active-elapsed']}
           title={elapsedTitle}
           aria-label={elapsedTitle}
         >
-          <GoalActionIcon kind="clock" />
+          {elapsed}
         </span>
         <button
           type="button"
           className={styles['goal-active-action']}
-          title={t('input.goalEdit')}
-          aria-label={t('input.goalEdit')}
-          disabled={busy}
-          onClick={onEdit}
+          title={editing ? t('input.goalSave') : t('input.goalEdit')}
+          aria-label={editing ? t('input.goalSave') : t('input.goalEdit')}
+          disabled={busy || (editing && !draft.trim())}
+          onClick={editing ? onSaveEdit : onEdit}
         >
-          <GoalActionIcon kind="edit" />
+          <GoalActionIcon kind={editing ? 'save' : 'edit'} />
         </button>
         <button
           type="button"
@@ -803,15 +782,16 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
 
   const goalIsRunning = visibleGoal?.status === 'active';
   const goalElapsed = useMemo(() => (
-    visibleGoal ? formatGoalElapsed(visibleGoal.createdAt, goalElapsedNow) : '0s'
+    visibleGoal ? formatGoalElapsed(visibleGoal, goalElapsedNow) : '0s'
   ), [visibleGoal, goalElapsedNow]);
 
   useEffect(() => {
     if (!visibleGoal) return;
     setGoalElapsedNow(Date.now());
+    if (visibleGoal.status !== 'active') return undefined;
     const timer = window.setInterval(() => setGoalElapsedNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [visibleGoal?.createdAt, !!visibleGoal]);
+  }, [visibleGoal?.activeStartedAt, visibleGoal?.status, !!visibleGoal]);
 
   const handleSlashToggle = useCallback(() => {
     if (initialGoalEditing) return;
@@ -834,6 +814,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     action: 'set' | 'clear' | 'complete' | 'blocked' | 'pause' | 'resume',
     objective?: string,
     note?: string,
+    status?: SessionGoal['status'],
   ): Promise<SessionGoal | null> => {
     const state = useStore.getState();
     const path = state.currentSessionPath;
@@ -844,6 +825,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
         action,
         objective,
         note,
+        status,
         sessionPath: path || undefined,
         pendingNewSession: !path || state.pendingNewSession,
       }),
@@ -928,7 +910,12 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     setGoalSaving(true);
     try {
       const previous = visibleGoal?.objective?.trim() || '';
-      await updateSessionGoal('set', objective);
+      await updateSessionGoal(
+        'set',
+        objective,
+        undefined,
+        visibleGoal?.status === 'paused' ? 'paused' : undefined,
+      );
       setGoalEditing(false);
       setGoalDraft('');
       return { objective, changed: objective !== previous, wasActive };
@@ -940,6 +927,26 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
       setGoalSaving(false);
     }
   }, [visibleGoal, addToast, goalDraft, goalSaving, t, updateSessionGoal]);
+
+  const savePausedGoalDraftAndResume = useCallback(async (): Promise<string | null> => {
+    if (goalSaving || !visibleGoal || visibleGoal.status !== 'paused') return null;
+    const objective = goalDraft.trim();
+    if (!objective) return null;
+    setGoalSaving(true);
+    try {
+      const savedGoal = await updateSessionGoal('set', objective, undefined, 'paused');
+      const resumedGoal = await updateSessionGoal('resume');
+      setGoalEditing(false);
+      setGoalDraft('');
+      return (resumedGoal?.objective || savedGoal?.objective || objective).trim();
+    } catch (err) {
+      addToast(t('input.goalSetFailed'), 'error', 5000);
+      console.warn('[goal] save and resume failed', err);
+      return null;
+    } finally {
+      setGoalSaving(false);
+    }
+  }, [addToast, goalDraft, goalSaving, t, updateSessionGoal, visibleGoal]);
 
   const manuallyClearGoal = useCallback(async () => {
     if (!visibleGoal || goalSaving) return;
@@ -1260,12 +1267,12 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     }
   }, [visibleGoal, addToast, goalSaving, isStreaming, t, updateSessionGoal]);
 
-  const resumeGoal = useCallback(async () => {
+  const resumeGoal = useCallback(async (objectiveOverride?: string) => {
     if (!visibleGoal || goalSaving) return;
     setGoalSaving(true);
     try {
       const goal = await updateSessionGoal('resume');
-      const objective = (goal?.objective || visibleGoal.objective || '').trim();
+      const objective = (objectiveOverride || goal?.objective || visibleGoal.objective || '').trim();
       if (objective) {
         await sendPlainPrompt(
           buildGoalResumePrompt(objective, t),
@@ -1281,10 +1288,21 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     }
   }, [visibleGoal, addToast, goalSaving, sendPlainPrompt, t, updateSessionGoal]);
 
+  const resumeGoalAfterPausedEdit = useCallback(async () => {
+    const objective = await savePausedGoalDraftAndResume();
+    if (!objective) return;
+    await sendPlainPrompt(
+      buildGoalResumePrompt(objective, t),
+      t('input.goalResumeDisplay'),
+      { allowStreaming: true },
+    );
+  }, [savePausedGoalDraftAndResume, sendPlainPrompt, t]);
+
   const toggleGoalRunning = useCallback(() => {
     if (visibleGoal?.status === 'active') void pauseGoal();
+    else if (visibleGoal?.status === 'paused' && activeGoalEditing) void resumeGoalAfterPausedEdit();
     else if (visibleGoal?.status === 'paused') void resumeGoal();
-  }, [pauseGoal, resumeGoal, visibleGoal?.status]);
+  }, [activeGoalEditing, pauseGoal, resumeGoal, resumeGoalAfterPausedEdit, visibleGoal?.status]);
 
   // ── Send message ──
   const handleSend = useCallback(async () => {
@@ -1691,7 +1709,10 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
             onEdit={openGoalEditor}
             onSaveEdit={() => {
               void (async () => {
-                await sendGoalSubmitPrompt(await saveGoalDraft());
+                const result = await saveGoalDraft();
+                if (visibleGoal?.status !== 'paused') {
+                  await sendGoalSubmitPrompt(result);
+                }
               })();
             }}
             onCancelEdit={cancelGoalEditing}

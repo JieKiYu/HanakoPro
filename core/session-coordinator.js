@@ -64,6 +64,27 @@ function isoOr(value, fallback) {
   return typeof value === "string" && value.trim() ? value : fallback;
 }
 
+function timeMs(value) {
+  const ms = typeof value === "string" ? Date.parse(value) : NaN;
+  return Number.isFinite(ms) ? ms : NaN;
+}
+
+function positiveNumber(value, fallback = 0) {
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function elapsedMsForGoal(raw, createdAt, updatedAt, status) {
+  const explicit = Number(raw.elapsedMs);
+  if (Number.isFinite(explicit) && explicit >= 0) return Math.floor(explicit);
+  const start = timeMs(createdAt);
+  const stopAt = status === "active"
+    ? updatedAt
+    : raw.pausedAt || raw.completedAt || raw.blockedAt || updatedAt;
+  const stop = timeMs(stopAt);
+  if (!Number.isFinite(start) || !Number.isFinite(stop)) return 0;
+  return Math.max(0, stop - start);
+}
+
 export function normalizeSessionGoal(value) {
   if (!value) return null;
   const raw = typeof value === "string" ? { objective: value } : value;
@@ -81,7 +102,11 @@ export function normalizeSessionGoal(value) {
     status,
     createdAt,
     updatedAt,
+    elapsedMs: elapsedMsForGoal(raw, createdAt, updatedAt, status),
   };
+  if (status === "active") {
+    goal.activeStartedAt = isoOr(raw.activeStartedAt, updatedAt);
+  }
   if (status === "paused") goal.pausedAt = isoOr(raw.pausedAt, updatedAt);
   if (status === "complete") goal.completedAt = isoOr(raw.completedAt, updatedAt);
   if (status === "blocked") goal.blockedAt = isoOr(raw.blockedAt, updatedAt);
@@ -96,17 +121,43 @@ export function makeSessionGoal(objective, { previousGoal = null, status = "acti
   if (!text) return null;
   const now = new Date().toISOString();
   const normalizedPrevious = normalizeSessionGoal(previousGoal);
+  const previousElapsedMs = positiveNumber(normalizedPrevious?.elapsedMs, 0);
+  const previousActiveStartedMs = timeMs(normalizedPrevious?.activeStartedAt);
+  const nowMs = Date.parse(now);
+  const elapsedThroughNow = normalizedPrevious?.status === "active" && Number.isFinite(previousActiveStartedMs)
+    ? previousElapsedMs + Math.max(0, nowMs - previousActiveStartedMs)
+    : previousElapsedMs;
   const goal = {
     objective: text,
     status: SESSION_GOAL_STATUSES.has(status) ? status : "active",
     createdAt: normalizedPrevious?.createdAt || now,
     updatedAt: now,
+    elapsedMs: goalStatusElapsedMs(status, normalizedPrevious, previousElapsedMs, elapsedThroughNow),
   };
+  if (goal.status === "active") {
+    goal.activeStartedAt = normalizedPrevious?.status === "active"
+      ? (normalizedPrevious.activeStartedAt || normalizedPrevious.createdAt || now)
+      : now;
+  }
   if (goal.status === "paused") goal.pausedAt = now;
   if (goal.status === "complete") goal.completedAt = now;
   if (goal.status === "blocked") goal.blockedAt = now;
   if (typeof note === "string" && note.trim()) goal.note = note.trim().slice(0, 1000);
   return goal;
+}
+
+function goalStatusElapsedMs(status, previousGoal, previousElapsedMs, elapsedThroughNow) {
+  if (!previousGoal) return 0;
+  return status === "active" ? previousElapsedMs : elapsedThroughNow;
+}
+
+function previousGoalForManualSet(previousGoal, status) {
+  const normalized = normalizeSessionGoal(previousGoal);
+  const nextStatus = SESSION_GOAL_STATUSES.has(status) ? status : "active";
+  if (nextStatus === "active" && (normalized?.status === "complete" || normalized?.status === "blocked")) {
+    return null;
+  }
+  return normalized;
 }
 
 export function buildSessionGoalText(goal, { locale = getLocale() } = {}) {
@@ -1994,8 +2045,11 @@ export class SessionCoordinator {
     return normalizeSessionGoal(entry?.goal);
   }
 
-  setPendingSessionGoal(objective) {
-    const goal = makeSessionGoal(objective, { previousGoal: this._pendingGoal });
+  setPendingSessionGoal(objective, { status = "active" } = {}) {
+    const goal = makeSessionGoal(objective, {
+      previousGoal: previousGoalForManualSet(this._pendingGoal, status),
+      status,
+    });
     if (!goal) return this.clearPendingSessionGoal();
     this._pendingGoal = goal;
     this._emitSessionGoalChanged(goal, null);
@@ -2024,10 +2078,10 @@ export class SessionCoordinator {
     return { ok: true, goal: entry.goal };
   }
 
-  setSessionGoal(sessionPath, objective) {
-    if (!sessionPath) return this.setPendingSessionGoal(objective);
-    const previousGoal = this.getSessionGoal(sessionPath);
-    const goal = makeSessionGoal(objective, { previousGoal });
+  setSessionGoal(sessionPath, objective, { status = "active" } = {}) {
+    if (!sessionPath) return this.setPendingSessionGoal(objective, { status });
+    const previousGoal = previousGoalForManualSet(this.getSessionGoal(sessionPath), status);
+    const goal = makeSessionGoal(objective, { previousGoal, status });
     if (!goal) return this.clearSessionGoal(sessionPath);
     return this._applySessionGoal(sessionPath, goal);
   }

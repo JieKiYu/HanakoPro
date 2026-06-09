@@ -1574,14 +1574,19 @@
 .goal-active-actions {
     display: inline-flex;
     align-items: center;
-    gap: 0.2rem;
+    gap: 0.18rem;
     flex-shrink: 0;
 }
 
 .goal-active-elapsed {
-    min-width: 0;
+    min-width: 3rem;
+    padding: 0 0.22rem;
     color: var(--text-muted);
+    font-size: 0.74rem;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
     cursor: default;
+    user-select: none;
 }
 
 .goal-active-action {
@@ -1616,16 +1621,6 @@
 .goal-active-action:disabled {
     opacity: 0.5;
     cursor: wait;
-}
-
-.goal-active-action.goal-active-elapsed {
-    color: var(--text-muted);
-    cursor: default;
-}
-
-.goal-active-action.goal-active-elapsed:hover {
-    background: transparent;
-    border-color: transparent;
 }
 
 .input-box {

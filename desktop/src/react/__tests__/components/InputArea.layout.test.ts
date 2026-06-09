@@ -87,11 +87,14 @@ describe('InputArea layout', () => {
     expect(inputAreaBlock).toMatch(/max-width:\s*var\(--chat-input-column-width\)/);
     expect(welcomeInputAreaBlock).toMatch(/max-width:\s*var\(--welcome-chat-input-column-width\)/);
     expect(sessionMessagesBlock).toMatch(/max-width:\s*var\(--chat-column-width\)/);
-    expect(sessionShellBlock).toMatch(/--chat-input-occlusion-height:\s*calc\(var\(--input-stack-h,\s*var\(--input-card-h,\s*0px\)\) \+ var\(--space-lg\) \+ 1\.5rem\)/);
+    expect(sessionShellBlock).toMatch(/--chat-input-stop-gap:\s*0\.55rem/);
+    expect(sessionShellBlock).toMatch(/--chat-scrollbar-bottom-inset:\s*var\(--chat-input-stop-gap\)/);
+    expect(sessionShellBlock).toMatch(/--chat-input-occlusion-height:\s*3rem/);
+    expect(sessionShellBlock).toMatch(/bottom:\s*calc\(var\(--input-stack-h,\s*var\(--input-card-h,\s*0px\)\) \+ var\(--space-lg\) \+ var\(--chat-input-stop-gap\)\)/);
     expect(sessionShellAfterBlock).toMatch(/pointer-events:\s*none/);
     expect(sessionShellAfterBlock).toMatch(/height:\s*var\(--chat-input-occlusion-height\)/);
     expect(sessionShellAfterBlock).toMatch(/linear-gradient/);
-    expect(sessionFooterBlock).toMatch(/height:\s*calc\(var\(--input-stack-h,\s*var\(--input-card-h,\s*0px\)\) \+ var\(--space-lg\) \+ 5rem\)/);
+    expect(sessionFooterBlock).toMatch(/height:\s*4rem/);
     expect(assistantMessageBlock).toMatch(/width:\s*100%/);
     expect(assistantMessageBlock).toMatch(/max-width:\s*100%/);
     expect(messageAssistantBlock).toMatch(/--chat-message-action-safe-area:\s*7rem/);
@@ -291,7 +294,8 @@ describe('InputArea layout', () => {
     expect(inputAreaSource).toMatch(/if \(initialGoalEditing\) \{[\s\S]*await sendGoalSubmitPrompt\(await saveGoalFromEditor\(\)\)/);
     expect(inputAreaSource).toMatch(/styles\['goal-active-edit-form'\]/);
     expect(inputAreaSource).toMatch(/styles\['goal-active-edit-input'\]/);
-    expect(inputAreaSource).toMatch(/sendGoalSubmitPrompt\(await saveGoalDraft\(\)\)/);
+    expect(inputAreaSource).toMatch(/const result = await saveGoalDraft\(\)/);
+    expect(inputAreaSource).toMatch(/visibleGoal\?\.status !== 'paused'[\s\S]*sendGoalSubmitPrompt\(result\)/);
     expect(inputAreaSource).toMatch(/buildGoalStartPrompt\(result\.objective, t\)/);
     expect(inputAreaSource).toMatch(/buildGoalUpdatePrompt\(result\.objective, t\)/);
     expect(inputAreaSource).toMatch(/buildGoalResumePrompt\(objective, t\)/);
@@ -306,7 +310,8 @@ describe('InputArea layout', () => {
     expect(inputAreaSource).toMatch(/styles\['goal-active-main'\]/);
     expect(inputAreaSource).toMatch(/styles\['goal-active-actions'\]/);
     expect(inputAreaSource).toMatch(/styles\['goal-active-elapsed'\]/);
-    expect(inputAreaSource).toMatch(/GoalActionIcon kind="edit"/);
+    expect(inputAreaSource).toMatch(/GoalActionIcon kind=\{editing \? 'save' : 'edit'\}/);
+    expect(inputAreaSource).toMatch(/className=\{styles\['goal-active-elapsed'\]\}[\s\S]*\{elapsed\}/);
     expect(inputAreaSource).toMatch(/GoalActionIcon kind=\{running \? 'pause' : 'play'\}/);
     expect(inputAreaSource).toMatch(/GoalActionIcon kind="delete"/);
     expect(inputAreaSource).toMatch(/onClear=\{manuallyClearGoal\}/);

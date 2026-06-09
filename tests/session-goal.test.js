@@ -25,6 +25,32 @@ describe("session goal", () => {
     expect(normalizeSessionGoal({ objective: "   " })).toBeNull();
   });
 
+  it("tracks goal runtime across active spans without counting paused time", () => {
+    const paused = makeSessionGoal("ship runtime", {
+      previousGoal: {
+        objective: "ship runtime",
+        status: "active",
+        createdAt: "2026-06-06T00:00:00.000Z",
+        updatedAt: "2026-06-06T00:00:00.000Z",
+        activeStartedAt: "2026-06-06T00:00:00.000Z",
+        elapsedMs: 5000,
+      },
+      status: "paused",
+    });
+
+    expect(paused.status).toBe("paused");
+    expect(paused.elapsedMs).toBeGreaterThanOrEqual(5000);
+    expect(paused.activeStartedAt).toBeUndefined();
+
+    const resumed = makeSessionGoal("ship runtime", {
+      previousGoal: paused,
+      status: "active",
+    });
+    expect(resumed.status).toBe("active");
+    expect(resumed.elapsedMs).toBe(paused.elapsedMs);
+    expect(resumed.activeStartedAt).toBe(resumed.updatedAt);
+  });
+
   it("only builds context for active goals", () => {
     const active = makeSessionGoal("Keep the session focused");
     expect(buildSessionGoalText(active, { locale: "en" })).toContain("Current Session Goal");

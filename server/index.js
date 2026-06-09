@@ -485,7 +485,7 @@ app.get("/api/session-goal", async (c) => {
 });
 
 app.post("/api/session-goal", async (c) => {
-  const { sessionPath, pendingNewSession, action, objective, note } = await safeJson(c);
+  const { sessionPath, pendingNewSession, action, objective, note, status } = await safeJson(c);
   const targetSessionPath = typeof sessionPath === "string" && sessionPath ? sessionPath : null;
   const usePending = pendingNewSession === true || !targetSessionPath;
   let result;
@@ -515,8 +515,8 @@ app.post("/api/session-goal", async (c) => {
       : engine.resumeSessionGoal?.(targetSessionPath, note);
   } else if (action === "set" || !action) {
     result = usePending
-      ? engine.setPendingSessionGoal?.(objective)
-      : engine.setSessionGoal?.(targetSessionPath, objective);
+      ? engine.setPendingSessionGoal?.(objective, { status })
+      : engine.setSessionGoal?.(targetSessionPath, objective, { status });
   } else {
     return c.json({ ok: false, error: "unknown session goal action" }, 400);
   }

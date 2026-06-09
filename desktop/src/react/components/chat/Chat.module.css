@@ -1912,13 +1912,14 @@
 /* ── Session Panel ── */
 
 .sessionShell {
-    --chat-scrollbar-bottom-inset: calc(var(--input-stack-h, var(--input-card-h, 0px)) / 2);
-    --chat-input-occlusion-height: calc(var(--input-stack-h, var(--input-card-h, 0px)) + var(--space-lg) + 1.5rem);
+    --chat-input-stop-gap: 0.55rem;
+    --chat-scrollbar-bottom-inset: var(--chat-input-stop-gap);
+    --chat-input-occlusion-height: 3rem;
     position: absolute;
     top: 0;
     left: 0;
     right: 0;
-    bottom: calc(var(--input-stack-h, var(--input-card-h, 0px)) / 2 + var(--space-lg));
+    bottom: calc(var(--input-stack-h, var(--input-card-h, 0px)) + var(--space-lg) + var(--chat-input-stop-gap));
     width: 100%;
     overflow: hidden;
 }
@@ -2140,8 +2141,8 @@
 }
 
 .sessionFooter {
-    /* 和 sessionPanel 的切点对齐：遮挡发生在输入卡片中部，同时在滚到底时额外多留约三行呼吸空间。 */
-    height: calc(var(--input-stack-h, var(--input-card-h, 0px)) + var(--space-lg) + 5rem);
+    /* 滚动容器已停在输入栈上方，这里只保留少量尾部呼吸空间。 */
+    height: 4rem;
     flex-shrink: 0;
 }
 
