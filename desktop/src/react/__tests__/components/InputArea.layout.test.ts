@@ -94,7 +94,7 @@ describe('InputArea layout', () => {
     expect(sessionShellAfterBlock).toMatch(/pointer-events:\s*none/);
     expect(sessionShellAfterBlock).toMatch(/height:\s*var\(--chat-input-occlusion-height\)/);
     expect(sessionShellAfterBlock).toMatch(/linear-gradient/);
-    expect(sessionFooterBlock).toMatch(/height:\s*4rem/);
+    expect(sessionFooterBlock).toMatch(/height:\s*max\(4rem,\s*calc\(var\(--input-stack-h,\s*var\(--input-card-h,\s*0px\)\) \+ var\(--space-lg\)\)\)/);
     expect(assistantMessageBlock).toMatch(/width:\s*100%/);
     expect(assistantMessageBlock).toMatch(/max-width:\s*100%/);
     expect(messageAssistantBlock).toMatch(/--chat-message-action-safe-area:\s*7rem/);
@@ -252,6 +252,16 @@ describe('InputArea layout', () => {
     expect(pluginCardContainerBlock).not.toMatch(/display:\s*inline-block/);
     expect(pluginCardIframeBlock).toMatch(/max-width:\s*none/);
     expect(floatingCss).not.toMatch(/--chat-column-width:\s*var\(--bridge-chat-column-width\)/);
+  });
+
+  it('rebinds composer height measurement when the input stack remounts', () => {
+    const source = fs.readFileSync(path.join(process.cwd(), 'desktop/src/react/App.tsx'), 'utf8');
+
+    expect(source).toMatch(/useCallback\(\(el:\s*HTMLDivElement \| null\)/);
+    expect(source).toMatch(/inputStackObserverRef\.current\?\.disconnect\(\)/);
+    expect(source).toMatch(/parent\.style\.setProperty\('--input-stack-h', `\$\{height\}px`\)/);
+    expect(source).toMatch(/new ResizeObserver\(\(\[entry\]\) => syncInputStackHeight\(entry\)\)/);
+    expect(source).toMatch(/style\.removeProperty\('--input-stack-h'\)/);
   });
 
   it('keeps composer horizontal padding symmetric with the left inset', () => {

@@ -5,7 +5,7 @@
  * 此文件只负责 titlebar + sidebar + 主区域 + overlays 的组装。
  */
 
-import { useEffect, useRef, lazy, Suspense } from 'react';
+import { useCallback, useEffect, useRef, lazy, Suspense } from 'react';
 import { useStore } from './stores';
 import type { ActivePanel } from './types';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -98,18 +98,31 @@ function App() {
   }, []);
 
   // 测量完整输入栈：目标条属于会话主流程，必须参与 chat panel 底部切点，避免正文钻到目标条下方。
-  const inputCardRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = inputCardRef.current;
+  const inputStackObserverRef = useRef<ResizeObserver | null>(null);
+  const inputStackParentRef = useRef<HTMLElement | null>(null);
+  const inputCardRef = useCallback((el: HTMLDivElement | null) => {
+    inputStackObserverRef.current?.disconnect();
+    inputStackObserverRef.current = null;
     if (!el) return;
+
     const parent = el.closest('.main-content') as HTMLElement | null;
     if (!parent) return;
-    const ro = new ResizeObserver(([entry]) => {
-      const h = entry.borderBoxSize?.[0]?.blockSize ?? el.offsetHeight;
-      parent.style.setProperty('--input-stack-h', `${h}px`);
-    });
+    inputStackParentRef.current = parent;
+
+    const syncInputStackHeight = (entry?: ResizeObserverEntry) => {
+      const height = entry?.borderBoxSize?.[0]?.blockSize ?? el.offsetHeight;
+      parent.style.setProperty('--input-stack-h', `${height}px`);
+    };
+
+    syncInputStackHeight();
+    const ro = new ResizeObserver(([entry]) => syncInputStackHeight(entry));
     ro.observe(el);
-    return () => ro.disconnect();
+    inputStackObserverRef.current = ro;
+  }, []);
+  useEffect(() => () => {
+    inputStackObserverRef.current?.disconnect();
+    inputStackObserverRef.current = null;
+    inputStackParentRef.current?.style.removeProperty('--input-stack-h');
   }, []);
 
   return (

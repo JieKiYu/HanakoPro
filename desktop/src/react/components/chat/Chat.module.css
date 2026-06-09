@@ -2141,8 +2141,8 @@
 }
 
 .sessionFooter {
-    /* 滚动容器已停在输入栈上方，这里只保留少量尾部呼吸空间。 */
-    height: 4rem;
+    /* 尾部必须覆盖完整输入栈高度，否则最后一轮会停在输入框下方，目标条出现时更明显。 */
+    height: max(4rem, calc(var(--input-stack-h, var(--input-card-h, 0px)) + var(--space-lg)));
     flex-shrink: 0;
 }
 

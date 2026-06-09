@@ -1,4 +1,4 @@
-import type { ReactNode, RefObject } from 'react';
+import type { ReactNode, Ref } from 'react';
 import { useStore } from '../../stores';
 import { ActivityPanel } from '../ActivityPanel';
 import { AutomationPanel } from '../AutomationPanel';
@@ -25,7 +25,7 @@ function WelcomeContainer() {
   );
 }
 
-function ChatPage({ inputCardRef }: { inputCardRef: RefObject<HTMLDivElement | null> }) {
+function ChatPage({ inputCardRef }: { inputCardRef: Ref<HTMLDivElement> }) {
   const welcomeVisible = useStore(s => s.welcomeVisible);
   const currentSessionPath = useStore(s => s.currentSessionPath);
   const hasPanels = !welcomeVisible && !!currentSessionPath;
@@ -173,7 +173,7 @@ export function WorkspaceCompanionRail() {
   );
 }
 
-export function AppPages({ inputCardRef }: { inputCardRef: RefObject<HTMLDivElement | null> }) {
+export function AppPages({ inputCardRef }: { inputCardRef: Ref<HTMLDivElement> }) {
   const currentTab = useStore(s => s.currentTab);
   const isPluginTab = typeof currentTab === 'string' && currentTab.startsWith('plugin:');
 
