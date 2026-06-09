@@ -514,7 +514,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
   const [goalDraft, setGoalDraft] = useState('');
   const [goalElapsedNow, setGoalElapsedNow] = useState(() => Date.now());
   const [goalSaving, setGoalSaving] = useState(false);
-  const goalDraftStartedAtRef = useRef(new Date().toISOString());
+  const chatDraftBeforeGoalRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (pendingSessionConfirmation) {
@@ -594,7 +594,13 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
   // ── Placeholder ──
   const placeholderRef = useRef('');
   const getEditorPlaceholder = useCallback(() => placeholderRef.current, []);
+  const visibleGoal = sessionGoal?.status === 'active' || sessionGoal?.status === 'blocked' || sessionGoal?.status === 'paused'
+    ? sessionGoal
+    : null;
+  const initialGoalEditing = goalEditing && !visibleGoal;
+  const activeGoalEditing = goalEditing && !!visibleGoal;
   const placeholder = (() => {
+    if (initialGoalEditing) return t('input.goalPlaceholder');
     if (welcomeVisible && welcomeTip) return welcomeTip;
     const yuanPh = t(`yuan.placeholder.${agentYuan}`);
     return (yuanPh && !yuanPh.startsWith('yuan.')) ? yuanPh : t('input.placeholder');
@@ -795,31 +801,23 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     setFileSelected(Math.max(0, fileMentionItems.length - 1));
   }, [fileMentionItems.length, fileSelected]);
 
-  const visibleGoal = sessionGoal?.status === 'active' || sessionGoal?.status === 'blocked' || sessionGoal?.status === 'paused'
-    ? sessionGoal
-    : null;
   const goalIsRunning = visibleGoal?.status === 'active';
-  const displayGoal = visibleGoal || (goalEditing ? {
-    objective: goalDraft,
-    status: 'active' as const,
-    createdAt: goalDraftStartedAtRef.current,
-    updatedAt: goalDraftStartedAtRef.current,
-  } : null);
   const goalElapsed = useMemo(() => (
-    displayGoal ? formatGoalElapsed(displayGoal.createdAt, goalElapsedNow) : '0s'
-  ), [displayGoal, goalElapsedNow]);
+    visibleGoal ? formatGoalElapsed(visibleGoal.createdAt, goalElapsedNow) : '0s'
+  ), [visibleGoal, goalElapsedNow]);
 
   useEffect(() => {
-    if (!displayGoal) return;
+    if (!visibleGoal) return;
     setGoalElapsedNow(Date.now());
     const timer = window.setInterval(() => setGoalElapsedNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [displayGoal?.createdAt, !!displayGoal]);
+  }, [visibleGoal?.createdAt, !!visibleGoal]);
 
   const handleSlashToggle = useCallback(() => {
+    if (initialGoalEditing) return;
     if (slashMenuOpen) dismissSlashMenu();
     else openSlashMenu();
-  }, [slashMenuOpen, dismissSlashMenu, openSlashMenu]);
+  }, [initialGoalEditing, slashMenuOpen, dismissSlashMenu, openSlashMenu]);
 
   const handleAttach = useCallback(async () => {
     const paths = await window.platform?.selectFiles?.();
@@ -856,19 +854,67 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     return goal;
   }, [applyGoalResponse]);
 
+  const restoreChatDraftAfterGoal = useCallback(() => {
+    if (!editor || editor.isDestroyed) return;
+    const draft = chatDraftBeforeGoalRef.current ?? currentDraft;
+    setEditorPlainText(editor, draft, false);
+    setInputText(draft);
+    chatDraftBeforeGoalRef.current = null;
+    window.requestAnimationFrame(() => editor.commands.focus('end'));
+  }, [currentDraft, editor]);
+
   const openGoalEditor = useCallback(() => {
     setGoalEditing(true);
-    setGoalDraft(visibleGoal?.objective || '');
-    if (!visibleGoal) goalDraftStartedAtRef.current = new Date().toISOString();
     setSlashMenuOpen(false);
     setFileMenuOpen(false);
     slashDismissedTextRef.current = null;
-  }, [visibleGoal]);
+
+    if (visibleGoal) {
+      setGoalDraft(visibleGoal.objective || '');
+      return;
+    }
+    if (!editor || editor.isDestroyed) return;
+    if (!initialGoalEditing) {
+      chatDraftBeforeGoalRef.current = editor.getText();
+    }
+    setGoalDraft('');
+    setEditorPlainText(editor, '', false);
+    setInputText('');
+    window.requestAnimationFrame(() => editor.commands.focus('end'));
+  }, [editor, initialGoalEditing, visibleGoal]);
 
   const cancelGoalEditing = useCallback(() => {
     setGoalEditing(false);
     setGoalDraft('');
-  }, []);
+    if (initialGoalEditing) {
+      restoreChatDraftAfterGoal();
+    }
+  }, [initialGoalEditing, restoreChatDraftAfterGoal]);
+
+  const saveGoalFromEditor = useCallback(async (): Promise<GoalSubmitResult | null> => {
+    if (!editor || editor.isDestroyed || goalSaving) return null;
+    const objective = editor.getText().trim();
+    if (!objective) {
+      setGoalEditing(false);
+      setGoalDraft('');
+      restoreChatDraftAfterGoal();
+      return null;
+    }
+    setGoalSaving(true);
+    try {
+      await updateSessionGoal('set', objective);
+      setGoalEditing(false);
+      setGoalDraft('');
+      restoreChatDraftAfterGoal();
+      return { objective, changed: true, wasActive: false };
+    } catch (err) {
+      addToast(t('input.goalSetFailed'), 'error', 5000);
+      console.warn('[goal] save failed', err);
+      return null;
+    } finally {
+      setGoalSaving(false);
+    }
+  }, [addToast, editor, goalSaving, restoreChatDraftAfterGoal, t, updateSessionGoal]);
 
   const saveGoalDraft = useCallback(async (): Promise<GoalSubmitResult | null> => {
     if (goalSaving) return null;
@@ -918,6 +964,14 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     const handler = () => {
       const text = editor.getText();
       setInputText(text);
+      if (initialGoalEditing) {
+        setSlashMenuOpen(false);
+        setFileMenuOpen(false);
+        setFileMentionRange(null);
+        setFileMentionQuery('');
+        requestAnimationFrame(() => editor.commands.scrollIntoView());
+        return;
+      }
       if (slashDismissedTextRef.current && slashDismissedTextRef.current !== text.trim()) {
         slashDismissedTextRef.current = null;
       }
@@ -949,11 +1003,12 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     };
     editor.on('update', handler);
     return () => { editor.off('update', handler); };
-  }, [editor, currentSessionPath, setDraft, slashCommands]);
+  }, [editor, currentSessionPath, initialGoalEditing, setDraft, slashCommands]);
 
   // 切换 session 时恢复草稿
   useEffect(() => {
     if (!editor || !currentSessionPath) return;
+    if (initialGoalEditing) return;
     if (typeof editor.setEditable === 'function' && !editor.isEditable) {
       editor.setEditable(true);
     }
@@ -963,7 +1018,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     if (draft !== current) {
       setEditorPlainText(editor, draft, false);
     }
-  }, [editor, currentDraft, currentSessionPath]);
+  }, [editor, currentDraft, currentSessionPath, initialGoalEditing]);
 
   // 点击外部关闭斜杠菜单
   useEffect(() => {
@@ -992,7 +1047,8 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     || editorHasInlineNode(editor, 'skillBadge')
     || editorHasInlineNode(editor, 'fileBadge');
   const hasUsableModel = !!currentModelInfo;
-  const canSend = hasContent && connected && !isStreaming && !modelSwitching && !pendingSessionSwitchPath && hasUsableModel && !compressForking;
+  const canChatSend = hasContent && connected && !isStreaming && !modelSwitching && !pendingSessionSwitchPath && hasUsableModel && !compressForking;
+  const canInitialGoalSubmit = inputText.trim().length > 0 && connected && !modelSwitching && !pendingSessionSwitchPath && hasUsableModel && !compressForking && !goalSaving;
   const canGoalControl = connected && !modelSwitching && !pendingSessionSwitchPath && hasUsableModel && !compressForking && !goalSaving;
   const modelNoticeText = modelsLoadState === 'error'
     ? t('model.loadFailedHint')
@@ -1233,6 +1289,10 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
   // ── Send message ──
   const handleSend = useCallback(async () => {
     if (!editor) return;
+    if (initialGoalEditing) {
+      await sendGoalSubmitPrompt(await saveGoalFromEditor());
+      return;
+    }
     const editorJson = editor.getJSON();
     const { text: rawText, skills, fileRefs } = serializeEditor(editorJson);
     const text = rawText.trim();
@@ -1411,7 +1471,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     } finally {
       setSending(false);
     }
-  }, [editor, attachedFiles, docContextAttached, connected, isStreaming, sending, pendingNewSession, currentDoc, clearAttachedFiles, clearDraft, currentSessionPath, setDocContextAttached, slashCommands, slashSelected, handleSlashSelect, supportsVision, currentModelInfo, loadVisionAuxiliaryConfig, modelSwitching, t]);
+  }, [editor, initialGoalEditing, saveGoalFromEditor, sendGoalSubmitPrompt, attachedFiles, docContextAttached, connected, isStreaming, sending, pendingNewSession, currentDoc, clearAttachedFiles, clearDraft, currentSessionPath, setDocContextAttached, slashCommands, slashSelected, handleSlashSelect, supportsVision, currentModelInfo, loadVisionAuxiliaryConfig, modelSwitching, t]);
 
   // ── Steer ──
   const handleSteer = useCallback(async () => {
@@ -1447,6 +1507,21 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
   // ── Key handler ──
   const handleEditorKeyDown = useCallback((e: InputKeyEvent): boolean => {
     if (e.defaultPrevented) return false;
+    if (initialGoalEditing) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        cancelGoalEditing();
+        return true;
+      }
+      if (e.key === 'Enter' && !e.shiftKey && !isComposing.current && !e.isComposing) {
+        e.preventDefault();
+        void (async () => {
+          await sendGoalSubmitPrompt(await saveGoalFromEditor());
+        })();
+        return true;
+      }
+      return false;
+    }
     if (fileMenuOpen && (fileMentionItems.length > 0 || fileMentionBusy)) {
       if (e.key === 'ArrowDown' && fileMentionItems.length > 0) {
         e.preventDefault();
@@ -1498,6 +1573,10 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     handleSend,
     handleSteer,
     handleSlashSelect,
+    initialGoalEditing,
+    cancelGoalEditing,
+    saveGoalFromEditor,
+    sendGoalSubmitPrompt,
     goalIsRunning,
     isStreaming,
     editor,
@@ -1599,14 +1678,14 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
             exiting={sessionConfirmationExiting}
           />
         )}
-        {displayGoal ? (
+        {visibleGoal ? (
           <ActiveGoalBar
-            goal={displayGoal}
+            goal={visibleGoal}
             t={t}
             busy={goalSaving}
-            running={displayGoal.status === 'active'}
+            running={goalIsRunning}
             elapsed={goalElapsed}
-            editing={goalEditing}
+            editing={activeGoalEditing}
             draft={goalDraft}
             onDraftChange={setGoalDraft}
             onEdit={openGoalEditor}
@@ -1657,6 +1736,8 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
             onGoalOpen={openGoalEditor}
             onGoalClose={cancelGoalEditing}
             goalEditing={goalEditing}
+            goalDrafting={initialGoalEditing}
+            goalSaving={goalSaving}
             goalRunning={goalIsRunning}
             slashBtnRef={slashBtnRef}
             onSlashToggle={handleSlashToggle}
@@ -1672,7 +1753,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
             sessionModel={sessionModel}
             isStreaming={isStreaming}
             hasInput={!!inputText.trim()}
-            canSend={goalIsRunning ? canGoalControl : canSend}
+            canSend={initialGoalEditing ? canInitialGoalSubmit : goalIsRunning ? canGoalControl : canChatSend}
             onSend={handleSend}
             onSteer={handleSteer}
             onStop={handleStop}

@@ -52,6 +52,21 @@ function AttachFileIcon() {
   );
 }
 
+function GoalCancelIcon() {
+  return (
+    <svg
+      className={styles['goal-chip-close-icon']}
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      aria-hidden="true"
+    >
+      <circle cx="8" cy="8" r="7" fill="currentColor" opacity="0.18" />
+      <path d="M5.4 5.4 10.6 10.6M10.6 5.4 5.4 10.6" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 interface Props {
   t: (key: string) => string;
   // 左侧工具按钮
@@ -59,6 +74,8 @@ interface Props {
   onGoalOpen: () => void;
   onGoalClose: () => void;
   goalEditing: boolean;
+  goalDrafting?: boolean;
+  goalSaving?: boolean;
   goalRunning?: boolean;
   slashBtnRef: RefObject<HTMLButtonElement | null>;
   onSlashToggle: () => void;
@@ -85,7 +102,7 @@ interface Props {
 export const InputControlBar = memo(function InputControlBar(props: Props) {
   const {
     t, onAttach, slashBtnRef, onSlashToggle,
-    onGoalOpen, onGoalClose, goalEditing, goalRunning = false,
+    onGoalOpen, onGoalClose, goalEditing, goalDrafting = false, goalSaving = false, goalRunning = false,
     permissionMode, onPermissionModeChange, planModeLocked,
     showThinking, thinkingLevel, onThinkingChange, modelXhigh,
     models, modelsLoadState, sessionModel, isStreaming, hasInput, canSend, onSend, onSteer, onStop,
@@ -167,6 +184,21 @@ export const InputControlBar = memo(function InputControlBar(props: Props) {
           </svg>
         </button>
         <PlanModeButton mode={permissionMode} onChange={onPermissionModeChange} locked={planModeLocked} />
+        {goalDrafting && (
+          <button
+            type="button"
+            className={styles['goal-chip']}
+            title={goalSaving ? t('input.goalSaving') : t('input.goalCancel')}
+            disabled={goalSaving}
+            onClick={onGoalClose}
+          >
+            <span className={styles['goal-chip-icon-stack']} aria-hidden="true">
+              <GoalIcon tone="active" />
+              <GoalCancelIcon />
+            </span>
+            <span>{t('input.goalMode')}</span>
+          </button>
+        )}
         <ContextRing />
       </div>
       <div className={styles['input-controls']}>
@@ -176,8 +208,8 @@ export const InputControlBar = memo(function InputControlBar(props: Props) {
         <ModelSelector models={models} sessionModel={sessionModel} isStreaming={isStreaming} loadState={modelsLoadState} />
         <ContextCompressButton />
         <SendButton isStreaming={isStreaming} goalRunning={goalRunning} hasInput={hasInput}
-          disabled={isStreaming && !goalRunning ? false : !canSend}
-          onSend={onSend} onSteer={onSteer} onStop={onStop} />
+          disabled={goalDrafting ? !canSend : (isStreaming && !goalRunning ? false : !canSend)}
+          onSend={onSend} onSteer={onSteer} onStop={onStop} forceSend={goalDrafting} />
       </div>
     </div>
   );

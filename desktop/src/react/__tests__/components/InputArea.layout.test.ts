@@ -261,7 +261,7 @@ describe('InputArea layout', () => {
     expect(inputWrapperBlock).toMatch(/padding:\s*var\(--space-md\)\s+var\(--space-md\)\s+var\(--space-sm\)/);
   });
 
-  it('keeps goal editing and controls inside the active goal bar', () => {
+  it('keeps new goals in the composer and existing goals in the active goal bar', () => {
     const inputAreaSource = fs.readFileSync(
       path.join(process.cwd(), 'desktop/src/react/components/InputArea.tsx'),
       'utf8',
@@ -276,9 +276,19 @@ describe('InputArea layout', () => {
     );
 
     expect(inputAreaSource).not.toMatch(/<textarea/);
-    expect(inputAreaSource).not.toMatch(/saveGoalFromEditor/);
-    expect(inputAreaSource).not.toMatch(/chatDraftBeforeGoalRef/);
+    expect(inputAreaSource).toMatch(/const initialGoalEditing = goalEditing && !visibleGoal/);
+    expect(inputAreaSource).toMatch(/const activeGoalEditing = goalEditing && !!visibleGoal/);
+    expect(inputAreaSource).toMatch(/saveGoalFromEditor/);
+    expect(inputAreaSource).toMatch(/chatDraftBeforeGoalRef/);
     expect(inputAreaSource).not.toMatch(/if \(goalEditing\) return t\('input\.goalPlaceholder'\)/);
+    expect(inputAreaSource).toMatch(/if \(initialGoalEditing\) return t\('input\.goalPlaceholder'\)/);
+    expect(inputAreaSource).not.toMatch(/displayGoal/);
+    expect(inputAreaSource).toMatch(/\{visibleGoal \? \(/);
+    expect(inputAreaSource).toMatch(/goal=\{visibleGoal\}/);
+    expect(inputAreaSource).toMatch(/editing=\{activeGoalEditing\}/);
+    expect(inputAreaSource).toMatch(/goalDrafting=\{initialGoalEditing\}/);
+    expect(inputAreaSource).toMatch(/canSend=\{initialGoalEditing \? canInitialGoalSubmit : goalIsRunning \? canGoalControl : canChatSend\}/);
+    expect(inputAreaSource).toMatch(/if \(initialGoalEditing\) \{[\s\S]*await sendGoalSubmitPrompt\(await saveGoalFromEditor\(\)\)/);
     expect(inputAreaSource).toMatch(/styles\['goal-active-edit-form'\]/);
     expect(inputAreaSource).toMatch(/styles\['goal-active-edit-input'\]/);
     expect(inputAreaSource).toMatch(/sendGoalSubmitPrompt\(await saveGoalDraft\(\)\)/);
@@ -308,16 +318,18 @@ describe('InputArea layout', () => {
     expect(inputAreaSource).toMatch(/t\('input\.goalPause'\)/);
     expect(inputAreaSource).toMatch(/t\('input\.goalResume'\)/);
     expect(inputAreaSource).toMatch(/onGoalClose=\{cancelGoalEditing\}/);
-    expect(controlBarSource).not.toMatch(/styles\['goal-chip'\]/);
-    expect(controlBarSource).not.toMatch(/forceSend/);
+    expect(controlBarSource).toMatch(/goalDrafting\?: boolean/);
+    expect(controlBarSource).toMatch(/styles\['goal-chip'\]/);
+    expect(controlBarSource).toMatch(/\{goalDrafting && \(/);
+    expect(controlBarSource).toMatch(/forceSend=\{goalDrafting\}/);
     expect(controlBarSource).toMatch(/goalRunning=\{goalRunning\}/);
-    expect(controlBarSource).toMatch(/disabled=\{isStreaming && !goalRunning \? false : !canSend\}/);
+    expect(controlBarSource).toMatch(/disabled=\{goalDrafting \? !canSend : \(isStreaming && !goalRunning \? false : !canSend\)\}/);
     expect(controlBarSource).not.toMatch(/add-menu-item'\]\}\s+\$\{goalActive/);
     expect(controlBarSource).toMatch(/aria-pressed=\{goalEditing\}/);
     expect(controlBarSource).toMatch(/if \(goalEditing\) onGoalClose\(\);[\s\S]*else onGoalOpen\(\);/);
     expect(controlBarSource).toMatch(/styles\['add-menu-switch'\][\s\S]*goalEditing \? styles\.on/);
-    expect(controlBarSource).not.toMatch(/title=\{goalSaving/);
-    expect(controlBarSource).not.toMatch(/styles\['goal-chip-icon-stack'\]/);
+    expect(controlBarSource).toMatch(/title=\{goalSaving \? t\('input\.goalSaving'\) : t\('input\.goalCancel'\)\}/);
+    expect(controlBarSource).toMatch(/styles\['goal-chip-icon-stack'\]/);
     expect(controlBarSource).toMatch(/function AttachFileIcon\(\)/);
     expect(controlBarSource).toMatch(/<AttachFileIcon \/>[\s\S]*t\('input\.attachFiles'\)/);
     expect(controlBarSource).toMatch(/M9\.85 4\.25v6\.08/);
@@ -328,9 +340,14 @@ describe('InputArea layout', () => {
     expect(controlBarSource).not.toMatch(/A5\.75|A3\.18/);
     expect(controlBarSource).toMatch(/styles\['add-menu-icon'\][\s\S]*<GoalIcon tone="plain" \/>[\s\S]*t\('input\.goalMode'\)/);
     expect(controlBarSource.indexOf('<PlanModeButton')).toBeLessThan(
+      controlBarSource.indexOf("styles['goal-chip']"),
+    );
+    expect(controlBarSource.indexOf("styles['goal-chip']")).toBeLessThan(
       controlBarSource.indexOf('<ContextRing />'),
     );
-    expect(css).not.toMatch(/\.goal-chip\s*\{/);
+    expect(css).toMatch(/\.goal-chip\s*\{/);
+    expect(css).toMatch(/\.goal-chip-icon-stack\s*\{/);
+    expect(css).toMatch(/\.goal-chip-close-icon\s*\{/);
     expect(css).toMatch(/\.goal-active-bar\s*\{/);
     expect(css).toMatch(/\.goal-active-main\s*\{/);
     expect(css).toMatch(/\.goal-active-edit-form\s*\{/);
