@@ -100,6 +100,98 @@ describe("chat route session goal events", () => {
       }),
     ]));
   });
+
+  it("broadcasts goal auto-review stop status even when the stop event carries a reason", () => {
+    let createHandlers;
+    let subscriber;
+    const upgradeWebSocket = vi.fn((factory) => {
+      createHandlers = factory;
+      return () => new Response(null);
+    });
+    const hub = {
+      subscribe: vi.fn((cb) => {
+        subscriber = cb;
+      }),
+      send: vi.fn(async () => {}),
+    };
+    const engine = {
+      agentName: "Hana",
+      abortAllStreaming: vi.fn(async () => {}),
+      getSessionByPath: vi.fn(() => null),
+      isSessionStreaming: vi.fn(() => false),
+      isSessionSwitching: vi.fn(() => false),
+      steerSession: vi.fn(() => false),
+      slashDispatcher: null,
+    };
+
+    createChatRoute(engine, hub, { upgradeWebSocket });
+    const handlers = createHandlers({});
+    const ws = {
+      readyState: 1,
+      send: vi.fn(),
+    };
+
+    handlers.onOpen({}, ws);
+    subscriber({ type: "session_status", isStreaming: true, reason: "goal_auto_review" }, "/tmp/session.jsonl");
+    subscriber({ type: "session_status", isStreaming: false, reason: "goal_auto_review" }, "/tmp/session.jsonl");
+
+    const sent = ws.send.mock.calls.map(([raw]) => JSON.parse(raw));
+    expect(sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "status",
+        isStreaming: false,
+        reason: "goal_auto_review",
+        sessionPath: "/tmp/session.jsonl",
+      }),
+    ]));
+  });
+
+  it("does not schedule another goal auto-review when the current stream is the auto-review", async () => {
+    vi.useFakeTimers();
+    try {
+      let createHandlers;
+      let subscriber;
+      const triggerSessionGoalAutoReview = vi.fn(async () => ({ ok: true }));
+      const upgradeWebSocket = vi.fn((factory) => {
+        createHandlers = factory;
+        return () => new Response(null);
+      });
+      const hub = {
+        subscribe: vi.fn((cb) => {
+          subscriber = cb;
+        }),
+        send: vi.fn(async () => {}),
+      };
+      const engine = {
+        agentName: "Hana",
+        abortAllStreaming: vi.fn(async () => {}),
+        getSessionByPath: vi.fn(() => null),
+        getSessionGoal: vi.fn(() => ({ objective: "preview", status: "active" })),
+        isSessionStreaming: vi.fn(() => false),
+        isSessionSwitching: vi.fn(() => false),
+        steerSession: vi.fn(() => false),
+        triggerSessionGoalAutoReview,
+        slashDispatcher: null,
+      };
+
+      createChatRoute(engine, hub, { upgradeWebSocket });
+      const handlers = createHandlers({});
+      const ws = {
+        readyState: 1,
+        send: vi.fn(),
+      };
+
+      handlers.onOpen({}, ws);
+      subscriber({ type: "session_status", isStreaming: true, reason: "goal_auto_review" }, "/tmp/session.jsonl");
+      subscriber({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "验收通过" } }, "/tmp/session.jsonl");
+      subscriber({ type: "turn_end" }, "/tmp/session.jsonl");
+
+      await vi.advanceTimersByTimeAsync(500);
+      expect(triggerSessionGoalAutoReview).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("chat route streaming error lifecycle", () => {

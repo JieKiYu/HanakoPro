@@ -44,6 +44,7 @@ import crypto from "crypto";
 /** tool_start 事件只广播这些 arg 字段，避免传输完整文件内容（同步维护：chat-render-shim.ts extractToolDetail） */
 const TOOL_ARG_SUMMARY_KEYS = ["file_path", "path", "command", "pattern", "url", "query", "key", "value", "action", "type", "schedule", "prompt", "label"];
 const FILE_WRITE_PREPARE_PREVIEW_MAX_CHARS = 12 * 1024;
+const SESSION_GOAL_AUTO_REVIEW_REASON = "goal_auto_review";
 
 export function summarizeToolStartArgs(toolName, rawArgs, startedAt = Date.now()) {
   if (!rawArgs || typeof rawArgs !== "object") return undefined;
@@ -327,7 +328,9 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
         fileWritePreviews: new Map(),
         deferredStatusFalseTimer: null,
         goalAutoReviewTimer: null,
+        goalAutoReviewInFlight: false,
         pendingStatusFalseExtra: null,
+        currentStreamReason: null,
         providerTurnEnded: false,
         lastAccessed: Date.now(),
         ...createSessionStreamState(),
@@ -409,6 +412,10 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       ss.pendingStatusFalseExtra = null;
       ss.providerTurnEnded = false;
       ss.hasToolCallThisProviderTurn = false;
+      if (extra?.reason === SESSION_GOAL_AUTO_REVIEW_REASON) {
+        ss.goalAutoReviewInFlight = false;
+        ss.currentStreamReason = null;
+      }
     }
     broadcast({ type: "status", isStreaming: false, sessionPath, ...extra });
   }
@@ -465,6 +472,10 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
     ss.pendingStatusFalseExtra = null;
     ss.providerTurnEnded = false;
     ss.hasToolCallThisProviderTurn = false;
+    if (ss.currentStreamReason === SESSION_GOAL_AUTO_REVIEW_REASON) {
+      ss.goalAutoReviewInFlight = false;
+    }
+    ss.currentStreamReason = null;
     if (ss.isStreaming) finishSessionStream(ss);
     ss.thinkTagParser.reset();
     ss.moodParser.reset();
@@ -570,10 +581,15 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
 
   function completeStreamingStop(sessionPath, ss, extra = {}) {
     if (!sessionPath || !ss?.isStreaming) return;
+    const completedStreamReason = ss.currentStreamReason || null;
     reportCompletedStream(sessionPath, ss);
     emitStreamEvent(sessionPath, ss, { type: "turn_end" });
     finishSessionStream(ss);
     broadcastStreamingStopped(sessionPath, ss, extra);
+    if (completedStreamReason === SESSION_GOAL_AUTO_REVIEW_REASON) {
+      ss.goalAutoReviewInFlight = false;
+    }
+    ss.currentStreamReason = null;
     ss.hasOutput = false;
     ss.hasToolCall = false;
     ss.hasToolCallThisProviderTurn = false;
@@ -589,7 +605,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
     debugLog()?.log("ws", `turn done (${sessionPath?.split("/").pop()})`);
     maybeGenerateFirstTurnTitle(sessionPath, ss);
     broadcastContextUsage(sessionPath);
-    if (!extra?.aborted && !extra?.reason) {
+    if (!extra?.aborted && !extra?.reason && completedStreamReason !== SESSION_GOAL_AUTO_REVIEW_REASON) {
       scheduleSessionGoalAutoReview(sessionPath, ss);
     }
   }
@@ -620,7 +636,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
   }
 
   function scheduleSessionGoalAutoReview(sessionPath, ss) {
-    if (!sessionPath || !ss || ss.isAborted || ss.hasError) return;
+    if (!sessionPath || !ss || ss.isAborted || ss.hasError || ss.goalAutoReviewInFlight) return;
     const goal = engine.getSessionGoal?.(sessionPath);
     if (!goal || goal.status !== "active") return;
     if (ss.goalAutoReviewTimer) clearTimeout(ss.goalAutoReviewTimer);
@@ -629,11 +645,15 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       const latestGoal = engine.getSessionGoal?.(sessionPath);
       if (!latestGoal || latestGoal.status !== "active") return;
       if (engine.isSessionStreaming?.(sessionPath)) return;
+      if (ss.goalAutoReviewInFlight) return;
+      ss.goalAutoReviewInFlight = true;
       try {
         await engine.triggerSessionGoalAutoReview?.(sessionPath);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         debugLog()?.log("goal", `auto review failed: ${message}`);
+      } finally {
+        ss.goalAutoReviewInFlight = false;
       }
     }, 450);
   }
@@ -994,11 +1014,20 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       } catch {}
       emitStreamEvent(sessionPath, ss, { type: "session_user_message", message: event.message });
     } else if (event.type === "session_status") {
+      const stopExtra = {
+        ...(event.aborted ? { aborted: true } : {}),
+        ...(event.reason ? { reason: event.reason } : {}),
+      };
+      let forceStopBroadcast = !event.isStreaming && (!!event.aborted || !!event.reason);
       if (ss) {
         if (event.isStreaming) {
           clearDeferredStatusFalse(ss);
           ss.pendingStatusFalseExtra = null;
           ss.providerTurnEnded = false;
+          ss.currentStreamReason = event.reason || null;
+          if (event.reason === SESSION_GOAL_AUTO_REVIEW_REASON) {
+            ss.goalAutoReviewInFlight = true;
+          }
           ss.thinkTagParser.reset();
           ss.moodParser.reset();
           ss.cardParser.reset();
@@ -1016,10 +1045,6 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
           ss.visibleAssistantText = "";
           beginSessionStream(ss);
         } else if (ss.isStreaming) {
-          const stopExtra = {
-            ...(event.aborted ? { aborted: true } : {}),
-            ...(event.reason ? { reason: event.reason } : {}),
-          };
           if (!event.aborted && !event.reason && !ss.hasError) {
             if (ss.providerTurnEnded) {
               completeStreamingStop(sessionPath, ss, stopExtra);
@@ -1029,15 +1054,13 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
             return;
           }
           finishStreamingState(ss);
+          forceStopBroadcast = true;
         }
       }
       if (event.isStreaming) {
         broadcast({ type: "status", isStreaming: true, sessionPath });
-      } else if (!ss || ss.isStreaming) {
-        broadcastStreamingStopped(sessionPath, ss, {
-          ...(event.aborted ? { aborted: true } : {}),
-          ...(event.reason ? { reason: event.reason } : {}),
-        });
+      } else if (!ss || forceStopBroadcast || ss.isStreaming) {
+        broadcastStreamingStopped(sessionPath, ss, stopExtra);
       }
     } else if (event.type === "bridge_rc_attached") {
       broadcast({

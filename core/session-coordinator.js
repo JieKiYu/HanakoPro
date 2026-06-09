@@ -171,7 +171,9 @@ export function buildSessionGoalText(goal, { locale = getLocale() } = {}) {
       `目标：${normalized.objective}`,
       "",
       "这是当前对话的主线任务。回答和行动要持续围绕它推进；路径清楚就直接做，路径分叉就先问清楚。",
+      "按 Plan → Act → Test → Review 的闭环推进：先计划最短路径，再执行，再测试/验收，最后评审目标是否真的完成。",
       "普通代码检查只是基础层。交付后必须进入用户视角验收：像用户一样打开、查看、点击、运行或操作结果；需要 UI/网页/桌面确认时使用 Computer Use、浏览器或对应工具实际验证，而不是只做静态代码审查。",
+      "验收过程要让用户看得见你在验证什么，但不要连续输出空泛的“继续验收”声明；关键动作前简短说明，最后用具体证据收束。",
       "只有目标已完成且通过这种用户视角验收后，才把目标视为完成并调用 session_goal complete。若验收不通过，把发现的问题当作内部反馈继续修复并再次验收；确认无法继续推进时才调用 session_goal blocked。",
     ].join("\n").trim();
   }
@@ -181,7 +183,9 @@ export function buildSessionGoalText(goal, { locale = getLocale() } = {}) {
     `Goal: ${normalized.objective}`,
     "",
     "This is the main task for the current conversation. Keep replies and actions oriented around it; act when the path is clear and ask only when the path forks.",
+    "Proceed as a Plan → Act → Test → Review loop: plan the shortest path, act, test/accept as a user, then review whether the goal is truly done.",
     "Ordinary code review is only the baseline. After delivery, run user-perspective acceptance: open, inspect, click, run, or operate the result as a user would. When UI, browser, or desktop behavior matters, use Computer Use, the browser, or the relevant tool to verify it in practice, not just static code review.",
+    "Keep the acceptance process visible enough for the user to see what you are verifying, but do not emit repeated generic 'continuing acceptance' statements; briefly announce key actions, then close with concrete evidence.",
     "Only treat the goal as complete and call session_goal complete after the goal is finished and passes that user-perspective acceptance. If acceptance fails, use the findings as internal feedback, keep fixing, and verify again; call session_goal blocked only when you confirm progress is impossible.",
   ].join("\n").trim();
 }
@@ -198,7 +202,9 @@ function buildSessionGoalAutoReviewText(goal, { locale = getLocale() } = {}) {
       "",
       "你刚完成了一轮输出。现在不要把普通交付当成结束，先做目标模式的用户视角验收：",
       "- 像用户一样打开、查看、点击、运行或操作结果。",
-      "- 如果涉及界面、网页或桌面应用，优先使用 Computer Use、浏览器或对应工具实际确认可见、可点、可用。",
+      "- 如果涉及界面、网页或桌面应用，使用 browser、Computer Use 或对应工具实际确认可见、可点、可用；预览/dev server 类目标至少要导航到真实 URL，并做一次页面检查、点击、截图或脚本检查。",
+      "- 验收过程要可追踪：说明你正在打开什么、检查什么；如果需要让用户看到浏览器状态，调用 browser show 或 Computer Use 把窗口置前。",
+      "- 不要连续输出多段空泛的“继续验收”说明；每次说明后必须紧跟一个实际工具动作或明确结论。",
       "- 代码测试、类型检查和静态审查只是基础层，不能替代用户视角验收。",
       "- 如果验收通过且目标已经完成，调用 session_goal complete 并简要写明验收证据。",
       "- 如果验收不通过，把问题当作内部反馈继续修复，然后再次验收。",
@@ -214,7 +220,9 @@ function buildSessionGoalAutoReviewText(goal, { locale = getLocale() } = {}) {
     "",
     "You just finished one assistant turn. Do not treat ordinary delivery as the end; first perform goal-mode user-perspective acceptance:",
     "- Open, inspect, click, run, or operate the result as a user would.",
-    "- If UI, web, or desktop behavior matters, prefer Computer Use, the browser, or the relevant tool to confirm it is visible, clickable, and usable.",
+    "- If UI, web, or desktop behavior matters, use browser, Computer Use, or the relevant tool to confirm it is visible, clickable, and usable; for preview/dev-server goals, at least navigate to the real URL and perform one page inspection, click, screenshot, or script check.",
+    "- Keep the acceptance process traceable: say what you are opening and checking; when the user needs to see the browser state, call browser show or Computer Use to bring the window forward.",
+    "- Do not emit repeated generic 'continuing acceptance' statements; each such note must be followed by an actual tool action or a clear conclusion.",
     "- Tests, type checks, and static code review are only the baseline; they do not replace user-perspective acceptance.",
     "- If acceptance passes and the goal is complete, call session_goal complete with brief evidence.",
     "- If acceptance fails, use the findings as internal feedback, keep fixing, and verify again.",

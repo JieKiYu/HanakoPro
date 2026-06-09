@@ -1,3 +1,5 @@
+import * as React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../hooks/use-stream-buffer', () => ({
@@ -7,6 +9,16 @@ vi.mock('../../hooks/use-stream-buffer', () => ({
     beginTurn: vi.fn(),
     finishTurn: vi.fn(),
   },
+}));
+
+vi.mock('../../hooks/use-i18n', () => ({
+  useI18n: () => ({
+    t: (key: string) => ({
+      'chat.send': '发送',
+      'chat.steer': '插话',
+      'chat.stop': '停止',
+    }[key] || key),
+  }),
 }));
 
 vi.mock('../../stores/session-actions', () => ({
@@ -47,6 +59,25 @@ import { applyStreamingStatus, configureWsMessageHandler, handleServerMessage } 
 import { dispatchStreamKey } from '../../services/stream-key-dispatcher';
 import { handleAppEvent } from '../../services/app-event-actions';
 import { clearMessageLiveVersion, readMessageLiveVersion } from '../../stores/message-live-version';
+import { SendButton } from '../../components/input/SendButton';
+
+function renderGoalAwareSendButtonFromStore() {
+  const state = useStore.getState();
+  const currentSessionPath = state.currentSessionPath;
+  const isStreaming = !!currentSessionPath && state.streamingSessions.includes(currentSessionPath);
+  const goal = currentSessionPath ? state.sessionGoalByPath[currentSessionPath] : null;
+  const goalRunning = goal?.status === 'active';
+
+  return renderToStaticMarkup(React.createElement(SendButton, {
+    isStreaming,
+    goalRunning,
+    hasInput: false,
+    disabled: false,
+    onSend: () => {},
+    onSteer: () => {},
+    onStop: () => {},
+  }));
+}
 
 describe('ws-message-handler applyStreamingStatus', () => {
   beforeEach(() => {
@@ -86,6 +117,48 @@ describe('ws-message-handler applyStreamingStatus', () => {
     useStore.setState({ streamingSessions: ['/focused.jsonl'] } as never);
     expect(() => applyStreamingStatus(false, null)).not.toThrow();
     expect(useStore.getState().streamingSessions).toEqual(['/focused.jsonl']);
+  });
+
+  it('目标自动验收结束后，主界面按钮从停止态恢复到发送态', () => {
+    useStore.setState({
+      currentSessionPath: '/focused.jsonl',
+      streamingSessions: ['/focused.jsonl'],
+      sessionGoalByPath: {
+        '/focused.jsonl': {
+          objective: '启动项目预览并验收',
+          status: 'active',
+          createdAt: '2026-06-09T10:00:00.000Z',
+          updatedAt: '2026-06-09T10:00:00.000Z',
+          activeStartedAt: '2026-06-09T10:00:00.000Z',
+        },
+      },
+    } as never);
+
+    expect(renderGoalAwareSendButtonFromStore()).toContain('停止');
+
+    handleServerMessage({
+      type: 'status',
+      sessionPath: '/focused.jsonl',
+      isStreaming: false,
+      reason: 'goal_auto_review',
+    });
+    handleServerMessage({
+      type: 'session_goal',
+      sessionPath: '/focused.jsonl',
+      goal: {
+        objective: '启动项目预览并验收',
+        status: 'complete',
+        createdAt: '2026-06-09T10:00:00.000Z',
+        updatedAt: '2026-06-09T10:01:00.000Z',
+        completedAt: '2026-06-09T10:01:00.000Z',
+      },
+    });
+
+    const buttonMarkup = renderGoalAwareSendButtonFromStore();
+    expect(buttonMarkup).toContain('发送');
+    expect(buttonMarkup).not.toContain('停止');
+    expect(useStore.getState().streamingSessions).not.toContain('/focused.jsonl');
+    expect(useStore.getState().sessionGoalByPath['/focused.jsonl']?.status).toBe('complete');
   });
 });
 
