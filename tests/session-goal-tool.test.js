@@ -17,24 +17,40 @@ function makeCtx(sessionPath = "/tmp/session.jsonl") {
 describe("session_goal tool", () => {
   it("marks the active session goal complete", async () => {
     const goal = { objective: "finish goal mode", status: "active" };
+    const computerHost = { stop: vi.fn(async () => true) };
     const engine = {
       getSessionGoal: vi.fn(() => goal),
       markSessionGoalComplete: vi.fn((_sessionPath, note) => ({
         ok: true,
-        goal: { ...goal, status: "complete", note },
+        goal: { ...goal, status: "complete", note, elapsedMs: 65_000, metrics: { tokenUsage: 3210, elapsedMs: 65_000 } },
       })),
     };
-    const tool = createSessionGoalTool({ getEngine: () => engine });
+    const tool = createSessionGoalTool({ getEngine: () => engine, getComputerHost: () => computerHost, getAgentId: () => "hana" });
 
-    const result = await tool.execute("call-1", { action: "complete", note: "verified" }, null, null, makeCtx());
+    const result = await tool.execute("call-1", { action: "complete", note: "verified" }, null, null, {
+      ...makeCtx(),
+      agentId: "hana",
+      model: { id: "gpt-5.5" },
+    });
 
     expect(engine.markSessionGoalComplete).toHaveBeenCalledWith("/tmp/session.jsonl", "verified");
-    expect(textOf(result)).toContain("finish goal mode");
+    expect(computerHost.stop).toHaveBeenCalledWith({
+      sessionPath: "/tmp/session.jsonl",
+      agentId: "hana",
+      model: { id: "gpt-5.5" },
+    });
+    expect(textOf(result)).toContain("验真已合");
+    expect(textOf(result)).toContain("verified");
+    expect(textOf(result)).toContain("目标用量：3210 tokens，用时约 1分 5 秒。");
     expect(result.details.goal.status).toBe("complete");
+    expect(result.details.metrics).toMatchObject({ tokenUsage: 3210, elapsedMs: 65_000 });
+    expect(result.details.summary).toContain("目标用量：3210 tokens，用时约 1分 5 秒。");
+    expect(result.details.computerCleanup).toBe(true);
   });
 
   it("marks the active session goal blocked", async () => {
     const goal = { objective: "finish goal mode", status: "active" };
+    const computerHost = { stop: vi.fn(async () => false) };
     const engine = {
       getSessionGoal: vi.fn(() => goal),
       markSessionGoalBlocked: vi.fn((_sessionPath, note) => ({
@@ -42,11 +58,16 @@ describe("session_goal tool", () => {
         goal: { ...goal, status: "blocked", note },
       })),
     };
-    const tool = createSessionGoalTool({ getEngine: () => engine });
+    const tool = createSessionGoalTool({ getEngine: () => engine, getComputerHost: () => computerHost });
 
     const result = await tool.execute("call-2", { action: "blocked", note: "missing input" }, null, null, makeCtx());
 
     expect(engine.markSessionGoalBlocked).toHaveBeenCalledWith("/tmp/session.jsonl", "missing input");
+    expect(computerHost.stop).toHaveBeenCalledWith({
+      sessionPath: "/tmp/session.jsonl",
+      agentId: null,
+      model: null,
+    });
     expect(textOf(result)).toContain("finish goal mode");
     expect(result.details.goal.status).toBe("blocked");
   });

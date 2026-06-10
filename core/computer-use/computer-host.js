@@ -37,6 +37,10 @@ function targetAppId(target = {}) {
     || null;
 }
 
+function normalizeWindowTitle(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
 function cloneLease(lease) {
   if (!lease) return null;
   return {
@@ -351,7 +355,12 @@ export class ComputerHost {
     if (appId && lease.appId !== appId) return false;
     const windowId = target.windowId ? String(target.windowId) : null;
     if (windowId && String(lease.windowId || "") !== windowId) return false;
-    return Boolean(appId || windowId);
+    const windowTitle = normalizeWindowTitle(target.windowTitle);
+    if (windowTitle) {
+      const leaseWindowTitle = normalizeWindowTitle(lease.providerState?.windowTitle || lease.windowTitle);
+      if (!leaseWindowTitle || !leaseWindowTitle.includes(windowTitle)) return false;
+    }
+    return Boolean(appId || windowId || windowTitle);
   }
 
   _assertCapability(capabilities, action) {

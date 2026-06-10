@@ -1,3 +1,4 @@
+import net from "net";
 import { describe, expect, it, vi } from "vitest";
 import { BrowserManager } from "../lib/browser/browser-manager.js";
 
@@ -7,6 +8,14 @@ const SP3 = "/sessions/session-3.json";
 const SP4 = "/sessions/session-4.json";
 const SP5 = "/sessions/session-5.json";
 const SP6 = "/sessions/session-6.json";
+
+async function unusedLocalPort() {
+  const server = net.createServer();
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  await new Promise(resolve => server.close(resolve));
+  return port;
+}
 
 describe("BrowserManager URL tracking (per-session)", () => {
   it.each([
@@ -348,6 +357,81 @@ describe("BrowserManager multi-instance", () => {
 
     expect(manager.isRunning(SP1)).toBe(true);
     expect(manager.currentUrl(SP1)).toBe("https://resumed.com");
+  });
+
+  it("does not cold-resume a dead localhost browser URL after app restart", async () => {
+    const port = await unusedLocalPort();
+    const manager = new BrowserManager();
+    manager._sendCmd = vi.fn().mockImplementation(async (cmd) => {
+      if (cmd === "resume") return { found: false };
+      return {};
+    });
+    manager._loadColdState = vi.fn().mockReturnValue({
+      [SP1]: `http://127.0.0.1:${port}/`,
+    });
+    manager._removeColdUrl = vi.fn();
+
+    await manager.resumeForSession(SP1);
+
+    expect(manager._sendCmd).toHaveBeenCalledWith("resume", { sessionPath: SP1 });
+    expect(manager._sendCmd).not.toHaveBeenCalledWith("launch", expect.anything());
+    expect(manager.isRunning(SP1)).toBe(false);
+    expect(manager._removeColdUrl).toHaveBeenCalledWith(SP1);
+  });
+
+  it("cold-resumes a localhost browser URL when the saved port is still alive", async () => {
+    const server = net.createServer(socket => socket.end());
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    const port = server.address().port;
+    const savedUrl = `http://127.0.0.1:${port}/`;
+
+    const manager = new BrowserManager();
+    manager._sendCmd = vi.fn().mockImplementation(async (cmd) => {
+      if (cmd === "resume") return { found: false };
+      if (cmd === "navigate") return { url: savedUrl };
+      return {};
+    });
+    manager._loadColdState = vi.fn().mockReturnValue({ [SP1]: savedUrl });
+
+    try {
+      await manager.resumeForSession(SP1);
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+    }
+
+    expect(manager._sendCmd).toHaveBeenCalledWith("launch", { sessionPath: SP1 });
+    expect(manager._sendCmd).toHaveBeenCalledWith("navigate", { url: savedUrl, sessionPath: SP1 });
+    expect(manager.isRunning(SP1)).toBe(true);
+    expect(manager.currentUrl(SP1)).toBe(savedUrl);
+  });
+
+  it("cleans up a local cold-resume when navigation fails after launch", async () => {
+    const server = net.createServer(socket => socket.end());
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    const port = server.address().port;
+    const savedUrl = `http://127.0.0.1:${port}/`;
+
+    const manager = new BrowserManager();
+    manager._sendCmd = vi.fn().mockImplementation(async (cmd) => {
+      if (cmd === "resume") return { found: false };
+      if (cmd === "navigate") throw new Error("Navigation failed");
+      return {};
+    });
+    manager._loadColdState = vi.fn().mockReturnValue({ [SP1]: savedUrl });
+    manager._removeColdUrl = vi.fn();
+
+    try {
+      await manager.resumeForSession(SP1);
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+    }
+
+    expect(manager._sendCmd).toHaveBeenCalledWith("launch", { sessionPath: SP1 });
+    expect(manager._sendCmd).toHaveBeenCalledWith("navigate", { url: savedUrl, sessionPath: SP1 });
+    expect(manager._sendCmd).toHaveBeenCalledWith("destroyView", { sessionPath: SP1 });
+    expect(manager.isRunning(SP1)).toBe(false);
+    expect(manager.currentUrl(SP1)).toBeNull();
+    expect(manager._removeColdUrl).toHaveBeenCalledWith(SP1);
   });
 
   it("hasAnyRunning returns true when at least one session is running", async () => {

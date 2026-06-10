@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import CuaDriverCore
 import CuaDriverServer
 import Foundation
@@ -14,6 +15,22 @@ private enum ExitCode {
 private struct HelperError: Error {
     let code: Int32
     let message: String
+}
+
+private struct HanaActivateAppOutput: Codable {
+    let pid: Int32
+    let windowId: UInt32?
+    let activated: Bool
+    let raised: Bool
+    let active: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case pid
+        case windowId = "window_id"
+        case activated
+        case raised
+        case active
+    }
 }
 
 @main
@@ -91,6 +108,11 @@ struct HanaComputerUseHelper {
 
     private static func callTool(_ name: String, args: [String], raw: Bool, compact: Bool, socketPath: String) async throws {
         let arguments = try decodeArguments(args.first)
+        if name == "hana_activate_app" {
+            let result = try await activateHanaTargetApp(arguments)
+            try emitToolResult(result, raw: raw, compact: compact)
+            return
+        }
         guard ToolRegistry.default.handlers[name] != nil else {
             throw HelperError(code: ExitCode.usage, message: "Unknown tool: \(name)")
         }
@@ -113,6 +135,73 @@ struct HanaComputerUseHelper {
         }
 
         try emitToolResult(result, raw: raw, compact: compact)
+    }
+
+    private static func activateHanaTargetApp(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let rawPid = arguments?["pid"]?.intValue,
+              let pid = pid_t(exactly: rawPid)
+        else {
+            throw HelperError(code: ExitCode.dataError, message: "hana_activate_app requires integer pid.")
+        }
+        let windowId = arguments?["window_id"]?.intValue.flatMap(UInt32.init(exactly:))
+        let output = try await MainActor.run {
+            try activateHanaTargetAppOnMain(pid: pid, windowId: windowId)
+        }
+        let windowText = windowId.map { ", window \($0)" } ?? ""
+        let textContent: Tool.Content = .text(
+            text: "Activated app pid \(pid)\(windowText).",
+            annotations: nil,
+            _meta: nil
+        )
+        if let result = try? CallTool.Result(content: [textContent], structuredContent: output) {
+            return result
+        }
+        return CallTool.Result(content: [textContent])
+    }
+
+    @MainActor
+    private static func activateHanaTargetAppOnMain(pid: pid_t, windowId: UInt32?) throws -> HanaActivateAppOutput {
+        guard let app = NSRunningApplication(processIdentifier: pid) else {
+            throw HelperError(code: ExitCode.toolError, message: "No running app for pid \(pid).")
+        }
+        app.unhide()
+        let activated = app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        let raised = raiseHanaTargetWindow(pid: pid, windowId: windowId)
+        if raised {
+            _ = app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        }
+        return HanaActivateAppOutput(
+            pid: Int32(pid),
+            windowId: windowId,
+            activated: activated,
+            raised: raised,
+            active: app.isActive
+        )
+    }
+
+    @MainActor
+    private static func raiseHanaTargetWindow(pid: pid_t, windowId: UInt32?) -> Bool {
+        let appElement = AXUIElementCreateApplication(pid)
+        var windowsValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsValue) == .success,
+              let windows = windowsValue as? [AXUIElement],
+              !windows.isEmpty
+        else {
+            return false
+        }
+        let target = windows.first { window in
+            guard let windowId else { return true }
+            var numberValue: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(window, "AXWindowNumber" as CFString, &numberValue) == .success,
+                  let number = numberValue as? NSNumber
+            else {
+                return false
+            }
+            return number.uint32Value == windowId
+        } ?? windows.first
+        guard let target else { return false }
+        _ = AXUIElementSetAttributeValue(target, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+        return AXUIElementPerformAction(target, kAXRaiseAction as CFString) == .success
     }
 
     private static func emitToolResult(_ result: CallTool.Result, raw: Bool, compact: Bool) throws {

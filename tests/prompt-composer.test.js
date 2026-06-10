@@ -8,7 +8,9 @@ import {
   DEFAULT_SIMPLE_PROMPT_TEMPLATE_ID,
   PROMPT_COMPOSER_MODES,
   SYSTEM_GENERATED_PROMPT_BLOCK_IDS,
+  composeOriginPromptTemplate,
   composePromptFromBlocks,
+  getOriginPromptModuleTemplates,
   normalizePromptComposerConfig,
 } from "../shared/prompt-composer.js";
 
@@ -29,6 +31,27 @@ describe("prompt composer", () => {
     expect(content).toContain("# 核");
     expect(content).toContain("# 照");
     expect(content).toContain("# 德");
+  });
+
+  it("composes the origin template from the same module sources shown in settings", () => {
+    const cfg = normalizePromptComposerConfig({
+      enabled: true,
+      mode: "origin",
+      origin: {
+        root: "# 核\n\n道核",
+        mood: "# 照\n\n照见",
+        conduct: "# 德\n\n德行",
+        includeMood: true,
+      },
+    });
+    const modules = getOriginPromptModuleTemplates(cfg);
+    const content = composeOriginPromptTemplate(cfg);
+
+    expect(modules.map((module) => module.key)).toEqual(["核", "形", "时", "忆", "器", "令", "照", "德"]);
+    expect(modules.find((module) => module.key === "器")?.content).toBe("# 器\n\n{{runtimeFoundation}}\n\n{{skills}}");
+    expect(content).toContain("# 器\n\n{{runtimeFoundation}}\n\n{{skills}}");
+    expect(content).not.toContain("<available_skills");
+    expect(content).toBe(modules.map((module) => module.content.trim()).filter(Boolean).join("\n\n---\n\n"));
   });
 
   it("respects explicit disabled and blocks mode configuration", () => {
@@ -251,6 +274,8 @@ describe("prompt composer", () => {
 
     expect(normalized.activeSimplePresetId).toBe(template.id);
     expect(normalized.simpleContent).toBe(template.content);
+    expect(normalized.simpleContent).toContain("keep adjacent tool calls silent");
+    expect(normalized.simpleContent).not.toContain("Explain what you are doing before taking meaningful action");
     expect(composePromptFromBlocks({
       config: normalized,
       builtInBlocks: [],
@@ -410,21 +435,50 @@ describe("prompt composer", () => {
         },
       },
       variables: {
-        runtimeFoundation: "# 运行底座\n\n- 查询当前视野",
+        runtimeFoundation: "# 器\n\n- 查询当前视野\n- 目标模式由运行底座注入隐藏的 `hana-session-goal-context` 续行上下文",
       },
     };
 
     const cleanContent = composePromptFromBlocks(baseArgs);
     expect(cleanContent).toContain("# 核\n\n道核");
     expect(cleanContent).toContain("# 德\n\n德行");
-    expect(cleanContent).not.toContain("# 运行底座");
+    expect(cleanContent).not.toContain("- 查询当前视野");
 
     const runtimeContent = composePromptFromBlocks({
       ...baseArgs,
       includeRuntimeFoundation: true,
     });
-    expect(runtimeContent).toContain("# 运行底座\n\n- 查询当前视野");
-    expect(runtimeContent).toMatch(/# 德[\s\S]*---[\s\S]*# 运行底座/);
+    expect(runtimeContent).toContain("# 器\n\n- 查询当前视野");
+    expect(runtimeContent).toContain("目标模式由运行底座注入隐藏的 `hana-session-goal-context` 续行上下文");
+    expect(runtimeContent).not.toContain("# 器\n\n# 器");
+    expect(runtimeContent).toMatch(/# 器[\s\S]*---[\s\S]*# 德/);
+  });
+
+  it("expands variables inside runtime blocks in the complete origin prompt", () => {
+    const content = composePromptFromBlocks({
+      config: {
+        enabled: true,
+        mode: "origin",
+        origin: {
+          root: "# 核\n\n道核",
+          conduct: "# 德\n\n德行",
+          includeMood: false,
+          keepBlockIds: ["mcp-config"],
+        },
+      },
+      builtInBlocks: [
+        {
+          id: "mcp-config",
+          content: "# 器 · MCP\n\n配置文件位于 `{{mcpConfigPath}}`。",
+        },
+      ],
+      variables: {
+        mcpConfigPath: "/Users/test/.hanakopro/plugin-data/mcp/config.json",
+      },
+    });
+
+    expect(content).toContain("配置文件位于 `/Users/test/.hanakopro/plugin-data/mcp/config.json`。");
+    expect(content).not.toContain("{{mcpConfigPath}}");
   });
 
   it("does not use legacy simpleContent as a hidden origin root source", () => {

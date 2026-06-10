@@ -78,6 +78,55 @@ function resolveSessionYuan(sessionPath: string): string {
   return state.agents.find((agent: any) => agent.id === sessionAgentId)?.yuan || 'hanako';
 }
 
+function finiteNonNegativeInteger(value: unknown): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null;
+}
+
+function nestedRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function formatGoalConclusionElapsed(ms: unknown): string {
+  const safeMs = finiteNonNegativeInteger(ms);
+  if (safeMs === null) return '未知';
+  const totalSeconds = Math.max(0, Math.round(safeMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}分 ${seconds} 秒`;
+}
+
+function goalConclusionUsageLine(details: Record<string, unknown> | null): string {
+  const goal = nestedRecord(details?.goal);
+  const metrics = nestedRecord(details?.metrics) || nestedRecord(goal?.metrics);
+  const tokens = finiteNonNegativeInteger(metrics?.tokenUsage ?? metrics?.estimatedTokens);
+  const elapsedMs = finiteNonNegativeInteger(metrics?.elapsedMs ?? goal?.elapsedMs);
+  return `目标用量：${tokens === null ? '未记录' : tokens} tokens，用时约 ${formatGoalConclusionElapsed(elapsedMs)}。`;
+}
+
+function goalConclusionEvidence(details: Record<string, unknown> | null): string {
+  const goal = nestedRecord(details?.goal);
+  const summary = typeof details?.summary === 'string' ? details.summary.trim() : '';
+  const firstSummaryLine = summary.split('\n').find(line => line.trim() && !line.includes('目标用量：'))?.trim();
+  if (firstSummaryLine) return firstSummaryLine;
+  const note = typeof goal?.note === 'string' ? goal.note.trim() : '';
+  if (note) return note.startsWith('验真已合') ? note : `验真已合：${note}`;
+  return '验真已合：验收已通过，目标终态已确认。';
+}
+
+function goalAcceptanceConclusionFromToolEnd(msg: any): Extract<ContentBlock, { type: 'goal_acceptance_conclusion' }> | null {
+  if (msg.name !== 'session_goal' || !msg.success) return null;
+  const details = nestedRecord(msg.details);
+  if (details?.action !== 'complete') return null;
+  return {
+    type: 'goal_acceptance_conclusion',
+    evidence: goalConclusionEvidence(details),
+    usage: goalConclusionUsageLine(details),
+  };
+}
+
 class StreamBufferManager {
   private buffers = new Map<string, Buffer>();
 
@@ -422,14 +471,6 @@ class StreamBufferManager {
               blocks[lastTg] = { ...tg, tools };
               return { ...m, blocks };
             }
-            // 如果上一个 group 里还有未完成的工具，追加到同一个 group
-            if (tg.tools.some(t => !t.done)) {
-              blocks[lastTg] = {
-                ...tg,
-                tools: [...tg.tools, { name: msg.name, args: msg.args, done: false, success: false }],
-              };
-              return { ...m, blocks };
-            }
           }
           // 新建 tool_group
           blocks.push({
@@ -504,21 +545,6 @@ class StreamBufferManager {
               blocks[lastTg] = { ...tg, tools };
               return { ...m, blocks };
             }
-            if (tg.tools.some(t => !t.done)) {
-              blocks[lastTg] = {
-                ...tg,
-                tools: [...tg.tools, {
-                  name: msg.name || 'write',
-                  args: msg.rawPath ? { path: msg.rawPath } : undefined,
-                  done: false,
-                  success: false,
-                  pendingToolStart: true,
-                  prepareKey: msg.prepareKey,
-                  progress,
-                }],
-              };
-              return { ...m, blocks };
-            }
           }
           blocks.push({
             type: 'tool_group',
@@ -580,6 +606,7 @@ class StreamBufferManager {
       case 'tool_end':
         this.updateTargetMessage(buf, (m) => {
           const blocks = [...(m.blocks || [])];
+          const conclusionBlock = goalAcceptanceConclusionFromToolEnd(msg);
           // 从后往前找含该 tool 名且未 done 的
           for (let i = blocks.length - 1; i >= 0; i--) {
             if (blocks[i].type !== 'tool_group') continue;
@@ -588,8 +615,11 @@ class StreamBufferManager {
             if (toolIdx >= 0) {
               const tools = [...tg.tools];
               tools[toolIdx] = { ...tools[toolIdx], done: true, success: !!msg.success, details: msg.details, progress: undefined };
-              const allDone = tools.every(t => t.done);
-              blocks[i] = { ...tg, tools, collapsed: allDone && tools.length > 1 };
+              blocks[i] = { ...tg, tools };
+              if (conclusionBlock && !blocks.some(block => block.type === 'goal_acceptance_conclusion')) {
+                blocks.push(conclusionBlock);
+                buf.currentTextBlockIdx = -1;
+              }
               return { ...m, blocks };
             }
           }

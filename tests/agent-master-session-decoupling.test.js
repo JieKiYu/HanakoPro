@@ -41,6 +41,7 @@ vi.mock("../lib/memory/fact-store.js", () => ({
 }));
 
 import { Agent } from "../core/agent.js";
+import { loadLocale } from "../server/i18n.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -272,10 +273,27 @@ describe("agent.systemPrompt: master / per-session 解耦", () => {
     expect(prompt).toContain("置顶记忆：\nPINNED_MEMORY_BEACON");
     expect(prompt).not.toContain("# 器\n\n## 当前视野");
     expect(prompt).toContain("# 德\n\nORIGIN_CONDUCT");
-    expect(prompt).toContain("# 运行底座");
+    expect(prompt).toContain("# 器");
+    expect(prompt).toContain("器是 HanakoPro 的工具行法");
+    expect(prompt).toContain("目标模式由运行底座注入隐藏的 `hana-session-goal-context` 续行上下文");
+    expect(prompt).toContain("目标正文保持原样可见");
+    expect(prompt).toContain("目标包在 `<objective>` 中");
+    expect(prompt).toContain("普通推进轮只负责实现、基础自检和候选交付");
+    expect(prompt).toContain("不要在普通轮里自行展开正式验收");
+    expect(prompt).toContain("正式验收涉及界面、网页、预览、Hanako 内部浏览器或桌面应用时必须走使用电脑（computer 工具）");
+    expect(prompt).not.toContain("browser 工具只作");
+    expect(prompt).toContain("## 行 · 终端");
+    expect(prompt).toContain("终端链路开始前只有在进入新阶段且确有助于理解时才给一句说明");
+    expect(prompt).toContain("放入“已播报集合”");
+    expect(prompt).toContain("换词不等于新信息");
+    expect(prompt).toContain("说完入口后只能二选一");
     expect(prompt).toContain("先查询当前视野");
     expect(prompt).toContain("标记文件已交付");
     expect(prompt).toContain("真实源文件");
+    expect(prompt).not.toContain("# 运行底座");
+    expect(prompt).not.toContain("一条终端链路只在开始前给一句阶段说明");
+    expect(prompt).not.toContain("工具调用之间的简短状态说明");
+    expect(prompt).not.toContain("Explain what you are doing before taking meaningful action");
     expect(prompt).not.toContain("END_ANCHOR");
 
     await agent.dispose();
@@ -303,8 +321,40 @@ describe("agent.systemPrompt: master / per-session 解耦", () => {
     expect(prompt).toContain("# 核\n\n只看道核");
     expect(prompt).toContain("# 德\n\n只看德");
     expect(prompt).not.toContain("# 运行底座");
+    expect(prompt).not.toContain("器是 HanakoPro 的工具行法");
     expect(prompt).not.toContain("先查询当前视野");
     expect(prompt).not.toContain("使用交付标记");
+
+    await agent.dispose();
+  });
+
+  it("origin composer uses global locale for 器 when agent locale is unset", async () => {
+    loadLocale("zh-CN");
+    const agent = makeAgent(agentsDir, tmpDir);
+    await agent.init(() => {});
+    delete agent._config.locale;
+
+    const prompt = agent.buildSystemPrompt({
+      forceMemoryEnabled: false,
+      promptComposer: {
+        enabled: true,
+        mode: "origin",
+        origin: {
+          root: "# 核\n\n只看道核",
+          conduct: "# 德\n\n只看德",
+          includeMood: false,
+        },
+      },
+    });
+
+    expect(prompt).toContain("器是 HanakoPro 的工具行法");
+    expect(prompt).toContain("## 行 · 终端");
+    expect(prompt).toContain("终端链路开始前只有在进入新阶段且确有助于理解时才给一句说明");
+    expect(prompt).toContain("放入“已播报集合”");
+    expect(prompt).toContain("换词不等于新信息");
+    expect(prompt).not.toContain("一条终端链路只在开始前给一句阶段说明");
+    expect(prompt).not.toContain("工具调用之间的简短状态说明");
+    expect(prompt).not.toContain("## Act · Terminal");
 
     await agent.dispose();
   });
@@ -384,6 +434,11 @@ describe("agent.systemPrompt: master / per-session 解耦", () => {
     expect(prompt).toContain("computer");
     expect(prompt).toContain("AppleScript");
     expect(prompt).toContain("osascript");
+    expect(prompt).toContain("If the user later minimizes the target app, do not treat that as failure or a stop signal");
+    expect(prompt).toContain("keep the target app and small cursor bound while continuing in the background");
+    expect(prompt).toContain("The cursor's ownership must persist");
+    expect(prompt).toContain("it must not drift onto the desktop or another app");
+    expect(prompt).toContain("when the user restores the target window they should immediately see the cursor still operating inside that app");
 
     await agent.dispose();
   });

@@ -23,6 +23,7 @@ import { buildFileRefId, isImageOrSvgExt } from '../../utils/file-kind';
 import { openPreview } from '../../stores/preview-actions';
 import { selectIsStreamingSession, selectSelectedIdsBySession } from '../../stores/session-selectors';
 import { extractSelectedTexts } from '../../utils/message-text';
+import { isDuplicateGoalConclusionTextBlock } from '../../utils/goal-conclusion';
 import { AgentAvatar, resolveAgentDisplayInfo } from '../../utils/agent-display';
 import { useI18n } from '../../hooks/use-i18n';
 import { revertTurn } from '../../stores/revert-turn-action';
@@ -284,10 +285,14 @@ export const AssistantMessage = memo(function AssistantMessage({ message, showAv
   const displayName = displayInfo.displayName;
   const displayYuan = displayInfo.yuan || globalYuan;
 
-  const blocks = useMemo(
-    () => (message.blocks || []).filter(block => block.type !== 'session_confirmation' || block.surface !== 'input'),
-    [message.blocks],
-  );
+  const blocks = useMemo(() => {
+    const visibleBlocks = (message.blocks || []).filter(block => block.type !== 'session_confirmation' || block.surface !== 'input');
+    const conclusions = visibleBlocks.filter(
+      (block): block is Extract<ContentBlock, { type: 'goal_acceptance_conclusion' }> => block.type === 'goal_acceptance_conclusion',
+    );
+    if (conclusions.length === 0) return visibleBlocks;
+    return visibleBlocks.filter(block => !isDuplicateGoalConclusionTextBlock(block, conclusions));
+  }, [message.blocks]);
   const activeFileWriteTool = useMemo(() => hasActiveFileWriteTool(blocks), [blocks]);
   const terminalExclusions = useMemo(() => computeTerminalExclusionsPerBlock(blocks), [blocks]);
   const terminalAggregates = useMemo(() => computeTerminalAggregates(blocks), [blocks]);
@@ -441,6 +446,10 @@ const ContentBlockView = memo(function ContentBlockView({ block, agentName, agen
     }
     case 'mood':
       return <MoodBlock yuan={block.yuan} text={block.text} />;
+    case 'goal_acceptance':
+      return <GoalAcceptanceBlock block={block} />;
+    case 'goal_acceptance_conclusion':
+      return <GoalAcceptanceConclusionBlock block={block} />;
     case 'vision_progress':
       if (block.reused && block.phase === 'done') return null;
       return <VisionProgressBlock block={block} />;
@@ -474,6 +483,42 @@ const ContentBlockView = memo(function ContentBlockView({ block, agentName, agen
 });
 
 // ── 简单子块组件（物种 B，统一接受 { block: any }） ──
+
+const GoalAcceptanceBlock = memo(function GoalAcceptanceBlock({ block }: { block: Extract<ContentBlock, { type: 'goal_acceptance' }> }) {
+  const [open, setOpen] = useState(false);
+  const toggle = useCallback(() => setOpen(v => !v), []);
+  const title = block.title || '验真';
+
+  return (
+    <div className={styles.moodWrapper} data-yuan="goal-acceptance">
+      <div className={styles.moodSummary} onClick={toggle}>
+        <span className={`${styles.moodArrow}${open ? ` ${styles.moodArrowOpen}` : ''}`}>›</span>
+        <span className={styles.goalAcceptanceLabel}>
+          <span className={styles.goalAcceptanceMark} aria-hidden="true">✦</span>
+          <span>{title}</span>
+        </span>
+      </div>
+      {open && (
+        <div className={styles.moodBlock}>{block.text}</div>
+      )}
+    </div>
+  );
+});
+
+const GoalAcceptanceConclusionBlock = memo(function GoalAcceptanceConclusionBlock({ block }: { block: Extract<ContentBlock, { type: 'goal_acceptance_conclusion' }> }) {
+  return (
+    <div className={styles.goalAcceptanceConclusion}>
+      <div className={styles.goalAcceptanceConclusionHeader}>
+        <span className={styles.goalAcceptanceConclusionMark}>✦</span>
+        <span className={styles.goalAcceptanceConclusionTitle}>验真结论</span>
+      </div>
+      <div className={styles.goalAcceptanceConclusionBody}>
+        <div>{block.evidence}</div>
+        <div className={styles.goalAcceptanceConclusionUsage}>{block.usage}</div>
+      </div>
+    </div>
+  );
+});
 
 const VisionProgressBlock = memo(function VisionProgressBlock({ block }: { block: Extract<ContentBlock, { type: 'vision_progress' }> }) {
   const responseRef = useRef<HTMLPreElement | null>(null);

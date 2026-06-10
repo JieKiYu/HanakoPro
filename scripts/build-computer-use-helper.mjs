@@ -120,6 +120,26 @@ const CUA_CLICK_TOOL_RELATIVE_PATH = path.join(
   "Tools",
   "ClickTool.swift",
 );
+const CUA_DRAG_TOOL_RELATIVE_PATH = path.join(
+  "checkouts",
+  "cua",
+  "libs",
+  "cua-driver",
+  "Sources",
+  "CuaDriverServer",
+  "Tools",
+  "DragTool.swift",
+);
+const CUA_GET_WINDOW_STATE_TOOL_RELATIVE_PATH = path.join(
+  "checkouts",
+  "cua",
+  "libs",
+  "cua-driver",
+  "Sources",
+  "CuaDriverServer",
+  "Tools",
+  "GetWindowStateTool.swift",
+);
 const CUA_PERMISSIONS_RELATIVE_PATH = path.join(
   "checkouts",
   "cua",
@@ -140,17 +160,35 @@ const CUA_CHECK_PERMISSIONS_TOOL_RELATIVE_PATH = path.join(
   "Tools",
   "CheckPermissionsTool.swift",
 );
+const CUA_AGENT_CURSOR_RELATIVE_PATH = path.join(
+  "checkouts",
+  "cua",
+  "libs",
+  "cua-driver",
+  "Sources",
+  "CuaDriverCore",
+  "Cursor",
+  "AgentCursor.swift",
+);
 
 const CUA_AX_PATCH_SENTINEL = "cuaDriverAXMessagingTimeoutSeconds";
 const CUA_CLICK_PATCH_SENTINEL = '"show_default_ui": "AXShowDefaultUI"';
+const CUA_GET_WINDOW_STATE_CURSOR_PATCH_SENTINEL = "hanaParkAgentCursorInObservedWindow";
 const CUA_PERMISSIONS_PATCH_SENTINEL = "static func preflightStatus() -> PermissionsStatus";
 const CUA_CHECK_PERMISSIONS_PATCH_SENTINEL = "Permissions.preflightStatus()";
+const CUA_AGENT_CURSOR_PATCH_SENTINEL = "hanaPinnedTargetIsVisible";
+const CUA_AGENT_CURSOR_WINDOW_PIN_SENTINEL = "hanaPinnedWindowBindingIsVisible";
+const CUA_AGENT_CURSOR_VISIBILITY_GUARD_SENTINEL = "hanaHideIfPinnedTargetUnavailable";
 
 function replaceRequired(source, needle, replacement, label) {
   if (!source.includes(needle)) {
     throw new Error(`[computer-use-helper] Cua patch anchor not found: ${label}`);
   }
   return source.replace(needle, replacement);
+}
+
+function replaceIfPresent(source, needle, replacement) {
+  return source.includes(needle) ? source.replace(needle, replacement) : source;
 }
 
 export function patchCuaDriverAppStateSource(source) {
@@ -422,32 +460,154 @@ private func applyCuaDriverAXMessagingTimeout(_ element: AXUIElement) -> AXError
 }
 
 export function patchCuaDriverClickToolSource(source) {
-  if (source.includes(CUA_CLICK_PATCH_SENTINEL)) return source;
   let patched = source;
 
-  patched = replaceRequired(
-    patched,
-    `"enum": ["press", "show_menu", "pick", "confirm", "cancel", "open"],`,
-    `"enum": ["press", "show_menu", "show_default_ui", "pick", "confirm", "cancel", "open"],`,
-    "ClickTool action schema",
-  );
+  if (!patched.includes(CUA_CLICK_PATCH_SENTINEL) && patched.includes(`"enum": ["press", "show_menu", "pick", "confirm", "cancel", "open"],`)) {
+    patched = replaceRequired(
+      patched,
+      `"enum": ["press", "show_menu", "pick", "confirm", "cancel", "open"],`,
+      `"enum": ["press", "show_menu", "show_default_ui", "pick", "confirm", "cancel", "open"],`,
+      "ClickTool action schema",
+    );
 
-  patched = replaceRequired(
-    patched,
-    `"show_menu": "AXShowMenu",
+    patched = replaceRequired(
+      patched,
+      `"show_menu": "AXShowMenu",
         "pick": "AXPick",`,
-    `"show_menu": "AXShowMenu",
+      `"show_menu": "AXShowMenu",
         "show_default_ui": "AXShowDefaultUI",
         "pick": "AXPick",`,
-    "ClickTool AXShowDefaultUI action mapping",
-  );
+      "ClickTool AXShowDefaultUI action mapping",
+    );
 
-  patched = replaceRequired(
-    patched,
-    "Other values:\n                  `show_menu` (right-click equivalent), `pick` (open a",
-    "Other values:\n                  `show_menu` (right-click equivalent), `show_default_ui`\n                  (select a row/list item via AXShowDefaultUI), `pick` (open a",
-    "ClickTool action description",
-  );
+    patched = replaceRequired(
+      patched,
+      "Other values:\n                  `show_menu` (right-click equivalent), `pick` (open a",
+      "Other values:\n                  `show_menu` (right-click equivalent), `show_default_ui`\n                  (select a row/list item via AXShowDefaultUI), `pick` (open a",
+      "ClickTool action description",
+    );
+  }
+
+  patched = patched.replaceAll("AgentCursor.shared.pinAbove(pid: pid)", "AgentCursor.shared.pinAbove(pid: pid, windowId: windowId.map { Int($0) })");
+  patched = patched.replaceAll("AgentCursor.shared.finishClick(pid: pid)", "AgentCursor.shared.finishClick(pid: pid, windowId: windowId.map { Int($0) })");
+
+  const elementClickStart = patched.indexOf("private static func performElementClick(");
+  const pixelClickStart = patched.indexOf("private static func performPixelClick(");
+  if (elementClickStart !== -1) {
+    const elementClickEnd = pixelClickStart === -1 ? patched.length : pixelClickStart;
+    const before = patched.slice(0, elementClickStart);
+    const elementClick = patched
+      .slice(elementClickStart, elementClickEnd)
+      .replaceAll("AgentCursor.shared.pinAbove(pid: pid, windowId: windowId.map { Int($0) })", "AgentCursor.shared.pinAbove(pid: pid, windowId: Int(windowId))")
+      .replaceAll("AgentCursor.shared.finishClick(pid: pid, windowId: windowId.map { Int($0) })", "AgentCursor.shared.finishClick(pid: pid, windowId: Int(windowId))");
+    const after = patched.slice(elementClickEnd);
+    patched = `${before}${elementClick}${after}`;
+  }
+
+  return patched;
+}
+
+export function patchCuaDriverDragToolSource(source) {
+  return source
+    .replaceAll("AgentCursor.shared.pinAbove(pid: pid)", "AgentCursor.shared.pinAbove(pid: pid, windowId: windowId.map { Int($0) })")
+    .replaceAll("AgentCursor.shared.finishClick(pid: pid)", "AgentCursor.shared.finishClick(pid: pid, windowId: windowId.map { Int($0) })");
+}
+
+export function patchCuaDriverGetWindowStateToolSource(source) {
+  let patched = source;
+
+  if (!patched.includes("import CoreGraphics")) {
+    patched = replaceRequired(
+      patched,
+      `import CuaDriverCore
+import Foundation
+import MCP
+`,
+      `import CoreGraphics
+import CuaDriverCore
+import Foundation
+import MCP
+`,
+      "get_window_state cursor parking import",
+    );
+  }
+
+  if (!patched.includes("await hanaParkAgentCursorInObservedWindow(pid: pid, window: window)")) {
+    patched = replaceRequired(
+      patched,
+      `            if window.pid != pid {
+                return errorResult(
+                    "window_id \\(windowId) belongs to pid \\(window.pid), not pid "
+                    + "\\(rawPid). Call \`list_windows({pid: \\(rawPid)})\` to get this "
+                    + "pid's own windows.")
+            }
+
+            // Re-read the persisted capture_mode on every invocation so a
+`,
+      `            if window.pid != pid {
+                return errorResult(
+                    "window_id \\(windowId) belongs to pid \\(window.pid), not pid "
+                    + "\\(rawPid). Call \`list_windows({pid: \\(rawPid)})\` to get this "
+                    + "pid's own windows.")
+            }
+
+            await hanaParkAgentCursorInObservedWindow(pid: pid, window: window)
+
+            // Re-read the persisted capture_mode on every invocation so a
+`,
+      "get_window_state cursor parking call",
+    );
+  }
+
+  if (!patched.includes("private static func hanaParkAgentCursorInObservedWindow(")) {
+    patched = replaceRequired(
+      patched,
+      `    /// Mode-aware summary block. First line is always a ✅ headline with
+`,
+      `    /// Keep Hana's visible cursor bound to the app even during pure
+    /// observation. Pointer tools already animate before clicks; validation
+    /// often starts with read-only snapshots, so without this the cursor can
+    /// remain wherever the previous action left it and look disconnected from
+    /// the app being verified. If the named window is minimized/offscreen we
+    /// do not show the cursor on the desktop; \`pinAbove(pid:windowId:)\`
+    /// keeps the binding alive so the cursor reappears inside the same app
+    /// window when restored.
+    @MainActor
+    private static func hanaParkAgentCursorInObservedWindow(
+        pid: Int32,
+        window: WindowInfo
+    ) {
+        AgentCursor.shared.pinAbove(pid: pid, windowId: window.id)
+        guard window.isOnScreen,
+              window.layer == 0,
+              window.bounds.width > 1,
+              window.bounds.height > 1
+        else { return }
+
+        let inset = 24.0
+        let xOffset = window.bounds.width <= inset * 2
+            ? window.bounds.width / 2
+            : min(max(window.bounds.width * 0.5, inset), window.bounds.width - inset)
+        let yOffset = window.bounds.height <= inset * 2
+            ? window.bounds.height / 2
+            : min(max(window.bounds.height * 0.5, inset), window.bounds.height - inset)
+        let point = CGPoint(
+            x: CGFloat(window.bounds.x + xOffset),
+            y: CGFloat(window.bounds.y + yOffset)
+        )
+        AgentCursor.shared.setPosition(point)
+        AgentCursor.shared.show()
+    }
+
+    /// Mode-aware summary block. First line is always a ✅ headline with
+`,
+      "get_window_state cursor parking helper",
+    );
+  } else {
+    patched = patched
+      .replaceAll("`pinAbove(pid:)` keeps the\n    /// binding alive so the cursor reappears inside the app when restored.", "`pinAbove(pid:windowId:)`\n    /// keeps the binding alive so the cursor reappears inside the same app\n    /// window when restored.")
+      .replaceAll("AgentCursor.shared.pinAbove(pid: pid)", "AgentCursor.shared.pinAbove(pid: pid, windowId: window.id)");
+  }
 
   return patched;
 }
@@ -514,6 +674,296 @@ export function patchCuaDriverCheckPermissionsToolSource(source) {
   return patched;
 }
 
+export function patchCuaDriverAgentCursorSource(source) {
+  let patched = source;
+
+  const minimizedOriginal = `            // Target has no on-screen window — it's minimized, hidden,
+            // or on another Space. Drop the overlay entirely rather
+            // than floating it above other apps: there's nothing to
+            // pin above, and showing a stranded cursor over the user's
+            // actual frontmost app is worse than nothing.
+            //
+            // BUT — a single missed tick is usually just a mid-raise
+            // frame where \`visibleWindows()\` transiently returns no
+            // match. Hiding on the first miss caused the overlay to
+            // vanish for ~1s during every click. Require ≥2
+            // consecutive misses before hiding; the next scheduled
+            // repin tick (60–300ms later) will catch the window
+            // once it's back on screen and reset the counter.
+            missedPinCount += 1
+            if missedPinCount >= 2 {
+                if win.isVisible { win.orderOut(nil) }
+                pinnedWindowId = nil
+            }
+            return
+`;
+  const minimizedReplacement = `            // Target has no on-screen window — it's minimized, hidden,
+            // or on another Space. Hide the overlay so it never floats over
+            // unrelated apps, but keep pinnedPid and the continuous repin loop
+            // alive. Hana keeps the target binding alive while minimized: when
+            // the user restores the app, the next repin tick orders the cursor
+            // back above that target window instead of treating the task as
+            // visually finished.
+            //
+            // BUT — a single missed tick is usually just a mid-raise
+            // frame where \`visibleWindows()\` transiently returns no
+            // match. Hiding on the first miss caused the overlay to
+            // vanish for ~1s during every click. Require ≥2
+            // consecutive misses before hiding; the next scheduled
+            // repin tick (60–300ms later) will catch the window
+            // once it's back on screen and reset the counter.
+            missedPinCount += 1
+            if missedPinCount >= 2 {
+                if win.isVisible { win.orderOut(nil) }
+                pinnedWindowId = nil
+            }
+            return
+`;
+  if (patched.includes(minimizedOriginal)) {
+    patched = patched.replace(minimizedOriginal, minimizedReplacement);
+  } else if (!patched.includes("Hana keeps the target binding alive while minimized")) {
+    throw new Error("[computer-use-helper] Cua patch anchor not found: AgentCursor minimized target binding");
+  }
+
+  if (!patched.includes(CUA_AGENT_CURSOR_PATCH_SENTINEL)) {
+    patched = replaceRequired(
+      patched,
+      `    public func show() {
+        guard isEnabled else { return }
+        let win = ensureWindow()
+        if !win.isVisible {
+            win.orderFrontRegardless()
+        }
+    }
+`,
+      `    public func show() {
+        guard isEnabled else { return }
+        let win = ensureWindow()
+        if !hanaPinnedTargetIsVisible() {
+            if win.isVisible { win.orderOut(nil) }
+            return
+        }
+        if !win.isVisible {
+            win.orderFrontRegardless()
+        }
+    }
+
+    private func hanaPinnedTargetIsVisible() -> Bool {
+        guard let pid = pinnedPid else { return true }
+        return WindowEnumerator.visibleWindows().contains { window in
+            window.pid == pid && window.layer == 0 && window.isOnScreen
+        }
+    }
+`,
+      "AgentCursor pinned target show guard",
+    );
+  }
+
+  if (!patched.includes(CUA_AGENT_CURSOR_WINDOW_PIN_SENTINEL)) {
+    patched = replaceRequired(
+      patched,
+      `    public func pinAbove(pid: pid_t) {
+        guard isEnabled else { return }
+        pinnedPid = pid
+        missedPinCount = 0  // fresh pin — any earlier miss streak is stale
+        ensureActivationObserver()
+        reapplyPinAbove()
+        startContinuousRepin()
+    }
+`,
+      `    public func pinAbove(pid: pid_t, windowId: Int? = nil) {
+        guard isEnabled else { return }
+        let targetChanged = pinnedPid != pid || pinnedWindowId != windowId
+        pinnedPid = pid
+        pinnedWindowId = windowId
+        if targetChanged || hanaPinnedWindowBindingIsVisible() {
+            missedPinCount = 0
+        }
+        ensureActivationObserver()
+        reapplyPinAbove()
+        startContinuousRepin()
+    }
+
+    private func hanaPinnedWindowBindingIsVisible() -> Bool {
+        guard isEnabled, let pid = pinnedPid else { return false }
+        return WindowEnumerator.visibleWindows().contains { window in
+            window.pid == pid
+                && window.layer == 0
+                && window.isOnScreen
+                && (pinnedWindowId == nil || window.id == pinnedWindowId)
+        }
+    }
+`,
+      "AgentCursor window-specific pin",
+    );
+
+    patched = replaceRequired(
+      patched,
+      `    private func hanaPinnedTargetIsVisible() -> Bool {
+        guard let pid = pinnedPid else { return true }
+        return WindowEnumerator.visibleWindows().contains { window in
+            window.pid == pid && window.layer == 0 && window.isOnScreen
+        }
+    }
+`,
+      `    private func hanaPinnedTargetIsVisible() -> Bool {
+        guard let pid = pinnedPid else { return true }
+        return WindowEnumerator.visibleWindows().contains { window in
+            window.pid == pid
+                && window.layer == 0
+                && window.isOnScreen
+                && (pinnedWindowId == nil || window.id == pinnedWindowId)
+        }
+    }
+`,
+      "AgentCursor pinned target window guard",
+    );
+
+    patched = replaceRequired(
+      patched,
+      `        let targetWindow = WindowEnumerator.visibleWindows()
+            .filter { $0.pid == pid && $0.layer == 0 && $0.isOnScreen }
+            .max(by: { $0.zIndex < $1.zIndex })
+`,
+      `        let targetWindow = WindowEnumerator.visibleWindows()
+            .filter {
+                $0.pid == pid
+                    && $0.layer == 0
+                    && $0.isOnScreen
+                    && (pinnedWindowId == nil || $0.id == pinnedWindowId)
+            }
+            .max(by: { $0.zIndex < $1.zIndex })
+`,
+      "AgentCursor reapply target window filter",
+    );
+
+    patched = patched.replaceAll("                pinnedWindowId = nil\n", "");
+  }
+
+  patched = patched
+    .replaceAll("public func finishClick(pid: pid_t) async", "public func finishClick(pid: pid_t, windowId: Int? = nil) async")
+    .replaceAll("_ = pid  // reserved for future per-pid dwell / hide policy", "pinAbove(pid: pid, windowId: windowId)");
+
+  if (!patched.includes(CUA_AGENT_CURSOR_VISIBILITY_GUARD_SENTINEL)) {
+    patched = replaceRequired(
+      patched,
+      `    private func hanaPinnedWindowBindingIsVisible() -> Bool {
+        guard isEnabled, let pid = pinnedPid else { return false }
+        return WindowEnumerator.visibleWindows().contains { window in
+            window.pid == pid
+                && window.layer == 0
+                && window.isOnScreen
+                && (pinnedWindowId == nil || window.id == pinnedWindowId)
+        }
+    }
+`,
+      `    private func hanaPinnedWindowBindingIsVisible() -> Bool {
+        guard isEnabled, let pid = pinnedPid else { return false }
+        return WindowEnumerator.visibleWindows().contains { window in
+            window.pid == pid
+                && window.layer == 0
+                && window.isOnScreen
+                && (pinnedWindowId == nil || window.id == pinnedWindowId)
+        }
+    }
+
+    @discardableResult
+    private func hanaHideIfPinnedTargetUnavailable() -> Bool {
+        guard pinnedPid != nil else { return false }
+        if hanaPinnedWindowBindingIsVisible() { return false }
+        if let win = overlay, win.isVisible { win.orderOut(nil) }
+        return true
+    }
+`,
+      "AgentCursor pinned target unavailable hide helper",
+    );
+
+    patched = replaceRequired(
+      patched,
+      `    public func show() {
+        guard isEnabled else { return }
+        let win = ensureWindow()
+        if !hanaPinnedTargetIsVisible() {
+            if win.isVisible { win.orderOut(nil) }
+            return
+        }
+        if !win.isVisible {
+            win.orderFrontRegardless()
+        }
+    }
+`,
+      `    public func show() {
+        guard isEnabled else { return }
+        if hanaHideIfPinnedTargetUnavailable() { return }
+        let win = ensureWindow()
+        if !win.isVisible {
+            win.orderFrontRegardless()
+        }
+    }
+`,
+      "AgentCursor show pinned target availability guard",
+    );
+
+    patched = replaceIfPresent(
+      patched,
+      `        let duration = duration ?? glideDurationSeconds
+        cancelIdleHide()  // incoming activity — defer auto-hide
+        show()  // ensure the overlay is visible; no-op if already shown
+        animate(to: point)
+`,
+      `        let duration = duration ?? glideDurationSeconds
+        cancelIdleHide()  // incoming activity — defer auto-hide
+        if hanaHideIfPinnedTargetUnavailable() { return }
+        show()  // ensure the overlay is visible; no-op if already shown
+        if hanaHideIfPinnedTargetUnavailable() { return }
+        animate(to: point)
+`,
+    );
+
+    patched = replaceIfPresent(
+      patched,
+      `        guard isEnabled else { return }
+        _ = ensureWindow()
+`,
+      `        guard isEnabled else { return }
+        if hanaHideIfPinnedTargetUnavailable() { return }
+        _ = ensureWindow()
+`,
+    );
+
+    patched = replaceIfPresent(
+      patched,
+      `    public func playClickPress(duration: CFTimeInterval = 0.65) async {
+        guard isEnabled else { return }
+        try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
+    }
+`,
+      `    public func playClickPress(duration: CFTimeInterval = 0.65) async {
+        guard isEnabled else { return }
+        if hanaHideIfPinnedTargetUnavailable() { return }
+        try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
+    }
+`,
+    );
+
+    patched = replaceRequired(
+      patched,
+      `    public func finishClick(pid: pid_t, windowId: Int? = nil) async {
+        pinAbove(pid: pid, windowId: windowId)
+        guard isEnabled else { return }
+`,
+      `    public func finishClick(pid: pid_t, windowId: Int? = nil) async {
+        pinAbove(pid: pid, windowId: windowId)
+        guard isEnabled else { return }
+        if hanaHideIfPinnedTargetUnavailable() { return }
+`,
+      "AgentCursor finishClick pinned target availability guard",
+    );
+  }
+
+  return patched;
+}
+
 export function applyCuaDriverSourcePatches({ scratchPath } = {}) {
   const appStatePath = path.join(scratchPath, CUA_APP_STATE_RELATIVE_PATH);
   if (!fs.existsSync(appStatePath)) {
@@ -523,6 +973,14 @@ export function applyCuaDriverSourcePatches({ scratchPath } = {}) {
   if (!fs.existsSync(clickToolPath)) {
     throw new Error(`[computer-use-helper] Cua ClickTool.swift not found at ${clickToolPath}`);
   }
+  const dragToolPath = path.join(scratchPath, CUA_DRAG_TOOL_RELATIVE_PATH);
+  if (!fs.existsSync(dragToolPath)) {
+    throw new Error(`[computer-use-helper] Cua DragTool.swift not found at ${dragToolPath}`);
+  }
+  const getWindowStateToolPath = path.join(scratchPath, CUA_GET_WINDOW_STATE_TOOL_RELATIVE_PATH);
+  if (!fs.existsSync(getWindowStateToolPath)) {
+    throw new Error(`[computer-use-helper] Cua GetWindowStateTool.swift not found at ${getWindowStateToolPath}`);
+  }
   const permissionsPath = path.join(scratchPath, CUA_PERMISSIONS_RELATIVE_PATH);
   if (!fs.existsSync(permissionsPath)) {
     throw new Error(`[computer-use-helper] Cua Permissions.swift not found at ${permissionsPath}`);
@@ -530,6 +988,10 @@ export function applyCuaDriverSourcePatches({ scratchPath } = {}) {
   const checkPermissionsToolPath = path.join(scratchPath, CUA_CHECK_PERMISSIONS_TOOL_RELATIVE_PATH);
   if (!fs.existsSync(checkPermissionsToolPath)) {
     throw new Error(`[computer-use-helper] Cua CheckPermissionsTool.swift not found at ${checkPermissionsToolPath}`);
+  }
+  const agentCursorPath = path.join(scratchPath, CUA_AGENT_CURSOR_RELATIVE_PATH);
+  if (!fs.existsSync(agentCursorPath)) {
+    throw new Error(`[computer-use-helper] Cua AgentCursor.swift not found at ${agentCursorPath}`);
   }
 
   let patchedAny = false;
@@ -551,6 +1013,24 @@ export function applyCuaDriverSourcePatches({ scratchPath } = {}) {
     patchedAny = true;
   }
 
+  const dragToolSource = fs.readFileSync(dragToolPath, "utf8");
+  const patchedDragTool = patchCuaDriverDragToolSource(dragToolSource);
+  if (patchedDragTool !== dragToolSource) {
+    fs.chmodSync(dragToolPath, 0o644);
+    fs.writeFileSync(dragToolPath, patchedDragTool);
+    console.log("[computer-use-helper] patched Cua DragTool for window-bound agent cursor");
+    patchedAny = true;
+  }
+
+  const getWindowStateToolSource = fs.readFileSync(getWindowStateToolPath, "utf8");
+  const patchedGetWindowStateTool = patchCuaDriverGetWindowStateToolSource(getWindowStateToolSource);
+  if (patchedGetWindowStateTool !== getWindowStateToolSource) {
+    fs.chmodSync(getWindowStateToolPath, 0o644);
+    fs.writeFileSync(getWindowStateToolPath, patchedGetWindowStateTool);
+    console.log("[computer-use-helper] patched Cua get_window_state to park the cursor in observed windows");
+    patchedAny = true;
+  }
+
   const permissionsSource = fs.readFileSync(permissionsPath, "utf8");
   const patchedPermissions = patchCuaDriverPermissionsSource(permissionsSource);
   if (patchedPermissions !== permissionsSource) {
@@ -566,6 +1046,15 @@ export function applyCuaDriverSourcePatches({ scratchPath } = {}) {
     fs.chmodSync(checkPermissionsToolPath, 0o644);
     fs.writeFileSync(checkPermissionsToolPath, patchedCheckPermissionsTool);
     console.log("[computer-use-helper] patched Cua check_permissions prompt=false preflight path");
+    patchedAny = true;
+  }
+
+  const agentCursorSource = fs.readFileSync(agentCursorPath, "utf8");
+  const patchedAgentCursor = patchCuaDriverAgentCursorSource(agentCursorSource);
+  if (patchedAgentCursor !== agentCursorSource) {
+    fs.chmodSync(agentCursorPath, 0o644);
+    fs.writeFileSync(agentCursorPath, patchedAgentCursor);
+    console.log("[computer-use-helper] patched Cua AgentCursor minimized target binding");
     patchedAny = true;
   }
 

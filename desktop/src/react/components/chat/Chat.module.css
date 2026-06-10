@@ -612,6 +612,12 @@
     --mood-accent: var(--mood-psych-color);
 }
 
+.moodWrapper[data-yuan="goal-acceptance"] {
+    --mood-psych-color: #174EA6;
+    --mood-psych-bg: rgba(23, 78, 166, 0.075);
+    --mood-psych-border: rgba(23, 78, 166, 0.34);
+}
+
 .moodSummary {
     display: inline-flex;
     align-items: center;
@@ -642,6 +648,19 @@
 
 .moodArrowOpen {
     transform: rotate(90deg);
+}
+
+.goalAcceptanceLabel {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.goalAcceptanceMark {
+    font-style: normal;
+    font-size: 0.82em;
+    line-height: 1;
+    color: var(--mood-psych-color);
 }
 
 .moodBlock {
@@ -1238,6 +1257,60 @@
     overflow-wrap: anywhere;
 }
 
+.goalAcceptanceConclusion {
+    width: var(--chat-code-block-width, 100%);
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    margin: 0.72rem 0 0.76rem;
+    overflow: hidden;
+    border: 1px solid rgba(23, 78, 166, 0.28);
+    border-radius: 8px;
+    background:
+        linear-gradient(180deg, rgba(23, 78, 166, 0.07), rgba(23, 78, 166, 0.035)),
+        var(--bg-card, var(--bg));
+    color: var(--text);
+    box-shadow: 0 1px 4px rgba(23, 78, 166, 0.08);
+}
+
+.goalAcceptanceConclusionHeader {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.46rem 0.68rem 0.1rem;
+    color: #174EA6;
+    font-size: 0.8rem;
+    font-style: italic;
+    line-height: 1.35;
+}
+
+.goalAcceptanceConclusionMark {
+    font-size: 0.78rem;
+    line-height: 1;
+}
+
+.goalAcceptanceConclusionTitle {
+    font-weight: 600;
+}
+
+.goalAcceptanceConclusionBody {
+    display: flex;
+    flex-direction: column;
+    gap: 0.22rem;
+    padding: 0.22rem 0.76rem 0.68rem;
+    color: var(--text);
+    font-size: 0.78rem;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+.goalAcceptanceConclusionUsage {
+    color: color-mix(in srgb, var(--text-muted) 82%, #174EA6 18%);
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    line-height: 1.45;
+}
+
 .toolExpandArrow {
     font-size: 0.7rem;
     color: var(--text-muted);
@@ -1302,6 +1375,10 @@
     margin: var(--space-xs) 0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     font-size: 0.8rem;
+    width: var(--chat-code-block-width, 100%);
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
 }
 
 .thinkingBlockSummary {
@@ -1348,6 +1425,9 @@
 }
 
 .thinkingBlockBody {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
     margin-top: var(--space-xs);
     padding: var(--space-sm) var(--space-md);
     color: var(--text-muted);
@@ -1357,6 +1437,8 @@
     white-space: pre-wrap;
     border-left: 2px solid var(--border);
     border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 /* 隐藏折叠状态下的内容 */

@@ -29,6 +29,8 @@ export const DEFAULT_SIMPLE_PROMPT_TEMPLATE_ID = "hanako-agentic-coding-assistan
 
 export const PROMPT_COMPOSER_MODES = ["blocks", "simple", "origin"];
 
+export const ORIGIN_PROMPT_MODULE_ORDER = ["核", "形", "时", "忆", "器", "令", "照", "德"];
+
 export const DEFAULT_ORIGIN_KEEP_BLOCK_ORDER = [
   "experience",
   "session-files",
@@ -103,24 +105,24 @@ export const DEFAULT_ORIGIN_TURN_ANCHOR = `此刻用户所语为本。
 道法自然。`;
 
 export const BUILTIN_PROMPT_BLOCKS = [
-  { id: "platform", label: "平台声明", labelEn: "Platform" },
-  { id: "environment", label: "执行环境", labelEn: "Environment" },
-  { id: "task-management", label: "任务管理", labelEn: "Task Management" },
-  { id: "experience", label: "经验库", labelEn: "Experience Library" },
-  { id: "tool-discipline", label: "工具使用纪律", labelEn: "Tool Discipline" },
-  { id: "current-view", label: "当前视野", labelEn: "Current View" },
-  { id: "session-files", label: "Session 文件与交付", labelEn: "Session Files" },
-  { id: "desktop-app-control", label: "本机应用控制", labelEn: "Desktop App Control" },
-  { id: "failure-handling", label: "失败处理", labelEn: "Failure Handling" },
-  { id: "action-safety", label: "操作安全", labelEn: "Action Safety" },
-  { id: "web-tool-priority", label: "网页工具优先级", labelEn: "Web Tool Priority" },
-  { id: "settings-changes", label: "设置修改", labelEn: "Settings Changes" },
-  { id: "mcp-config", label: "MCP 配置", labelEn: "MCP Configuration" },
-  { id: "proactive-skill-acquisition", label: "主动技能获取", labelEn: "Proactive Skill Acquisition" },
-  { id: "team", label: "团队", labelEn: "Team" },
+  { id: "platform", label: "器 · 平台", labelEn: "Vessel · Platform" },
+  { id: "environment", label: "器 · 时地", labelEn: "Vessel · Environment" },
+  { id: "task-management", label: "器 · 记", labelEn: "Vessel · Task Management" },
+  { id: "experience", label: "器 · 习", labelEn: "Vessel · Experience Library" },
+  { id: "tool-discipline", label: "器 · 行", labelEn: "Vessel · Tool Discipline" },
+  { id: "current-view", label: "器 · 观", labelEn: "Vessel · Current View" },
+  { id: "session-files", label: "器 · 物", labelEn: "Vessel · Session Files" },
+  { id: "desktop-app-control", label: "器 · 应用", labelEn: "Vessel · Desktop App Control" },
+  { id: "failure-handling", label: "器 · 复", labelEn: "Vessel · Failure Handling" },
+  { id: "action-safety", label: "器 · 戒", labelEn: "Vessel · Action Safety" },
+  { id: "web-tool-priority", label: "器 · 网页", labelEn: "Vessel · Web Tool Priority" },
+  { id: "settings-changes", label: "器 · 设置", labelEn: "Vessel · Settings" },
+  { id: "mcp-config", label: "器 · MCP", labelEn: "Vessel · MCP Configuration" },
+  { id: "proactive-skill-acquisition", label: "器 · 取", labelEn: "Vessel · Proactive Skill Acquisition" },
+  { id: "team", label: "器 · 和", labelEn: "Vessel · Team" },
   { id: "user-profile", label: "用户档案", labelEn: "User Profile" },
   { id: "personality", label: "人格与意识", labelEn: "Personality" },
-  { id: "skill-file-identity", label: "技能文件身份", labelEn: "Skill File Identity" },
+  { id: "skill-file-identity", label: "器 · 源", labelEn: "Vessel · Skill File Identity" },
 ];
 
 function normalizeId(value, fallback) {
@@ -389,12 +391,24 @@ function normalizeToolOverrides(value) {
   return result;
 }
 
+const TEMPLATE_VARIABLE_PATTERN = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
+
 function renderTemplate(content, variables = {}) {
-  return String(content || "").replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (match, key) => {
+  return String(content || "").replace(TEMPLATE_VARIABLE_PATTERN, (match, key) => {
     if (!Object.prototype.hasOwnProperty.call(variables, key)) return match;
     const value = variables[key];
     return value == null ? "" : String(value);
   });
+}
+
+function renderTemplateFully(content, variables = {}, maxPasses = 6) {
+  let current = String(content || "");
+  for (let index = 0; index < maxPasses; index += 1) {
+    const next = renderTemplate(current, variables);
+    if (next === current) return next;
+    current = next;
+  }
+  return current;
 }
 
 function buildPromptBlockMap(normalized, builtInBlocks, variables, route) {
@@ -410,19 +424,19 @@ function buildPromptBlockMap(normalized, builtInBlocks, variables, route) {
     if (!block?.id || typeof block.content !== "string" || !block.content.trim()) continue;
     const override = systemGeneratedBlockIds.has(block.id) ? null : overrideMap.get(block.id);
     if (override?.enabled === false) continue;
-    const content = override ? renderTemplate(override.content, variables) : block.content;
+    const content = renderTemplateFully(override ? override.content : block.content, variables);
     blockMap.set(block.id, content);
   }
   for (const block of normalized.blocks) {
     if (systemGeneratedBlockIds.has(block.id)) continue;
     if (!block.enabled || !block.content.trim()) continue;
-    blockMap.set(block.id, renderTemplate(block.content, variables));
+    blockMap.set(block.id, renderTemplateFully(block.content, variables));
   }
   return blockMap;
 }
 
 function renderPromptValue(value, variables) {
-  return renderTemplate(value == null ? "" : String(value), variables).trim();
+  return renderTemplateFully(value == null ? "" : String(value), variables).trim();
 }
 
 function cleanExtractedOriginRoot(renderedRoot) {
@@ -467,6 +481,48 @@ function compactSection(title, content) {
   const body = String(content || "").trim();
   if (!body) return "";
   return `# ${title}\n\n${body}`;
+}
+
+function stripCompactSectionHeading(content, titles = []) {
+  const body = String(content || "").trim();
+  if (!body) return "";
+  for (const title of titles) {
+    const pattern = new RegExp(`^#\\s*${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\n+`, "i");
+    if (pattern.test(body)) return body.replace(pattern, "").trim();
+  }
+  return body;
+}
+
+export function getOriginPromptReadonlyModuleTemplate(key) {
+  if (key === "形") return compactSection(key, "{{originPersonality}}");
+  if (key === "时") return compactSection(key, ["{{workspace}}", "当前时日：{{currentDateTime}}"].join("\n"));
+  if (key === "忆") return compactSection(key, ["用户档案：", "{{userProfile}}", "", "置顶记忆：", "{{pinnedMemory}}"].join("\n"));
+  if (key === "器") return compactSection(key, ["{{runtimeFoundation}}", "{{skills}}"].join("\n\n"));
+  if (key === "令") return compactSection(key, "{{appendSystemPrompt}}");
+  return "";
+}
+
+export function getOriginPromptModuleTemplates(config) {
+  const normalized = normalizePromptComposerConfig(config);
+  const origin = normalized.origin || {};
+  const modules = [
+    { key: "核", content: normalizeText(origin.root) },
+    { key: "形", content: getOriginPromptReadonlyModuleTemplate("形") },
+    { key: "时", content: getOriginPromptReadonlyModuleTemplate("时") },
+    { key: "忆", content: getOriginPromptReadonlyModuleTemplate("忆") },
+    { key: "器", content: getOriginPromptReadonlyModuleTemplate("器") },
+    { key: "令", content: getOriginPromptReadonlyModuleTemplate("令") },
+  ];
+  if (origin.includeMood === true) modules.push({ key: "照", content: normalizeText(origin.mood) });
+  modules.push({ key: "德", content: normalizeText(origin.conduct) });
+  return modules;
+}
+
+export function composeOriginPromptTemplate(config) {
+  const parts = getOriginPromptModuleTemplates(config)
+    .map((module) => String(module.content || "").trim())
+    .filter(Boolean);
+  return parts.length ? parts.join("\n\n---\n\n").trim() : null;
 }
 
 function composeKeptOriginBlocks(normalized, builtInBlocks, variables) {
@@ -518,8 +574,13 @@ function composeOriginPrompt(normalized, builtInBlocks, variables, options = {})
   ].filter(Boolean);
   if (memoryLines.length) parts.push(compactSection("忆", memoryLines.join("\n\n")));
 
-  const skills = renderPromptValue(variables?.skills, variables);
-  if (skills) parts.push(compactSection("器", skills));
+  const vesselLines = [
+    options.includeRuntimeFoundation === true
+      ? stripCompactSectionHeading(renderPromptValue(variables?.runtimeFoundation, variables), ["器", "Vessel"])
+      : "",
+    renderPromptValue(variables?.skills, variables),
+  ].filter(Boolean);
+  if (vesselLines.length) parts.push(compactSection("器", vesselLines.join("\n\n")));
 
   const appendSystemPrompt = renderPromptValue(variables?.appendSystemPrompt, variables);
   if (appendSystemPrompt) parts.push(compactSection("令", appendSystemPrompt));
@@ -534,11 +595,6 @@ function composeOriginPrompt(normalized, builtInBlocks, variables, options = {})
 
   parts.push(...composeKeptOriginBlocks(normalized, builtInBlocks, variables));
 
-  const runtimeFoundation = options.includeRuntimeFoundation === true
-    ? renderPromptValue(variables?.runtimeFoundation, variables)
-    : "";
-  if (runtimeFoundation) parts.push(runtimeFoundation);
-
   return parts.filter(Boolean).join("\n\n---\n\n").trim() || null;
 }
 
@@ -547,7 +603,7 @@ export function composePromptFromBlocks({ config, builtInBlocks, variables, incl
   if (!normalized.enabled) return null;
 
   if (normalized.mode === "simple") {
-    const content = renderTemplate(normalized.simpleContent, variables).trim();
+    const content = renderTemplateFully(normalized.simpleContent, variables).trim();
     if (!content) return null;
     return content;
   }

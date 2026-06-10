@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   updateHandler: undefined as undefined | (() => void),
   insertContent: vi.fn(),
   setContent: vi.fn(),
+  chainClearContent: vi.fn(),
   chainInserted: [] as unknown[],
   ensureSession: vi.fn(async () => true),
   loadSessions: vi.fn(),
@@ -32,7 +33,10 @@ vi.mock('@tiptap/react', () => ({
   useEditor: (options: Record<string, unknown>) => {
     mocks.editorOptions = options;
     const chain = {
-      clearContent: vi.fn(() => chain),
+      clearContent: vi.fn(() => {
+        mocks.chainClearContent();
+        return chain;
+      }),
       insertContent: vi.fn((content: unknown) => {
         mocks.chainInserted.push(content);
         return chain;
@@ -116,9 +120,20 @@ vi.mock('../../MainContent', () => ({
 }));
 
 vi.mock('../../components/input/SlashCommandMenu', () => ({
-  SlashCommandMenu: ({ selected }: { selected: number }) => React.createElement(
+  SlashCommandMenu: ({ commands, selected, onSelect }: { commands: Array<{ name: string }>; selected: number; onSelect: (command: { name: string }) => void }) => React.createElement(
     'div',
     { 'data-testid': 'slash-menu', 'data-selected': String(selected) },
+    commands.map((command, index) => React.createElement(
+      'button',
+      {
+        key: command.name,
+        type: 'button',
+        'data-testid': `slash-command-${command.name}`,
+        'data-selected': String(index === selected),
+        onClick: () => onSelect(command),
+      },
+      command.name,
+    )),
   ),
 }));
 
@@ -135,7 +150,36 @@ vi.mock('../../components/input/InputContextRow', () => ({
 }));
 
 vi.mock('../../components/input/InputControlBar', () => ({
-  InputControlBar: () => React.createElement('button', { type: 'button' }, 'send'),
+  InputControlBar: (props: {
+    onGoalOpen: () => void;
+    onGoalClose: () => void;
+    goalEditing: boolean;
+    goalDrafting?: boolean;
+    onSlashToggle: () => void;
+    onSend: () => void;
+    slashBtnRef?: React.Ref<HTMLButtonElement>;
+  }) => React.createElement(
+    'div',
+    null,
+    React.createElement('button', {
+      type: 'button',
+      'data-testid': 'goal-toggle',
+      'data-goal-editing': String(props.goalEditing),
+      'data-goal-drafting': String(!!props.goalDrafting),
+      onClick: props.goalEditing ? props.onGoalClose : props.onGoalOpen,
+    }, 'goal'),
+    React.createElement('button', {
+      type: 'button',
+      ref: props.slashBtnRef,
+      'data-testid': 'slash-toggle',
+      onClick: props.onSlashToggle,
+    }, 'slash'),
+    React.createElement('button', {
+      type: 'button',
+      'data-testid': 'send',
+      onClick: props.onSend,
+    }, 'send'),
+  ),
 }));
 
 vi.mock('../../components/input/SessionConfirmationPrompt', () => ({
@@ -219,6 +263,16 @@ function tiptapKeyDownHandler(): ((view: unknown, event: KeyboardEvent) => boole
   return editorProps?.handleKeyDown as ((view: unknown, event: KeyboardEvent) => boolean | void) | undefined;
 }
 
+async function typeEditorText(text: string) {
+  await waitFor(() => {
+    expect(mocks.updateHandler).toBeTypeOf('function');
+  });
+  mocks.editorText = text;
+  act(() => {
+    mocks.updateHandler?.();
+  });
+}
+
 function installImageCompressionMocks() {
   const close = vi.fn();
   vi.stubGlobal('createImageBitmap', vi.fn(async () => ({
@@ -246,6 +300,7 @@ describe('InputArea paste and slash menu behavior', () => {
     mocks.editorOptions = undefined;
     mocks.editorText = '';
     mocks.updateHandler = undefined;
+    mocks.chainClearContent.mockClear();
     mocks.chainInserted = [];
     seedInputState();
     mocks.hanaFetch.mockResolvedValue(new Response('{}', { status: 200 }));
@@ -298,6 +353,46 @@ describe('InputArea paste and slash menu behavior', () => {
       type: 'skillBadge',
       attrs: { name: 'zz-second' },
     });
+    expect(mocks.wsSend).not.toHaveBeenCalled();
+  });
+
+  it('keeps typed text visible when initial goal mode starts', async () => {
+    render(React.createElement(InputArea));
+    await typeEditorText('修复目标模式草稿');
+    mocks.setContent.mockClear();
+
+    fireEvent.click(screen.getByTestId('goal-toggle'));
+
+    expect(mocks.setContent).not.toHaveBeenCalledWith('', expect.anything());
+    expect(screen.getByTestId('goal-toggle').getAttribute('data-goal-drafting')).toBe('true');
+  });
+
+  it('opens the skill menu from the star button while drafting an initial goal', async () => {
+    render(React.createElement(InputArea));
+    await typeEditorText('修复目标模式草稿');
+
+    fireEvent.click(screen.getByTestId('goal-toggle'));
+    fireEvent.click(screen.getByTestId('slash-toggle'));
+
+    expect(await screen.findByTestId('slash-menu')).toBeTruthy();
+  });
+
+  it('selects a slash skill on Enter while drafting an initial goal instead of submitting the goal', async () => {
+    render(React.createElement(InputArea));
+
+    fireEvent.click(screen.getByTestId('goal-toggle'));
+    await typeEditorText('/zz');
+
+    await screen.findByTestId('slash-menu');
+    fireEvent.keyDown(screen.getByTestId('editor'), { key: 'ArrowDown' });
+    fireEvent.keyDown(screen.getByTestId('editor'), { key: 'Enter' });
+
+    expect(mocks.chainInserted).toContainEqual({
+      type: 'skillBadge',
+      attrs: { name: 'zz-second' },
+    });
+    expect(mocks.chainClearContent).toHaveBeenCalledTimes(1);
+    expect(mocks.hanaFetch).not.toHaveBeenCalledWith('/api/session-goal', expect.anything());
     expect(mocks.wsSend).not.toHaveBeenCalled();
   });
 

@@ -8,8 +8,11 @@ import {
   createComputerUseHelperAppBundle,
   computerUseHelperOutputDir,
   patchCuaDriverAppStateSource,
+  patchCuaDriverAgentCursorSource,
   patchCuaDriverCheckPermissionsToolSource,
   patchCuaDriverClickToolSource,
+  patchCuaDriverDragToolSource,
+  patchCuaDriverGetWindowStateToolSource,
   patchCuaDriverPermissionsSource,
   resolveComputerUseHelperBuildArch,
   shouldBuildComputerUseHelper,
@@ -167,6 +170,151 @@ describe("Computer Use helper build script", () => {
     expect(patched).toContain('"show_default_ui"');
     expect(patched).toContain('"show_default_ui": "AXShowDefaultUI"');
     expect(patchCuaDriverClickToolSource(patched)).toBe(patched);
+  });
+
+  it("patches Cua get_window_state to park the cursor in observed target windows", () => {
+    const source = `import CuaDriverCore
+import Foundation
+import MCP
+
+public enum GetWindowStateTool {
+        invoke: { arguments in
+            if window.pid != pid {
+                return errorResult(
+                    "window_id \\(windowId) belongs to pid \\(window.pid), not pid "
+                    + "\\(rawPid). Call \`list_windows({pid: \\(rawPid)})\` to get this "
+                    + "pid's own windows.")
+            }
+
+            // Re-read the persisted capture_mode on every invocation so a
+        }
+
+    /// Mode-aware summary block. First line is always a ✅ headline with
+    private static func buildSummary() {}
+}
+`;
+
+    const patched = patchCuaDriverGetWindowStateToolSource(source);
+
+    expect(patched).toContain("import CoreGraphics");
+    expect(patched).toContain("hanaParkAgentCursorInObservedWindow");
+    expect(patched).toContain("AgentCursor.shared.pinAbove(pid: pid, windowId: window.id)");
+    expect(patched).toContain("window.isOnScreen");
+    expect(patched).toContain("AgentCursor.shared.setPosition(point)");
+    expect(patched).toContain("AgentCursor.shared.show()");
+    expect(patched).toContain("reappears inside the same app");
+    expect(patchCuaDriverGetWindowStateToolSource(patched)).toBe(patched);
+  });
+
+  it("patches Cua AgentCursor to keep minimized targets bound without drifting onto the desktop", () => {
+    const source = `    public func show() {
+        guard isEnabled else { return }
+        let win = ensureWindow()
+        if !win.isVisible {
+            win.orderFrontRegardless()
+        }
+    }
+
+    public func pinAbove(pid: pid_t) {
+        guard isEnabled else { return }
+        pinnedPid = pid
+        missedPinCount = 0  // fresh pin — any earlier miss streak is stale
+        ensureActivationObserver()
+        reapplyPinAbove()
+        startContinuousRepin()
+    }
+
+    private func reapplyPinAbove() {
+        guard isEnabled, let pid = pinnedPid else { return }
+        let win = ensureWindow()
+        let targetWindow = WindowEnumerator.visibleWindows()
+            .filter { $0.pid == pid && $0.layer == 0 && $0.isOnScreen }
+            .max(by: { $0.zIndex < $1.zIndex })
+
+            // Target has no on-screen window — it's minimized, hidden,
+            // or on another Space. Drop the overlay entirely rather
+            // than floating it above other apps: there's nothing to
+            // pin above, and showing a stranded cursor over the user's
+            // actual frontmost app is worse than nothing.
+            //
+            // BUT — a single missed tick is usually just a mid-raise
+            // frame where \`visibleWindows()\` transiently returns no
+            // match. Hiding on the first miss caused the overlay to
+            // vanish for ~1s during every click. Require ≥2
+            // consecutive misses before hiding; the next scheduled
+            // repin tick (60–300ms later) will catch the window
+            // once it's back on screen and reset the counter.
+            missedPinCount += 1
+            if missedPinCount >= 2 {
+                if win.isVisible { win.orderOut(nil) }
+                pinnedWindowId = nil
+            }
+            return
+        guard let targetWindow else { return }
+        win.order(.above, relativeTo: targetWindow.id)
+        pinnedWindowId = targetWindow.id
+    }
+
+    public func finishClick(pid: pid_t) async {
+        _ = pid  // reserved for future per-pid dwell / hide policy
+        guard isEnabled else { return }
+    }
+`;
+
+    const patched = patchCuaDriverAgentCursorSource(source);
+
+    expect(patched).toContain("Hana keeps the target binding alive while minimized");
+    expect(patched).toContain("hanaPinnedTargetIsVisible");
+    expect(patched).toContain("hanaPinnedWindowBindingIsVisible");
+    expect(patched).toContain("hanaHideIfPinnedTargetUnavailable");
+    expect(patched).toContain("if hanaHideIfPinnedTargetUnavailable() { return }");
+    expect(patched).toContain("public func pinAbove(pid: pid_t, windowId: Int? = nil)");
+    expect(patched).toContain("pinnedWindowId == nil || window.id == pinnedWindowId");
+    expect(patched).toContain("if win.isVisible { win.orderOut(nil) }");
+    expect(patched).toContain("WindowEnumerator.visibleWindows()");
+    expect(patched).not.toContain("pinnedWindowId = nil");
+    expect(patched).not.toContain("pinnedPid = nil");
+    expect(patchCuaDriverAgentCursorSource(patched)).toBe(patched);
+  });
+
+  it("patches pointer tools to keep the native cursor bound to the target window", () => {
+    const clickSource = `private static func performElementClick(
+        pid: Int32, windowId: UInt32, index: Int, actionName: String
+    ) async -> CallTool.Result {
+            if let center = AXInput.screenCenter(of: element) {
+                await MainActor.run {
+                    AgentCursor.shared.pinAbove(pid: pid)
+                }
+            }
+            await AgentCursor.shared.finishClick(pid: pid)
+    }
+    private static func performPixelClick(
+        pid: Int32, windowId: UInt32?
+    ) async -> CallTool.Result {
+            if let index = elementIndex, let windowId {
+                return await performElementClick(pid: pid, windowId: windowId, index: index, actionName: actionName ?? "press")
+            }
+            await MainActor.run {
+                AgentCursor.shared.pinAbove(pid: pid)
+            }
+            await AgentCursor.shared.finishClick(pid: pid)
+    }
+`;
+    const dragSource = `        await MainActor.run {
+            AgentCursor.shared.pinAbove(pid: pid)
+        }
+        await AgentCursor.shared.finishClick(pid: pid)
+`;
+
+    const patchedClick = patchCuaDriverClickToolSource(clickSource);
+    const patchedDrag = patchCuaDriverDragToolSource(dragSource);
+
+    expect(patchedClick).toContain("AgentCursor.shared.pinAbove(pid: pid, windowId: windowId.map { Int($0) })");
+    expect(patchedClick).toContain("AgentCursor.shared.pinAbove(pid: pid, windowId: Int(windowId))");
+    expect(patchedClick).toContain("AgentCursor.shared.finishClick(pid: pid, windowId: windowId.map { Int($0) })");
+    expect(patchedClick).toContain("AgentCursor.shared.finishClick(pid: pid, windowId: Int(windowId))");
+    expect(patchedDrag).toContain("AgentCursor.shared.pinAbove(pid: pid, windowId: windowId.map { Int($0) })");
+    expect(patchedDrag).toContain("AgentCursor.shared.finishClick(pid: pid, windowId: windowId.map { Int($0) })");
   });
 
   it("patches Cua permissions so read-only status checks avoid ScreenCaptureKit probes", () => {

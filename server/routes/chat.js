@@ -263,6 +263,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
   let disconnectAbortTimer = null;
   const DISCONNECT_ABORT_GRACE_MS = 15_000;
   const DEFERRED_STATUS_FALSE_IDLE_MS = 15_000;
+  const SESSION_GOAL_DEFERRED_STATUS_FALSE_IDLE_MS = 2_000;
   const sessionState = new Map(); // sessionPath -> shared stream state
 
   function cancelDisconnectAbort() {
@@ -406,6 +407,14 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
     ss.deferredStatusFalseTimer = null;
   }
 
+  function deferredStatusFalseIdleMs(sessionPath, ss) {
+    if (ss?.currentStreamReason === SESSION_GOAL_AUTO_REVIEW_REASON) return DEFERRED_STATUS_FALSE_IDLE_MS;
+    const goal = engine.getSessionGoal?.(sessionPath);
+    return goal?.status === "active"
+      ? SESSION_GOAL_DEFERRED_STATUS_FALSE_IDLE_MS
+      : DEFERRED_STATUS_FALSE_IDLE_MS;
+  }
+
   function broadcastStreamingStopped(sessionPath, ss, extra = {}) {
     clearDeferredStatusFalse(ss);
     if (ss) {
@@ -463,7 +472,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       } else {
         broadcastStreamingStopped(sessionPath, ss, stopExtra);
       }
-    }, DEFERRED_STATUS_FALSE_IDLE_MS);
+    }, deferredStatusFalseIdleMs(sessionPath, ss));
   }
 
   function finishStreamingState(ss) {
@@ -690,6 +699,19 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
     const ss = sessionPath ? getState(sessionPath) : null;
     if (ss?.isStreaming && event.type !== "turn_end" && event.type !== "session_status") {
       ss.providerTurnEnded = false;
+    }
+
+    if (event.type === "goal_acceptance_start") {
+      if (!ss || !event.block) return;
+      ss.hasOutput = true;
+      emitStreamEvent(sessionPath, ss, {
+        type: "content_block",
+        block: {
+          ...event.block,
+          type: "goal_acceptance",
+        },
+      });
+      return;
     }
 
     // Helper: feed CardParser, emit card events or pass text through as text_delta

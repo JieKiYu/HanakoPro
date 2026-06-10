@@ -306,6 +306,93 @@ describe("macos Cua provider", () => {
     });
   });
 
+  it("prefers a running app window matching the requested title", async () => {
+    const { runner, calls } = makeRunner((_command, args) => {
+      if (args[0] === "list_apps") {
+        return rawResult({
+          apps: [{
+            pid: 844,
+            bundle_id: "com.hanakopro.app",
+            name: "HanakoPro",
+            running: true,
+          }],
+        });
+      }
+      if (args[0] === "list_windows") {
+        return rawResult({
+          windows: [
+            {
+              window_id: 10725,
+              pid: 844,
+              app_name: "HanakoPro",
+              title: "HanakoPro",
+              bounds: { x: 40, y: 80, width: 1200, height: 800 },
+              layer: 0,
+              z_index: 9,
+              is_on_screen: true,
+              on_current_space: true,
+            },
+            {
+              window_id: 10726,
+              pid: 844,
+              app_name: "HanakoPro",
+              title: "Browser",
+              bounds: { x: 80, y: 100, width: 1000, height: 760 },
+              layer: 0,
+              z_index: 3,
+              is_on_screen: true,
+              on_current_space: true,
+            },
+          ],
+        });
+      }
+      throw new Error(`unexpected helper tool: ${args[0]}`);
+    });
+    const provider = createMacosCuaProvider({
+      platform: "darwin",
+      command: "/tmp/cua-driver",
+      runner,
+      autoStartDaemon: false,
+      cursorEnabled: false,
+    });
+
+    const lease = await provider.createLease({}, {
+      appId: "com.hanakopro.app",
+      windowTitle: "Browser",
+    });
+
+    expect(calls.map((call) => call.args[0])).toEqual(["list_apps", "list_windows"]);
+    expect(lease).toMatchObject({
+      appId: "com.hanakopro.app",
+      windowId: "10726",
+      providerState: { windowTitle: "Browser" },
+    });
+  });
+
+  it("hides Hana's native cursor when the provider stops", async () => {
+    const { runner, calls } = makeRunner((_command, args) => {
+      if (args[0] === "set_agent_cursor_enabled") {
+        return rawResult({ ok: true });
+      }
+      throw new Error(`unexpected helper tool: ${args[0]}`);
+    });
+    const provider = createMacosCuaProvider({
+      platform: "darwin",
+      command: "/tmp/hana-computer-use-helper",
+      runner,
+      autoStartDaemon: false,
+    });
+
+    await expect(provider.stop()).resolves.toMatchObject({
+      stopped: true,
+      cursor: { hidden: true },
+    });
+
+    expect(calls.map((call) => [call.args[0], JSON.parse(call.args[1])])).toEqual([
+      ["set_agent_cursor_enabled", { enabled: false }],
+    ]);
+  });
+
   it("configures Hana's native cursor before controlling an app", async () => {
     const { runner, calls } = makeRunner((_command, args) => {
       if (args[0] === "set_agent_cursor_style") {
@@ -338,6 +425,16 @@ describe("macos Cua provider", () => {
           bundle_id: "com.apple.calculator",
           name: "Calculator",
           windows: [{ window_id: 10725, title: "Calculator" }],
+        });
+      }
+      if (args[0] === "hana_activate_app") {
+        expect(JSON.parse(args[1])).toEqual({ pid: 844, window_id: 10725 });
+        return rawResult({
+          pid: 844,
+          window_id: 10725,
+          activated: true,
+          raised: true,
+          active: true,
         });
       }
       if (args[0] === "get_window_state") {
@@ -373,9 +470,89 @@ describe("macos Cua provider", () => {
       "list_apps",
       "launch_app",
     ]);
+    expect(calls[5].args[0]).toBe("hana_activate_app");
     expect(calls.filter((call) => call.args[0] === "set_agent_cursor_enabled")).toHaveLength(1);
     expect(calls.filter((call) => call.args[0] === "set_agent_cursor_style")).toHaveLength(1);
     expect(calls.filter((call) => call.args[0] === "set_agent_cursor_motion")).toHaveLength(1);
+  });
+
+  it("brings the bundled target app forward only when a Computer Use lease starts", async () => {
+    const { runner, calls } = makeRunner((_command, args) => {
+      if (args[0] === "set_agent_cursor_style" || args[0] === "set_agent_cursor_motion" || args[0] === "set_agent_cursor_enabled") {
+        return rawResult({ ok: true });
+      }
+      if (args[0] === "list_apps") {
+        return rawResult({
+          apps: [{
+            pid: 844,
+            bundle_id: "com.apple.calculator",
+            name: "Calculator",
+            running: true,
+          }],
+        });
+      }
+      if (args[0] === "list_windows") {
+        return rawResult({
+          windows: [{
+            window_id: 10725,
+            pid: 844,
+            app_name: "Calculator",
+            title: "Calculator",
+            bounds: { x: 40, y: 80, width: 600, height: 400 },
+            layer: 0,
+            z_index: 9,
+            is_on_screen: true,
+            on_current_space: true,
+          }],
+        });
+      }
+      if (args[0] === "hana_activate_app") {
+        return rawResult({
+          pid: 844,
+          window_id: 10725,
+          activated: true,
+          raised: true,
+          active: true,
+        });
+      }
+      if (args[0] === "get_window_state") {
+        return rawResult(
+          { tree_markdown: "- [14] AXButton \"Three\"" },
+          [
+            { type: "text", text: "✅ Calculator\n- [14] AXButton \"Three\"" },
+            { type: "image", mimeType: "image/png", data: "abc" },
+          ],
+        );
+      }
+      if (args[0] === "click") {
+        return rawResult({ ok: true });
+      }
+      throw new Error(`unexpected helper tool: ${args[0]}`);
+    });
+    const provider = createMacosCuaProvider({
+      platform: "darwin",
+      command: "/tmp/hana-computer-use-helper",
+      runner,
+      autoStartDaemon: false,
+    });
+
+    const lease = await provider.createLease({}, { appId: "com.apple.calculator" });
+    await provider.getAppState({}, { ...lease, leaseId: "lease-1" });
+    await provider.performAction({}, { ...lease, leaseId: "lease-1" }, { type: "click_element", elementId: "14" });
+
+    expect(calls.map((call) => call.args[0])).toEqual([
+      "set_agent_cursor_style",
+      "set_agent_cursor_motion",
+      "set_agent_cursor_enabled",
+      "list_apps",
+      "list_windows",
+      "hana_activate_app",
+      "get_window_state",
+      "click",
+    ]);
+    const activateCall = calls.find((call) => call.args[0] === "hana_activate_app");
+    expect(JSON.parse(activateCall.args[1])).toEqual({ pid: 844, window_id: 10725 });
+    expect(calls.filter((call) => call.args[0] === "hana_activate_app")).toHaveLength(1);
   });
 
   it("starts the bundled helper daemon before using cached element-index tools", async () => {
@@ -438,6 +615,7 @@ describe("macos Cua provider", () => {
       "set_agent_cursor_enabled",
       "list_apps",
       "launch_app",
+      "hana_activate_app",
     ]);
   });
 
@@ -573,6 +751,33 @@ describe("macos Cua provider", () => {
     });
   });
 
+  it("keeps a minimized or hidden target usable when Cua returns an AX tree without a screenshot", async () => {
+    const { runner } = makeRunner((_command, args) => {
+      expect(args[0]).toBe("get_window_state");
+      return rawResult(
+        {
+          tree_markdown: "- [14] AXButton \"Three\"",
+          screenshot_width: undefined,
+          screenshot_height: undefined,
+        },
+        [{ type: "text", text: "✅ Calculator (screenshot capture failed)\n- [14] AXButton \"Three\"" }],
+      );
+    });
+    const provider = createMacosCuaProvider({ platform: "darwin", command: "/tmp/cua-driver", runner });
+
+    const snapshot = await provider.getAppState({}, {
+      leaseId: "lease-1",
+      appId: "com.apple.calculator",
+      windowId: "10725",
+      providerState: { pid: 844, windowId: 10725 },
+    });
+
+    expect(snapshot.screenshot).toBeNull();
+    expect(snapshot.elements).toEqual([
+      { elementId: "14", role: "AXButton", label: "Three", actions: [], enabled: true, bounds: null },
+    ]);
+  });
+
   it("maps clean text input to Cua CLI tools without enabling pixel clicks", async () => {
     const { runner, calls } = makeRunner(() => rawResult({ ok: true }));
     const provider = createMacosCuaProvider({ platform: "darwin", command: "/tmp/cua-driver", runner });
@@ -678,9 +883,30 @@ describe("macos Cua provider", () => {
         spring: 1,
         glide_duration_ms: 520,
         dwell_after_click_ms: 160,
-        idle_hide_ms: 2600,
+        idle_hide_ms: 60000,
       },
     });
+  });
+
+  it("keeps Hana's native cursor visible across goal acceptance thinking gaps", async () => {
+    const { runner, calls } = makeRunner(() => rawResult({ ok: true }));
+    const provider = createMacosCuaProvider({
+      platform: "darwin",
+      command: "/tmp/hana-computer-use-helper",
+      runner,
+    });
+    const lease = {
+      leaseId: "lease-1",
+      appId: "com.apple.calculator",
+      windowId: "10725",
+      providerState: { pid: 844, windowId: 10725, bundleId: "com.apple.calculator" },
+    };
+
+    await provider.performAction({}, lease, { type: "click_element", elementId: "14" });
+
+    const clickCall = calls.find((call) => call.command === "/tmp/hana-computer-use-helper" && call.args[0] === "click");
+    const cursorConfig = JSON.parse(clickCall.options.env.HANA_AGENT_CURSOR_CONFIG_JSON);
+    expect(cursorConfig.motion.idle_hide_ms).toBeGreaterThanOrEqual(30000);
   });
 
   it("maps element-indexed actions to Cua element_index calls", async () => {

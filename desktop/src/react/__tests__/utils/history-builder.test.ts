@@ -103,6 +103,107 @@ describe('buildItemsFromHistory user image restoration', () => {
     expect(finalAssistant.data.blocks?.map(block => block.type)).toEqual(['text']);
   });
 
+  it('从历史 session_goal complete 工具结果恢复独立验真结论块', () => {
+    const items = buildItemsFromHistory({
+      messages: [{
+        id: 'a-goal',
+        role: 'assistant',
+        content: '',
+        toolCalls: [{
+          name: 'session_goal',
+          args: { action: 'complete' },
+          done: true,
+          success: true,
+          details: {
+            action: 'complete',
+            summary: '验真已合：已复走预览入口，确认页面可见，目标收束。\n目标用量：39187 tokens，用时约 1分 58 秒。',
+            metrics: { tokenUsage: 39187, elapsedMs: 118000 },
+          },
+        }],
+      }],
+    });
+
+    const first = items[0];
+    expect(first.type).toBe('message');
+    if (first.type !== 'message') throw new Error('expected message');
+    expect(first.data.blocks?.map(block => block.type)).toEqual(['tool_group', 'goal_acceptance_conclusion']);
+    expect(first.data.blocks?.[1]).toEqual({
+      type: 'goal_acceptance_conclusion',
+      evidence: '验真已合：已复走预览入口，确认页面可见，目标收束。',
+      usage: '目标用量：39187 tokens，用时约 1分 58 秒。',
+    });
+  });
+
+  it('从历史恢复验真开场时放在验收工具组前', () => {
+    const items = buildItemsFromHistory({
+      messages: [{
+        id: 'a-review',
+        role: 'assistant',
+        content: '',
+        hasThinking: true,
+        toolCalls: [{
+          name: 'computer',
+          args: { action: 'get_app_state' },
+          done: true,
+          success: true,
+        }],
+      }],
+      blocks: [{
+        afterIndex: 0,
+        type: 'goal_acceptance',
+        title: '验真',
+        objective: '启动守一禅机画布预览.',
+        text: '这次要验的是：启动守一禅机画布预览.\n我会从真实运行的那条路进去。',
+      }],
+    });
+
+    const first = items[0];
+    expect(first.type).toBe('message');
+    if (first.type !== 'message') throw new Error('expected message');
+    expect(first.data.blocks?.map(block => block.type)).toEqual(['thinking', 'goal_acceptance', 'tool_group']);
+    expect(first.data.blocks?.[1]).toEqual({
+      type: 'goal_acceptance',
+      title: '验真',
+      objective: '启动守一禅机画布预览.',
+      text: '这次要验的是：启动守一禅机画布预览.\n我会从真实运行的那条路进去。',
+    });
+  });
+
+  it('从历史重建时隐藏验真卡片后的跨消息重复结论文本', () => {
+    const items = buildItemsFromHistory({
+      messages: [
+        { id: 'u1', role: 'user', content: '跑目标验收' },
+        {
+          id: 'a-goal',
+          role: 'assistant',
+          content: '',
+          toolCalls: [{
+            name: 'session_goal',
+            args: { action: 'complete' },
+            done: true,
+            success: true,
+            details: {
+              action: 'complete',
+              summary: '验真已合：已用 Hanako 内置浏览器打开本地预览并绑定 Browser 窗口可见检查，页面显示守一缝机诊断画布、Online 状态、6 板块/18 明细图/146 事件，且点击图表区域可响应。\n目标用量：37171 tokens，用时约 2分 55 秒。',
+              metrics: { tokenUsage: 37171, elapsedMs: 175000 },
+            },
+          }],
+        },
+        {
+          id: 'a-duplicate',
+          role: 'assistant',
+          content: '验真已合：已用 Hanako 内置浏览器打开本地预览并绑定 Browser 窗口可见检查，页面显示守一缝机诊断画布、Online 状态、6 板块 / 18 明细图 / 146 事件，且点击图表区域可响应。',
+        },
+      ],
+    });
+
+    expect(items.map(item => item.type === 'message' ? item.data.id : item.id)).toEqual(['u1', 'a-goal']);
+    const goalItem = items[1];
+    expect(goalItem.type).toBe('message');
+    if (goalItem.type !== 'message') throw new Error('expected message');
+    expect(goalItem.data.blocks?.map(block => block.type)).toEqual(['tool_group', 'goal_acceptance_conclusion']);
+  });
+
   it('隐藏 bridge 写入用户消息里的内部时间标签', () => {
     const items = buildItemsFromHistory({
       messages: [{

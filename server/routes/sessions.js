@@ -90,6 +90,7 @@ const TODO_COMPLETE_MESSAGE =
   "[Hana Todo] The user marked the current todo list as completed and removed it from the session UI. Treat every item in that list as completed. Create a new todo list only if new work needs tracking.";
 
 const HANA_COMPRESS_FORK_MARKER = "hana-compress-fork-marker";
+const HANA_SESSION_GOAL_AUTO_REVIEW = "hana-session-goal-auto-review";
 
 function compactionLabelFromReason(reason) {
   if (reason === "compress-fork") return "上下文已压缩";
@@ -97,11 +98,48 @@ function compactionLabelFromReason(reason) {
   return "上下文已自动压缩";
 }
 
+function compactGoalObjectiveForHistory(objective, max = 180) {
+  const oneLine = String(objective || "").replace(/\s+/g, " ").trim();
+  if (oneLine.length <= max) return oneLine;
+  return `${oneLine.slice(0, Math.max(0, max - 3)).trim()}...`;
+}
+
+function goalAcceptanceBlockFromCustomEntry(entry) {
+  if (entry?.customType !== HANA_SESSION_GOAL_AUTO_REVIEW) return null;
+  const details = entry.details && typeof entry.details === "object" ? entry.details : null;
+  const storedBlock = details?.acceptanceBlock && typeof details.acceptanceBlock === "object"
+    ? details.acceptanceBlock
+    : null;
+  if (storedBlock?.type === "goal_acceptance" && typeof storedBlock.text === "string") {
+    return {
+      ...storedBlock,
+      type: "goal_acceptance",
+      title: storedBlock.title || "验真",
+    };
+  }
+  const objective = compactGoalObjectiveForHistory(details?.objective);
+  return {
+    type: "goal_acceptance",
+    title: "验真",
+    objective,
+    text: [
+      objective ? `这次要验的是：${objective}` : "这次先不急着说成。",
+      "我会从用户真实会走的路径重新验一遍。",
+      "能看见、能操作、能复现，再把它收成一句有证据的话。",
+    ].join("\n"),
+    aspects: [
+      { key: "goal", label: "闭环" },
+      { key: "evidence", label: "凭据" },
+    ],
+  };
+}
+
 function visibleMessagesAndCompactionsFromEntries(entries) {
   const messages = [];
   const blocks = [];
   const compactions = [];
   const hiddenEntryIds = new Set();
+  const pendingGoalAcceptanceBlocks = [];
 
   for (const entry of Array.isArray(entries) ? entries : []) {
     if (entry?.type !== "custom" || entry.customType !== HANA_COMPRESS_FORK_MARKER) continue;
@@ -137,6 +175,12 @@ function visibleMessagesAndCompactionsFromEntries(entries) {
         label: normalizedEntry.data?.label || compactionLabelFromReason("compress-fork"),
         timestamp: normalizedEntry.timestamp || null,
       });
+      continue;
+    }
+
+    if (normalizedEntry?.type === "custom_message" && normalizedEntry.customType === HANA_SESSION_GOAL_AUTO_REVIEW) {
+      const block = goalAcceptanceBlockFromCustomEntry(normalizedEntry);
+      if (block) pendingGoalAcceptanceBlocks.push(block);
       continue;
     }
 
@@ -177,6 +221,11 @@ function visibleMessagesAndCompactionsFromEntries(entries) {
           images: images.length ? images : undefined,
           ...(m.timestamp ? { timestamp: m.timestamp } : {}),
         });
+        if (pendingGoalAcceptanceBlocks.length > 0) {
+          for (const block of pendingGoalAcceptanceBlocks.splice(0)) {
+            blocks.push({ ...block, afterIndex: messages.length - 1 });
+          }
+        }
         lastVisibleMessageId = id;
         globalIdx++;
       }

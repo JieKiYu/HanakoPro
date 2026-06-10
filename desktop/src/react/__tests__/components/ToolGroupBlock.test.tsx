@@ -257,6 +257,51 @@ describe('ToolGroupBlock', () => {
     expect(screen.getByText('tool._fallback.done')).toBeTruthy();
   });
 
+  it('renders goal acceptance conclusion outside the tool group and hides duplicate conclusion text', () => {
+    const { container } = render(
+      <AssistantMessage
+        showAvatar={false}
+        sessionPath="/sessions/main.jsonl"
+        readOnly
+        message={{
+          id: 'a-goal-conclusion',
+          role: 'assistant',
+          blocks: [
+            {
+              type: 'tool_group',
+              collapsed: false,
+              tools: [{
+                name: 'session_goal',
+                args: { action: 'complete' },
+                done: true,
+                success: true,
+                details: { action: 'complete' },
+              }],
+            },
+            {
+              type: 'goal_acceptance_conclusion',
+              evidence: '验真已合：已复走预览入口，确认页面可见，目标收束。',
+              usage: '目标用量：39187 tokens，用时约 1分 58 秒。',
+            },
+            {
+              type: 'text',
+              html: '<p>验真已合：已复走预览入口，确认页面可见，目标收束。</p>',
+              source: '验真已合：已复走预览入口，确认页面可见，目标收束。',
+            },
+          ],
+        }}
+      />,
+    );
+
+    const conclusion = screen.getByText('验真已合：已复走预览入口，确认页面可见，目标收束。');
+    const conclusionCard = conclusion.closest('[class*="goalAcceptanceConclusion"]');
+    const toolGroup = container.querySelector('[class*="toolGroup"]');
+    expect(conclusionCard).toBeTruthy();
+    expect(toolGroup).toBeTruthy();
+    expect(toolGroup?.contains(conclusionCard)).toBe(false);
+    expect(screen.getAllByText('验真已合：已复走预览入口，确认页面可见，目标收束。')).toHaveLength(1);
+  });
+
   it('shows only one browser reply tag at the latest assistant message for a completed turn', async () => {
     const items: ChatListItem[] = [
       {

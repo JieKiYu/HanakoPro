@@ -192,11 +192,14 @@ describe("browser screenshot vision adaptation", () => {
       type: "text",
       text: expect.stringContaining("browser.navigate"),
     }));
+    expect(result.content[0].text).toContain("无需再用正文重复说明同一入口");
+    expect(result.content[0].text).not.toContain("请继续找到或启动对应服务");
     expect(result.details).toEqual(expect.objectContaining({
       status: "launched",
       needsNavigation: true,
       navigationHint: expect.stringContaining("真实 URL"),
     }));
+    expect(result.details.navigationHint).toContain("无需再用正文重复说明同一入口");
   });
 
   it("allows text-only browser screenshots when auxiliary vision is enabled", async () => {

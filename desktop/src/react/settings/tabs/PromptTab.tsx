@@ -12,6 +12,7 @@ import {
   DEFAULT_ORIGIN_CONDUCT_PROMPT,
   DEFAULT_ORIGIN_MOOD_PROMPT,
   DEFAULT_ORIGIN_ROOT_PROMPT,
+  getOriginPromptModuleTemplates,
   normalizePromptComposerConfig,
 } from '../../../../../shared/prompt-composer.js';
 
@@ -110,7 +111,7 @@ const MODULE_HINTS: Record<PromptModuleKey, string> = {
   形: 'Hana 的身份、人格与关系设定',
   时: '当前时间、工作目录、运行环境',
   忆: '用户档案、置顶记忆、召回记忆',
-  器: '可用技能',
+  器: '工具行法与可用技能',
   令: '当前会话追加规则',
   照: '内照与 mood',
   德: '行动约束、确认边界、验证与交付方式',
@@ -177,20 +178,6 @@ function getEditableModuleContent(key: PromptModuleKey, origin: PromptOriginConf
   return '';
 }
 
-function compactModuleTemplate(key: PromptModuleKey, content: string) {
-  const body = content.trim();
-  return body ? `# ${key}\n\n${body}` : '';
-}
-
-function getReadonlyModuleTemplate(key: PromptModuleKey) {
-  if (key === '形') return compactModuleTemplate(key, '{{originPersonality}}');
-  if (key === '时') return compactModuleTemplate(key, ['{{workspace}}', '当前时日：{{currentDateTime}}'].join('\n'));
-  if (key === '忆') return compactModuleTemplate(key, ['用户档案：', '{{userProfile}}', '', '置顶记忆：', '{{pinnedMemory}}'].join('\n'));
-  if (key === '器') return compactModuleTemplate(key, '{{skills}}');
-  if (key === '令') return compactModuleTemplate(key, '{{appendSystemPrompt}}');
-  return '';
-}
-
 function formatErrorMessage(err: unknown, fallback: string) {
   return err instanceof Error ? err.message : fallback;
 }
@@ -207,27 +194,18 @@ export function PromptTab() {
   const [preview, setPreview] = useState<SystemPromptPreview | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewMode, setPreviewMode] = useState<PromptPreviewMode>('markdown');
-  const [previewRuntimeFoundation, setPreviewRuntimeFoundation] = useState(false);
   const [moduleDialogKey, setModuleDialogKey] = useState<PromptModuleKey | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const autosaveTimerRef = useRef<number | null>(null);
-  const previewTimerRef = useRef<number | null>(null);
   const migrationKeyRef = useRef<string | null>(null);
 
   const fallbackModules = useMemo(() => {
-    const modules: PromptModule[] = [
-      { key: '核', content: displayOriginRoot(draft.origin) },
-      { key: '形', content: getReadonlyModuleTemplate('形') },
-      { key: '时', content: getReadonlyModuleTemplate('时') },
-      { key: '忆', content: getReadonlyModuleTemplate('忆') },
-      { key: '器', content: getReadonlyModuleTemplate('器') },
-      { key: '令', content: getReadonlyModuleTemplate('令') },
-    ];
-    if (draft.origin.includeMood === true) modules.push({ key: '照', content: displayOriginMood(draft.origin) });
-    modules.push({ key: '德', content: displayOriginConduct(draft.origin) });
-    return modules;
-  }, [draft.origin]);
+    const validKeys = new Set<PromptModuleKey>(MODULE_ORDER);
+    return getOriginPromptModuleTemplates(draft)
+      .filter((module): module is PromptModule => validKeys.has(module.key as PromptModuleKey))
+      .map(module => ({ key: module.key as PromptModuleKey, content: module.content }));
+  }, [draft]);
   const visibleModules = useMemo(() => {
     const modulesByKey = new Map<PromptModuleKey, PromptModule>();
     for (const module of fallbackModules) {
@@ -286,25 +264,26 @@ export function PromptTab() {
           promptComposer: normalizeDraft(nextDraft),
           cwd: typeof homeFolder === 'string' ? homeFolder : (typeof settingsConfig?.last_cwd === 'string' ? settingsConfig.last_cwd : undefined),
           memoryEnabled: settingsConfig?.memory?.enabled !== false,
-          includeRuntimeFoundation: previewRuntimeFoundation,
+          includeRuntimeFoundation: true,
         }),
         timeout: 60_000,
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      setPreview({
+      const nextPreview = {
         markdown: typeof data.markdown === 'string' ? data.markdown : '',
         content: typeof data.content === 'string' ? data.content : '',
         cwd: typeof data.cwd === 'string' ? data.cwd : undefined,
         model: data.model || null,
-      });
+      };
+      setPreview(nextPreview);
       if (options.open) setPreviewOpen(true);
     } catch (err: unknown) {
       if (!options.silent) setPreviewError(formatErrorMessage(err, '加载完整提示词失败'));
     } finally {
       setPreviewLoading(false);
     }
-  }, [agentId, previewRuntimeFoundation, settingsConfig?.last_cwd, settingsConfig?.memory?.enabled]);
+  }, [agentId, settingsConfig?.last_cwd, settingsConfig?.memory?.enabled]);
 
   const getToolOverride = (name: string) => draft.toolOverrides.find(tool => tool.name === name);
 
@@ -466,7 +445,6 @@ export function PromptTab() {
 
   useEffect(() => () => {
     if (autosaveTimerRef.current) window.clearTimeout(autosaveTimerRef.current);
-    if (previewTimerRef.current) window.clearTimeout(previewTimerRef.current);
   }, []);
 
   useEffect(() => {
@@ -492,15 +470,9 @@ export function PromptTab() {
   }, [agentId, showToast]);
 
   useEffect(() => {
-    if (!agentId) return;
-    if (previewTimerRef.current) window.clearTimeout(previewTimerRef.current);
-    previewTimerRef.current = window.setTimeout(() => {
-      void refreshSystemPromptPreview(draft, { silent: true });
-    }, 700);
-    return () => {
-      if (previewTimerRef.current) window.clearTimeout(previewTimerRef.current);
-    };
-  }, [agentId, draft, refreshSystemPromptPreview, settingsConfig?.last_cwd, settingsConfig?.memory?.enabled, previewRuntimeFoundation]);
+    if (!agentId || !previewOpen) return;
+    void refreshSystemPromptPreview(draft, { silent: true });
+  }, [agentId, draft, previewOpen, refreshSystemPromptPreview]);
 
   return (
     <div className={`${styles['settings-tab-content']} ${styles['active']}`} data-tab="prompt">
@@ -508,7 +480,7 @@ export function PromptTab() {
         <div className={styles['prompt-dao-hero']}>
           <div>
             <h2>提示词</h2>
-            <p>模块里保留可编辑模板变量；展开后的真实内容在完整提示词里查看。</p>
+            <p>模块保留模板变量；完整提示词展示运行时展开后的真实内容。</p>
           </div>
           <button
             type="button"
@@ -613,17 +585,9 @@ export function PromptTab() {
             <div className={styles['prompt-preview-header']}>
               <div>
                 <h3>完整提示词</h3>
-                <span>{previewRuntimeFoundation ? '含运行底座' : '仅提示词正文'}</span>
+                <span>运行时展开</span>
               </div>
               <div className={styles['prompt-preview-actions']}>
-                <button
-                  type="button"
-                  className={`${styles['prompt-preview-mode-toggle']} ${previewRuntimeFoundation ? styles['prompt-preview-mode-toggle-active'] : ''}`}
-                  aria-pressed={previewRuntimeFoundation}
-                  onClick={() => setPreviewRuntimeFoundation((enabled) => !enabled)}
-                >
-                  运行底座
-                </button>
                 {(['markdown', 'plain'] as const).map((mode) => (
                   <button
                     key={mode}
@@ -657,7 +621,7 @@ export function PromptTab() {
             <div className={styles['prompt-preview-header']}>
               <div>
                 <h3>{activeModule.key} · {MODULE_HINTS[activeModule.key]}</h3>
-                <span>{isEditableModuleKey(activeModule.key) ? '可编辑模块' : '来自完整提示词预览，只读'}</span>
+                <span>{isEditableModuleKey(activeModule.key) ? '可编辑模块' : '模块模板，只读'}</span>
               </div>
               <div className={styles['prompt-preview-actions']}>
                 {isEditableModuleKey(activeModule.key) && (

@@ -147,6 +147,67 @@ describe("SessionCoordinator", () => {
     ]);
   });
 
+  it("records goal elapsed time and token delta when completing a session goal", () => {
+    const sessionFile = path.join(tempDir, "goal-metrics.jsonl");
+    let contextTokens = 1000;
+    const emitted = [];
+    const coordinator = new SessionCoordinator({
+      agentsDir: tempDir,
+      getAgent: () => ({ id: "hana" }),
+      getActiveAgentId: () => "hana",
+      getModels: () => ({ authStorage: {}, modelRegistry: {}, resolveThinkingLevel: () => "medium" }),
+      getResourceLoader: () => ({ getSystemPrompt: () => "prompt" }),
+      getSkills: () => null,
+      buildTools: () => ({ tools: [], customTools: [] }),
+      emitEvent: (event, sessionPath) => emitted.push({ event, sessionPath }),
+      getHomeCwd: () => tempDir,
+      agentIdFromSessionPath: () => "hana",
+      switchAgentOnly: async () => {},
+      getConfig: () => ({}),
+      getPrefs: () => ({ getThinkingLevel: () => "medium" }),
+      getAgents: () => new Map(),
+      getActivityStore: () => null,
+      getAgentById: () => null,
+      listAgents: () => [],
+    });
+    coordinator.sessions.set(sessionFile, {
+      session: {
+        getContextUsage: () => ({ tokens: contextTokens, contextWindow: 200000 }),
+        agent: { state: { messages: [] } },
+      },
+      agentId: "hana",
+      lastTouchedAt: Date.now(),
+      unsub: vi.fn(),
+    });
+
+    const started = coordinator.setSessionGoal(sessionFile, "ship metrics").goal;
+    contextTokens = 1456;
+    const completed = coordinator.markSessionGoalComplete(sessionFile, "验了主路径").goal;
+
+    expect(started.metrics).toMatchObject({ contextBaselineTokens: 1000 });
+    expect(completed).toMatchObject({
+      status: "complete",
+      metrics: expect.objectContaining({
+        contextBaselineTokens: 1000,
+        contextCurrentTokens: 1456,
+        tokenUsage: 456,
+        estimatedTokens: 456,
+        tokenUsageSource: "context_delta",
+      }),
+    });
+    expect(completed.metrics.elapsedMs).toBeGreaterThanOrEqual(0);
+    expect(emitted.at(-1)).toEqual(expect.objectContaining({
+      sessionPath: sessionFile,
+      event: expect.objectContaining({
+        type: "session_goal",
+        goal: expect.objectContaining({
+          status: "complete",
+          metrics: expect.objectContaining({ tokenUsage: 456 }),
+        }),
+      }),
+    }));
+  });
+
   it("builds session tools with sandbox workspace pinned to the effective cwd", async () => {
     const agent = {
       id: "hana",
@@ -1686,6 +1747,7 @@ describe("SessionCoordinator", () => {
   it("triggers goal auto review as a hidden custom message", async () => {
     const sessionFile = path.join(tempDir, "goal-auto-review.jsonl");
     const sendCustomMessage = vi.fn(async () => {});
+    const setActiveToolsByName = vi.fn();
     const notifyTurn = vi.fn();
     const emitted = [];
     const coordinator = new SessionCoordinator({
@@ -1708,10 +1770,11 @@ describe("SessionCoordinator", () => {
       listAgents: () => [],
     });
     coordinator.sessions.set(sessionFile, {
-      session: { isStreaming: false, sendCustomMessage },
+      session: { isStreaming: false, sendCustomMessage, setActiveToolsByName },
       agentId: "hana",
+      toolNames: ["read", "browser", "computer", "session_goal"],
       goal: {
-        objective: "finish goal mode",
+        objective: "打开 Hanako 内部浏览器验收目标模式页面",
         status: "active",
         createdAt: "2026-06-06T00:00:00.000Z",
         updatedAt: "2026-06-06T00:00:00.000Z",
@@ -1730,11 +1793,134 @@ describe("SessionCoordinator", () => {
       }),
       { triggerTurn: true },
     );
+    const reviewContent = sendCustomMessage.mock.calls[0][0].content;
+    expect(sendCustomMessage.mock.calls[0][0].details).toMatchObject({
+      objective: "打开 Hanako 内部浏览器验收目标模式页面",
+      acceptanceBlock: expect.objectContaining({
+        type: "goal_acceptance",
+        title: "验真",
+        text: expect.stringContaining("这次要验的是"),
+      }),
+    });
+    expect(reviewContent).toContain("本轮验收侧重点");
+    expect(reviewContent).toContain("用户视角必须落到使用电脑（computer 工具）");
+    expect(reviewContent).toContain("打开页面只允许用 Hanako 内置浏览器（browser 工具）直接 navigate 到真实 URL");
+    expect(reviewContent).toContain("不要通过使用电脑去 Chrome/Safari");
+    expect(reviewContent).toContain("browser.navigate 打开真实 URL → browser.show");
+    expect(reviewContent).toContain("appId=\"com.hanakopro.app\" 且 windowTitle=\"Browser\"");
+    expect(reviewContent).toContain("使用电脑只负责把小鼠标绑定到 HanakoPro 的 Browser/内置浏览器窗口");
+    expect(reviewContent).toContain("目标应用和小鼠标的绑定必须持续存在");
+    expect(reviewContent).not.toContain("browser 工具只作");
+    expect(reviewContent).toContain("不要重复复述");
+    expect(reviewContent).toContain("不要为了推进验收而调用 todo_write");
+    expect(reviewContent).toContain("最短可验证链路");
+    expect(reviewContent).toContain("验收工具必须串行");
+    expect(reviewContent).toContain("简单目标只要一条证据链足以判断");
+    expect(setActiveToolsByName).toHaveBeenCalledWith(["browser", "computer", "session_goal"]);
     expect(notifyTurn).toHaveBeenCalledWith(sessionFile);
     expect(emitted.map(({ event }) => event)).toEqual([
       expect.objectContaining({ type: "session_status", isStreaming: true, reason: "goal_auto_review" }),
+      expect.objectContaining({
+        type: "goal_acceptance_start",
+        reason: "goal_auto_review",
+        block: expect.objectContaining({
+          type: "goal_acceptance",
+          title: "验真",
+          text: expect.stringContaining("这次要验的是"),
+        }),
+      }),
       expect.objectContaining({ type: "session_status", isStreaming: false, reason: "goal_auto_review" }),
     ]);
+  });
+
+  it("keeps full tools during goal auto review for non-web goals", async () => {
+    const sessionFile = path.join(tempDir, "goal-auto-review-code.jsonl");
+    const sendCustomMessage = vi.fn(async () => {});
+    const setActiveToolsByName = vi.fn();
+    const coordinator = new SessionCoordinator({
+      agentsDir: tempDir,
+      getAgent: () => ({ id: "hana" }),
+      getActiveAgentId: () => "hana",
+      getModels: () => ({ authStorage: {}, modelRegistry: {}, resolveThinkingLevel: () => "medium" }),
+      getResourceLoader: () => ({ getSystemPrompt: () => "prompt" }),
+      getSkills: () => null,
+      buildTools: () => ({ tools: [], customTools: [] }),
+      emitEvent: () => {},
+      getHomeCwd: () => tempDir,
+      agentIdFromSessionPath: () => "hana",
+      switchAgentOnly: async () => {},
+      getConfig: () => ({}),
+      getPrefs: () => ({ getThinkingLevel: () => "medium" }),
+      getAgents: () => new Map(),
+      getActivityStore: () => null,
+      getAgentById: () => null,
+      listAgents: () => [],
+    });
+    coordinator.sessions.set(sessionFile, {
+      session: { isStreaming: false, sendCustomMessage, setActiveToolsByName },
+      agentId: "hana",
+      toolNames: ["read", "browser", "computer", "session_goal"],
+      goal: {
+        objective: "修复 session goal 单元测试",
+        status: "active",
+        createdAt: "2026-06-06T00:00:00.000Z",
+        updatedAt: "2026-06-06T00:00:00.000Z",
+      },
+      lastTouchedAt: Date.now(),
+      unsub: vi.fn(),
+    });
+
+    await coordinator.triggerSessionGoalAutoReview(sessionFile);
+
+    expect(sendCustomMessage).toHaveBeenCalledOnce();
+    expect(setActiveToolsByName).not.toHaveBeenCalled();
+  });
+
+  it("does not suggest terminal or browser as a substitute when Computer Use is unavailable for visual goal review", async () => {
+    const sessionFile = path.join(tempDir, "goal-auto-review-no-computer.jsonl");
+    const sendCustomMessage = vi.fn(async () => {});
+    const setActiveToolsByName = vi.fn();
+    const coordinator = new SessionCoordinator({
+      agentsDir: tempDir,
+      getAgent: () => ({ id: "hana" }),
+      getActiveAgentId: () => "hana",
+      getModels: () => ({ authStorage: {}, modelRegistry: {}, resolveThinkingLevel: () => "medium" }),
+      getResourceLoader: () => ({ getSystemPrompt: () => "prompt" }),
+      getSkills: () => null,
+      buildTools: () => ({ tools: [], customTools: [] }),
+      emitEvent: () => {},
+      getHomeCwd: () => tempDir,
+      agentIdFromSessionPath: () => "hana",
+      switchAgentOnly: async () => {},
+      getConfig: () => ({}),
+      getPrefs: () => ({ getThinkingLevel: () => "medium" }),
+      getAgents: () => new Map(),
+      getActivityStore: () => null,
+      getAgentById: () => null,
+      listAgents: () => [],
+    });
+    coordinator.sessions.set(sessionFile, {
+      session: { isStreaming: false, sendCustomMessage, setActiveToolsByName },
+      agentId: "hana",
+      toolNames: ["read", "browser", "session_goal"],
+      goal: {
+        objective: "打开 Hanako 内部浏览器检查 localhost 页面",
+        status: "active",
+        createdAt: "2026-06-06T00:00:00.000Z",
+        updatedAt: "2026-06-06T00:00:00.000Z",
+      },
+      lastTouchedAt: Date.now(),
+      unsub: vi.fn(),
+    });
+
+    await coordinator.triggerSessionGoalAutoReview(sessionFile);
+
+    expect(sendCustomMessage).toHaveBeenCalledOnce();
+    const reviewContent = sendCustomMessage.mock.calls[0][0].content;
+    expect(reviewContent).toContain("当前会话没有可用的使用电脑（computer 工具）");
+    expect(reviewContent).toContain("不要用终端、browser 或静态检查替代屏幕侧验收");
+    expect(reviewContent).toContain("session_goal blocked");
+    expect(setActiveToolsByName).toHaveBeenCalledWith(["session_goal"]);
   });
 
   it("executeIsolated builds non-session tools from the master memory switch, not the focused session switch", async () => {

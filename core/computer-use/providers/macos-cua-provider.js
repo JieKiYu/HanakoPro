@@ -24,7 +24,9 @@ const HANA_CURSOR_MOTION = Object.freeze({
   spring: 1,
   glide_duration_ms: 520,
   dwell_after_click_ms: 160,
-  idle_hide_ms: 2600,
+  // Goal acceptance leaves multi-second gaps while the model reads screenshots
+  // and decides the next action; keep Hana's pointer visible across that loop.
+  idle_hide_ms: 60000,
 });
 const MACOS_CUA_ALLOWED_ACTIONS = [
   "click_element",
@@ -37,6 +39,7 @@ const MACOS_CUA_ALLOWED_ACTIONS = [
   "perform_secondary_action",
   "stop",
 ];
+const HANA_ACTIVATE_APP_TOOL = "hana_activate_app";
 
 function expandHome(filePath, homeDir = os.homedir()) {
   if (!filePath || !filePath.startsWith("~/")) return filePath;
@@ -306,8 +309,23 @@ function windowArea(win) {
   return Number.isFinite(width) && Number.isFinite(height) ? width * height : 0;
 }
 
-function scoreLaunchWindow(win) {
+function normalizeWindowTitle(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function scoreWindowTitleMatch(win, requestedTitle) {
+  const query = normalizeWindowTitle(requestedTitle);
+  const title = normalizeWindowTitle(win?.title || win?.name || "");
+  if (!query || !title) return 0;
+  if (title === query) return 10000;
+  if (title.includes(query) || query.includes(title)) return 8000;
+  const queryTokens = query.split(/[^a-z0-9]+/i).filter(Boolean);
+  return queryTokens.length && queryTokens.every((token) => title.includes(token)) ? 7000 : 0;
+}
+
+function scoreLaunchWindow(win, targetWindowTitle = null) {
   let score = 0;
+  score += scoreWindowTitleMatch(win, targetWindowTitle);
   if (win?.isOnScreen === true) score += 1000;
   if (win?.onCurrentSpace === true) score += 500;
   if (String(win?.title || "").trim()) score += 100;
@@ -317,20 +335,20 @@ function scoreLaunchWindow(win) {
   return score;
 }
 
-function selectLaunchWindow(windows, targetWindowId = null) {
+function selectLaunchWindow(windows, targetWindowId = null, targetWindowTitle = null) {
   if (!Array.isArray(windows) || !windows.length) return null;
   if (targetWindowId) {
     const explicit = windows.find((win) => String(win.windowId) === String(targetWindowId));
     if (explicit) return explicit;
   }
-  return [...windows].sort((a, b) => scoreLaunchWindow(b) - scoreLaunchWindow(a))[0] || null;
+  return [...windows].sort((a, b) => scoreLaunchWindow(b, targetWindowTitle) - scoreLaunchWindow(a, targetWindowTitle))[0] || null;
 }
 
 function normalizeLaunchPayload(payload, target) {
   const data = payload || {};
   const windows = normalizeWindows(data.windows);
   const pid = data.pid ?? data.process_id ?? data.processId ?? target?.pid ?? null;
-  const selectedWindow = selectLaunchWindow(windows, target?.windowId);
+  const selectedWindow = selectLaunchWindow(windows, target?.windowId, target?.windowTitle);
   const windowId = target?.windowId || selectedWindow?.windowId || null;
   if (pid == null || windowId == null) {
     throw computerUseError(
@@ -347,6 +365,7 @@ function normalizeLaunchPayload(payload, target) {
       windowId: Number(windowId),
       appName: data.name || data.app_name || target?.name || null,
       bundleId: data.bundle_id || data.bundleId || target?.appId || null,
+      windowTitle: selectedWindow?.title || null,
     },
   };
 }
@@ -378,7 +397,7 @@ function runningPid(app) {
 
 function normalizeRunningAppLease(app, windows, target = {}) {
   const pid = runningPid(app);
-  const selectedWindow = selectLaunchWindow(windows, target.windowId);
+  const selectedWindow = selectLaunchWindow(windows, target.windowId, target.windowTitle);
   if (!pid || !selectedWindow) return null;
   const bundleId = app?.providerData?.bundleId || app?.appId || target.appId || null;
   return {
@@ -389,6 +408,7 @@ function normalizeRunningAppLease(app, windows, target = {}) {
       windowId: Number(selectedWindow.windowId),
       appName: app?.name || target.name || target.appName || null,
       bundleId,
+      windowTitle: selectedWindow?.title || null,
     },
   };
 }
@@ -465,18 +485,20 @@ function normalizeWindowState(result, lease) {
   const structured = getStructured(result) || {};
   const text = getText(result);
   const image = getImage(result);
-  if (!image?.data) {
+  if (!image?.data && !structured.tree_markdown && !structured.treeMarkdown && !text) {
     throw computerUseError(
       COMPUTER_USE_ERRORS.PROVIDER_CRASHED,
-      "Cua Driver response did not include screenshot image data.",
+      "Cua Driver response did not include screenshot image data or accessibility tree data.",
       { leaseId: lease.leaseId },
     );
   }
-  const screenshot = {
-    type: "image",
-    mimeType: image.mimeType || image.mime_type || "image/png",
-    data: image.data,
-  };
+  const screenshot = image?.data
+    ? {
+        type: "image",
+        mimeType: image.mimeType || image.mime_type || "image/png",
+        data: image.data,
+      }
+    : null;
   const display = normalizeScreenshotDisplay(structured);
 
   const elements = Array.isArray(structured.elements)
@@ -781,6 +803,35 @@ export function createMacosCuaProvider({
     await nativeCursorConfigPromise;
   }
 
+  async function hideNativeCursor() {
+    if (!resolvedCursorStyle || !bundledHanaHelper) return { hidden: false, reason: "native-cursor-unavailable" };
+    nativeCursorConfigPromise = null;
+    await ensureDaemonRunning();
+    await runTool("set_agent_cursor_enabled", { enabled: false });
+    return { hidden: true };
+  }
+
+  async function activateTargetApp(providerState = {}) {
+    if (!bundledHanaHelper) return null;
+    const pid = Number(providerState.pid);
+    if (!Number.isFinite(pid) || pid <= 0) return null;
+    const payload = { pid };
+    const windowId = Number(providerState.windowId);
+    if (Number.isFinite(windowId) && windowId > 0) {
+      payload.window_id = windowId;
+    }
+    try {
+      return getStructured(await runTool(HANA_ACTIVATE_APP_TOOL, payload)) || { ok: true };
+    } catch (err) {
+      const message = err?.message || String(err);
+      throw computerUseError(
+        COMPUTER_USE_ERRORS.PROVIDER_CRASHED,
+        `Computer Use could not bring the target app window forward: ${message}`,
+        { providerId, pid, windowId: payload.window_id || null },
+      );
+    }
+  }
+
   async function tryCreateLeaseFromRunningApp(target = {}) {
     const appsResult = await runTool("list_apps");
     const app = normalizeAppsPayload(getStructured(appsResult)).find((candidate) => appMatchesTarget(candidate, target));
@@ -903,12 +954,14 @@ export function createMacosCuaProvider({
         if (!Number.isFinite(pid) || !Number.isFinite(windowId)) {
           throw computerUseError(COMPUTER_USE_ERRORS.TARGET_NOT_FOUND, "Cua lease target requires pid and windowId.", { target });
         }
-        return {
+        const lease = {
           appId: target.appId || `pid:${pid}`,
           windowId: String(windowId),
           allowedActions: MACOS_CUA_ALLOWED_ACTIONS,
           providerState: { pid, windowId, appName: target.name || null, bundleId: target.appId || null },
         };
+        await activateTargetApp(lease.providerState);
+        return lease;
       }
 
       if (!target.appId && !target.name) {
@@ -917,10 +970,12 @@ export function createMacosCuaProvider({
 
       const runningLease = await tryCreateLeaseFromRunningApp(target);
       if (runningLease) {
-        return {
+        const lease = {
           ...runningLease,
           allowedActions: MACOS_CUA_ALLOWED_ACTIONS,
         };
+        await activateTargetApp(lease.providerState);
+        return lease;
       }
 
       const payload = target.appId ? { bundle_id: target.appId } : { name: target.name };
@@ -941,10 +996,12 @@ export function createMacosCuaProvider({
         }
       }
       if (!normalized && lastError) throw lastError;
-      return {
+      const lease = {
         ...normalized,
         allowedActions: MACOS_CUA_ALLOWED_ACTIONS,
       };
+      await activateTargetApp(lease.providerState);
+      return lease;
     },
 
     async getAppState(_ctx, lease) {
@@ -1033,7 +1090,8 @@ export function createMacosCuaProvider({
     },
 
     async stop() {
-      return { stopped: true };
+      const cursor = await hideNativeCursor();
+      return { stopped: true, cursor };
     },
   };
 }

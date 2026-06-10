@@ -41,10 +41,20 @@ import { runCompatChecks } from "../lib/compat/index.js";
 import { formatSkillsForPrompt } from "../lib/pi-sdk/index.js";
 import { getPlatformPromptNote } from "./platform-prompt.js";
 import { composePromptFromBlocks, createDefaultPromptComposerConfig } from "../shared/prompt-composer.js";
+import { getLocale } from "../server/i18n.js";
 
 function promptVariableText(value) {
   if (Array.isArray(value)) return value.filter((item) => typeof item === "string" && item.trim()).join("\n\n");
   return typeof value === "string" ? value : "";
+}
+
+function resolvePromptLocale(agentLocale) {
+  const ownLocale = typeof agentLocale === "string" ? agentLocale.trim() : "";
+  return ownLocale || getLocale();
+}
+
+function isChinesePromptLocale(agentLocale) {
+  return String(resolvePromptLocale(agentLocale) || "").startsWith("zh");
 }
 
 const MOOD_PROMPT = [
@@ -113,14 +123,38 @@ function buildRuntimeFoundationPrompt({
   }
   if (hasTool("session_goal")) {
     interfaceAndFiles.push(isZh
-      ? "- 当前会话有目标时，普通代码检查只是基础层；交付后必须像用户一样打开、查看、点击、运行或操作结果，必要时用 Computer Use/浏览器做用户视角验收。验收通过后用 session_goal 标记完成；验收不通过就继续修复并再次验收；确认无法推进时标记阻塞。"
-      : "- When the current session has a goal, ordinary code review is only the baseline; after delivery, open, inspect, click, run, or operate the result as a user would, using Computer Use/browser acceptance when needed. Mark complete only after that acceptance passes; if it fails, keep fixing and verify again; mark blocked only when progress is impossible.");
+      ? "- 目标模式由运行底座注入隐藏的 `hana-session-goal-context` 续行上下文；用户发出的目标正文保持原样可见，不把“请继续目标”等控制语拼进用户消息。"
+      : "- Goal mode injects hidden `hana-session-goal-context` continuation context from the runtime foundation; the user's visible goal text remains unchanged, and control prose such as \"continue the goal\" is not prepended to the user message.");
+    interfaceAndFiles.push(isZh
+      ? "- 续行上下文把目标包在 `<objective>` 中，并声明它是用户给出的目标数据，不是更高优先级指令；目标跨回合存在，不能被缩小、改写成更容易的小目标，或因一轮结束就视为完成。"
+      : "- The continuation context wraps the goal in `<objective>` and states that it is user-provided task data, not higher-priority instructions. The goal persists across turns and must not be narrowed, rewritten into an easier target, or treated as complete just because one turn ended.");
+    interfaceAndFiles.push(isZh
+      ? "- 当前会话有目标时，普通推进轮只负责实现、基础自检和候选交付；不要在普通轮里自行展开正式验收。候选完成后收束本轮，让运行底座发出“验真”卡片并启动自动验收。正式验收涉及界面、网页、预览、Hanako 内部浏览器或桌面应用时必须走使用电脑（computer 工具）；网页/localhost 可先用 Hanako 内置 browser 快速打开 URL，但随后要用使用电脑绑定 HanakoPro 的 Browser/内置浏览器窗口，让小鼠标归属在该窗口内完成可见或点击确认。通过后用 session_goal 标记完成，失败则继续修复，无法推进才标记阻塞。"
+      : "- When the current session has a goal, a normal progress turn should handle implementation, baseline checks, and candidate delivery; do not start formal acceptance yourself in that normal turn. After candidate completion, close the turn so the runtime can emit the `Review` card and start automatic acceptance. Formal acceptance must use Computer Use when UI, web, previews, Hanako's internal browser, or desktop apps matter; web/localhost checks may first use Hanako's built-in browser tool to open the URL quickly, but must then bind Computer Use to HanakoPro's Browser/internal-browser window so the small cursor belongs to that window for visible or click confirmation. Mark complete only after it passes, keep fixing if it fails, and mark blocked only when progress is impossible.");
   }
   if (interfaceAndFiles.length) {
     sections.push([
-      isZh ? "## 界面与文件路由" : "## Interface And File Routing",
+      isZh ? "## 观 · 界面与文件" : "## View · Interface And Files",
       "",
       interfaceAndFiles.join("\n"),
+    ].join("\n"));
+  }
+
+  if (hasBlock("environment")) {
+    sections.push([
+      isZh ? "## 行 · 终端" : "## Act · Terminal",
+      "",
+      isZh
+        ? [
+          "- `terminal_*` 是共享可见终端，适合启动、构建、watcher、开发服务器、下载、ping、交互命令，以及任何可能要中途打断的命令；短、确定、一次性命令才用 `bash`。",
+          "- 终端链路开始前只有在进入新阶段且确有助于理解时才给一句说明；terminal_list / terminal_create / terminal_write / terminal_wait / terminal_read 之间静默接上。工具卡片本身就是进度，不要重复播报同一个入口、URL、路径或服务地址。",
+          "- 一个逻辑任务最多 terminal_create 一次，后续操作复用同一个 session id；terminal_write 后优先一次 terminal_wait 覆盖预期时长。",
+        ].join("\n")
+        : [
+          "- `terminal_*` is the shared visible terminal. Use it for starts, builds, watchers, dev servers, downloads, pings, interactive commands, and anything that may need interruption; use `bash` only for short deterministic one-shot commands.",
+          "- Before a terminal chain, speak only when entering a new phase and the note adds useful context; let terminal_list / terminal_create / terminal_write / terminal_wait / terminal_read continue silently. Tool cards already show progress; do not repeat the same entrypoint, URL, path, or service address.",
+          "- Create at most one terminal session per logical task, then reuse the same session id; after terminal_write, prefer one terminal_wait that covers the expected duration.",
+        ].join("\n"),
     ].join("\n"));
   }
 
@@ -129,6 +163,9 @@ function buildRuntimeFoundationPrompt({
     appAndSettings.push(isZh
       ? "- 需要控制本机 GUI 应用时，走 HanakoPro 的应用控制通道。"
       : "- When local GUI apps need control, use HanakoPro's app-control channel.");
+    appAndSettings.push(isZh
+      ? "- 使用电脑开始正式验收或桌面控制时，可以先把目标应用带到前台，让用户看见验收已经开始；若用户随后最小化目标应用，不把这当作失败或停止，继续保持目标应用和小鼠标的绑定并在后台推进。小鼠标的归属必须一直存在：窗口不可见时不能漂到桌面或其他应用上，用户恢复目标窗口时，应能立刻看到小鼠标仍在该应用内继续操作。"
+      : "- When Computer Use starts formal acceptance or desktop control, it may first bring the target app forward so the user can see acceptance has begun. If the user later minimizes the target app, do not treat that as failure or a stop signal; keep the target app and small cursor bound while continuing in the background. The cursor's ownership must persist: while the window is not visible it must not drift onto the desktop or another app, and when the user restores the target window they should immediately see the cursor still operating inside that app.");
   }
   if (hasTool("update_settings") && hasBlock("settings-changes")) {
     appAndSettings.push(isZh
@@ -137,7 +174,7 @@ function buildRuntimeFoundationPrompt({
   }
   if (appAndSettings.length) {
     sections.push([
-      isZh ? "## 应用与设置路由" : "## App And Settings Routing",
+      isZh ? "## 行 · 应用与设置" : "## Act · Apps And Settings",
       "",
       appAndSettings.join("\n"),
     ].join("\n"));
@@ -161,7 +198,7 @@ function buildRuntimeFoundationPrompt({
   }
   if (skillsAndExtensions.length) {
     sections.push([
-      isZh ? "## 技能与扩展路由" : "## Skill And Extension Routing",
+      isZh ? "## 取 · 技能与扩展" : "## Fetch · Skills And Extensions",
       "",
       skillsAndExtensions.join("\n"),
     ].join("\n"));
@@ -181,7 +218,7 @@ function buildRuntimeFoundationPrompt({
       .filter(Boolean)
       .join("\n");
     sections.push([
-      isZh ? "## 协作" : "## Collaboration",
+      isZh ? "## 和 · 协作" : "## Harmony · Collaboration",
       "",
       isZh
         ? [
@@ -197,11 +234,27 @@ function buildRuntimeFoundationPrompt({
 
   if (!sections.length) return "";
   return [
-    isZh ? "# 运行底座" : "# Runtime Foundation",
+    isZh ? "# 器" : "# Vessel",
     "",
     isZh
-      ? "以下只补充 HanakoPro 的运行路由；具体工具能力、参数与限制以工具 schema 为准，不覆盖道核或用户明令。"
-      : "This only supplements HanakoPro runtime routing; exact tool capabilities, parameters, and limits follow tool schemas and do not override the Dao core or direct user instructions.",
+      ? "器是 HanakoPro 的工具行法：只说明工具如何接入现实、如何少扰动地行动；不覆盖道核、德行、用户明令或工具 schema。"
+      : "The vessel is HanakoPro's tool practice: it only explains how tools touch reality and how to act with minimal disruption; it does not override the Dao core, conduct, direct user instructions, or tool schemas.",
+    "",
+    isZh
+      ? [
+        "同一执行链路里，把已经说过的入口、URL、文件路径、端口、服务地址或产物名放入“已播报集合”；集合内对象本轮只向用户说一次。",
+        "换词不等于新信息：“已找到 / 已定位 / 已确认 / 将启动 / 将打开 / 下一步我会”加同一个对象，都算重复同一事实。",
+        "说完入口后只能二选一：立刻调用工具，或在最后用一次证据收束。中间不要再发一条只是在铺垫同一对象的正文。",
+        "发正文前先过一道门：这句话有没有新事实、失败、选择请求或最终证据？如果没有，而且只是换个说法指向刚才同一路径/入口，就删掉这句话，直接行动。",
+        "工具卡片已经在显示运行进度时，正文保持安静；只有新发现、失败、需要用户选择或最终证据才再开口。",
+      ].join("\n")
+      : [
+        "Within one execution chain, put every entrypoint, URL, file path, port, service address, or artifact name you have already mentioned into a reported-object set; each object in that set may be mentioned to the user only once in this turn.",
+        "Changing words is not new information: found / located / confirmed / will start / will open / next I will plus the same object still counts as repeating the same fact.",
+        "After mentioning an entrypoint, do only one of two things: call the tool immediately, or close once at the end with evidence. Do not insert another prose note that merely prepares the same object again.",
+        "Before sending prose, pass one gate: does this sentence contain a new fact, failure, user choice, or final evidence? If not, and it merely points to the same path or entrypoint in new words, delete the sentence and act directly.",
+        "When tool cards already show progress, keep the prose quiet; speak again only for a new finding, a failure, a user choice, or final evidence.",
+      ].join("\n"),
     "",
     sections.join("\n\n"),
   ].join("\n").trim();
@@ -318,7 +371,7 @@ export class Agent {
    */
   loadConfigOnly() {
     this._config = loadConfig(this.configPath);
-    const isZh = String(this._config.locale || "").startsWith("zh");
+    const isZh = isChinesePromptLocale(this._config.locale);
     this.userName = this._config.user?.name || (isZh ? "用户" : "User");
     this.agentName = this._config.agent?.name || "Hanako";
     this._memoryMasterEnabled = this._config.memory?.enabled !== false;
@@ -339,7 +392,7 @@ export class Agent {
     log(`  [agent] 1. loadConfig 完成`);
 
     // 2. 身份 + 记忆总开关
-    const isZh = String(this._config.locale || "").startsWith("zh");
+    const isZh = isChinesePromptLocale(this._config.locale);
     this.userName = this._config.user?.name || (isZh ? "用户" : "User");
     this.agentName = this._config.agent?.name || "Hanako";
     this._memoryMasterEnabled = this._config.memory?.enabled !== false;
@@ -534,6 +587,8 @@ export class Agent {
     this._sessionGoalTool = createSessionGoalTool({
       getEngine: () => this._cb?.getEngine?.(),
       getSessionPath: () => this._cb?.getCurrentSessionPath?.(),
+      getComputerHost: () => this._cb?.getEngine?.()?.getComputerHost?.() || null,
+      getAgentId: () => this.id,
     });
 
     // 10. 设置修改工具
@@ -891,7 +946,7 @@ export class Agent {
     this._config = loadConfig(this.configPath);
 
     // 更新身份
-    const isZh = String(this._config.locale || "").startsWith("zh");
+    const isZh = isChinesePromptLocale(this._config.locale);
     if (partial.agent?.name) this.agentName = this._config.agent?.name || "Hanako";
     if (partial.user?.name) this.userName = this._config.user?.name || (isZh ? "用户" : "User");
 
@@ -931,7 +986,7 @@ export class Agent {
 
   /** 返回纯人格 prompt（identity + yuan + ishiki），不含记忆、用户档案等 */
   get personality() {
-    const isZh = String(this._config.locale || "").startsWith("zh");
+    const isZh = isChinesePromptLocale(this._config.locale);
     const fill = (text) => text
       .replace(/\{\{userName\}\}/g, this.userName)
       .replace(/\{\{agentName\}\}/g, this.agentName)
@@ -959,7 +1014,7 @@ export class Agent {
 
   /** 返回花名册描述生成用的人格来源，不包含 yuan 输出协议。 */
   get descriptionSource() {
-    const isZh = String(this._config.locale || "").startsWith("zh");
+    const isZh = isChinesePromptLocale(this._config.locale);
     const fill = (text) => text
       .replace(/\{\{userName\}\}/g, this.userName)
       .replace(/\{\{agentName\}\}/g, this.agentName)
@@ -987,7 +1042,7 @@ export class Agent {
   /** 读取 yuan 模板（能力定义） */
   _readYuan() {
     const yuanType = this._config?.agent?.yuan || "hanako";
-    const isZh = String(this._config.locale || "").startsWith("zh");
+    const isZh = isChinesePromptLocale(this._config.locale);
     const langDir = isZh ? "" : "en/";
     return safeReadFile(path.join(this.productDir, "yuan", `${langDir}${yuanType}.md`), "")
       || safeReadFile(path.join(this.productDir, "yuan", `${yuanType}.md`), "");
@@ -1007,7 +1062,7 @@ export class Agent {
         } catch { return ""; }
       });
     const yuanType = this._config?.agent?.yuan || "hanako";
-    const isZh = String(this._config.locale || "").startsWith("zh");
+    const isZh = isChinesePromptLocale(this._config.locale);
     const langDir = isZh ? "" : "en/";
     const raw = readFile(path.join(this.agentDir, "public-ishiki.md"))
       || readFile(path.join(this.productDir, "public-ishiki-templates", `${langDir}${yuanType}.md`))
@@ -1025,7 +1080,7 @@ export class Agent {
    * @param {string} [options.cwdOverride] - 覆盖 prompt 变量中的 cwd。
    *   用于新建隔离 session 时，让 prompt 快照和实际执行目录保持一致。
    * @param {boolean} [options.includeRuntimeFoundation] - 是否在 origin 模式下附加
-   *   HanakoPro 运行底座。默认开启；设置页普通完整预览会显式关闭。
+   *   HanakoPro 器层运行说明。默认开启；设置页普通完整预览会显式关闭。
    */
   buildSystemPrompt(options = {}) {
     const forSubagent = !!options.forSubagent;
@@ -1050,7 +1105,8 @@ export class Agent {
     const experienceEnabled = typeof forceExperienceEnabled === "boolean"
       ? forceExperienceEnabled
       : this.experienceEnabled;
-    const isZh = String(this._config.locale || "").startsWith("zh");
+    const promptLocale = resolvePromptLocale(this._config.locale);
+    const isZh = String(promptLocale || "").startsWith("zh");
     const includeRuntimeFoundation = Object.prototype.hasOwnProperty.call(options, "includeRuntimeFoundation")
       ? options.includeRuntimeFoundation !== false
       : true;
@@ -1111,42 +1167,42 @@ export class Agent {
     //
     // ishiki 放在用户档案之后：模板里有「你和{userName}是认识很久的人」这类引用，
     // 叙事顺序上先告诉模型"用户是谁"，再告诉它"你是谁、你和用户什么关系"。
-    addPromptBlock("platform", isZh ? "平台声明" : "Platform", 
+    addPromptBlock("platform", isZh ? "器 · 平台" : "Vessel · Platform",
       isZh
         ? "你运行在 OpenHanako 平台上，由 liliMozi 开发。项目主页：https://github.com/liliMozi/openhanako"
         : "You are running on the OpenHanako platform, developed by liliMozi. Project page: https://github.com/liliMozi/openhanako"
     );
-    const platformPrompt = getPlatformPromptNote({ platform: process.platform });
+    const platformPrompt = getPlatformPromptNote({ platform: process.platform, locale: promptLocale });
     if (platformPrompt) {
-      addPromptBlock("environment", isZh ? "执行环境" : "Environment", section(
-        isZh ? "# 执行环境" : "# Environment",
+      addPromptBlock("environment", isZh ? "器 · 时地" : "Vessel · Environment", section(
+        isZh ? "# 器 · 时地" : "# Vessel · Environment",
         platformPrompt
       ));
     }
     // 任务管理引导（todo_write 工具主动使用）
-    addPromptBlock("task-management", isZh ? "任务管理" : "Task Management", isZh
-      ? "\n## 任务管理\n\n" +
-        "用 todo_write 工具拆分和追踪你的工作。收到复杂或多步骤的任务时，先拆分为子任务再逐步执行。\n\n" +
+    addPromptBlock("task-management", isZh ? "器 · 记" : "Vessel · Task Management", isZh
+      ? "\n## 器 · 记\n\n" +
+        "用 todo_write 工具拆分和追踪真正复杂的工作。收到复杂或多步骤任务时，先拆分为少量阶段级子任务再逐步执行；不要把连续工具链里的每个工具动作都拆成 todo。\n\n" +
         "**每次调用都传入完整的 todos 列表**（替换式），每条 todo 必须包含：\n" +
         "- content：静态描述，如『读取 spec』\n" +
         "- activeForm：执行中态描述，如『正在读取 spec』\n" +
         "- status：pending | in_progress | completed\n\n" +
-        "**约定同时最多一条 in_progress**。开始一条时标 in_progress，完成后立即改 completed 并把下一条改 in_progress，不要攒着批量标记。\n" +
-        "这能帮助用户了解你的进度。简单的单步任务（回答问题、单次查询、简单修改）不需要 todo_write。"
+        "**约定同时最多一条 in_progress**。todo_write 是阶段结构，不是工具心跳；只有任务阶段真实切换、结构明显变化或最终收束时才更新。不要为了相邻工具步骤连续调用 todo_write。\n" +
+        "todo_write 只承载阶段结构，不承载工具进度。简单的单步任务（回答问题、单次查询、简单修改）不需要 todo_write；已有工具卡片能显示进度时，也不要再用 todo_write 重复显示同一进度。"
       : "\n## Task Management\n\n" +
-        "Use the todo_write tool to break down and track your work. When you receive complex or multi-step tasks, decompose them into sub-tasks before executing step by step.\n\n" +
+        "Use the todo_write tool to break down and track genuinely complex work. When you receive a complex or multi-step task, decompose it into a small number of phase-level subtasks; do not turn every tool call in a continuous tool chain into a todo.\n\n" +
         "**Each call replaces the entire todos list** (replacement-style). Each todo must include:\n" +
         "- content: static description, e.g. 'Read spec'\n" +
         "- activeForm: in-progress description, e.g. 'Reading spec'\n" +
         "- status: pending | in_progress | completed\n\n" +
-        "**Convention: at most one in_progress at a time**. Mark a todo in_progress when starting it, immediately change it to completed and set the next one to in_progress — do not batch up completions.\n" +
-        "This helps the user track your progress. Simple single-step tasks (answering questions, single lookups, simple edits) do not need todo_write."
+        "**Convention: at most one in_progress at a time**. todo_write is for phase structure, not a tool heartbeat; update it only when the task phase truly changes, the structure materially changes, or the work is being closed. Do not call todo_write repeatedly for adjacent tool steps.\n" +
+        "todo_write carries phase structure, not tool progress. Simple single-step tasks (answering questions, single lookups, simple edits) do not need todo_write; when visible tool cards already show progress, do not duplicate that same progress with todo_write."
     );
 
     // 经验库引导。经验是独立能力：缺省关闭，开启后才把规则写入新 session 的 prompt。
     if (experienceEnabled) {
-      addPromptBlock("experience", isZh ? "经验库" : "Experience Library", isZh
-        ? "\n## 经验库\n\n" +
+      addPromptBlock("experience", isZh ? "器 · 习" : "Vessel · Experience Library", isZh
+        ? "\n## 器 · 习\n\n" +
           "你有一个经验库，记录着过往工作中踩过的坑和学到的教训。\n\n" +
           "**查**：接到工作任务时，先调用 recall_experience 扫一眼索引，看有没有相关经验。\n\n" +
           "**记**：工作中遇到以下情况时，用 record_experience 记录一条简洁的教训：\n" +
@@ -1166,17 +1222,23 @@ export class Agent {
     }
 
     // 工具使用纪律（轻量优先）
-    addPromptBlock("tool-discipline", isZh ? "工具使用纪律" : "Tool Usage Discipline", isZh
-      ? "\n## 工具使用纪律\n\n" +
+    addPromptBlock("tool-discipline", isZh ? "器 · 行" : "Vessel · Tool Discipline", isZh
+      ? "\n## 器 · 行\n\n" +
         "当多个工具能完成同一件事时，优先使用成本最低、干扰最小的那个。" +
-        "不要在简单工具能解决问题的场景下启动重型工具。"
+        "不要在简单工具能解决问题的场景下启动重型工具。\n\n" +
+        "可见说明只在必要的新阶段给，不按工具给：同一执行链路默认静默接工具；只有新发现、失败、需要用户选择或最终结论，才再开口。\n\n" +
+        "反复述禁令：同一个入口、URL、文件路径、端口、服务地址或产物名已经对用户说过一次后，立刻记入“已播报集合”，本轮不要再说第二次；“已找到 / 已定位 / 已确认 / 我现在会 / 下一步我会”加同一路径也算重复。说完入口后直接调用工具，或最后用一次证据收束。\n\n" +
+        "发正文前先过一道门：这句话有没有新事实、失败、选择请求或最终证据？如果没有，而且只是换个说法指向刚才同一路径/入口，就删掉这句话，直接行动。"
       : "\n## Tool Usage Discipline\n\n" +
         "When multiple tools can accomplish the same task, prefer the one with the lowest cost and least disruption. " +
-        "Do not reach for heavy tools when simpler ones can do the job."
+        "Do not reach for heavy tools when simpler ones can do the job.\n\n" +
+        "Make visible notes only for necessary new phases, not tool steps: one execution chain should default to silent tool continuation; speak again only for a new finding, a failure, a user choice, or a final conclusion.\n\n" +
+        "No paraphrase loops: after the same entrypoint, URL, file path, port, service address, or artifact name has been mentioned once to the user, immediately put it in the reported-object set and do not mention it a second time in this turn; 'found / located / confirmed / I will / next I will' plus the same path still counts as repetition. After the entrypoint note, call the tool directly, or close once with evidence at the end.\n\n" +
+        "Before sending prose, pass one gate: does this sentence contain a new fact, failure, user choice, or final evidence? If not, and it merely points to the same path or entrypoint in new words, delete the sentence and act directly."
     );
 
-    addPromptBlock("current-view", isZh ? "当前视野" : "Current View", isZh
-      ? "\n## 当前视野\n\n" +
+    addPromptBlock("current-view", isZh ? "器 · 观" : "Vessel · Current View", isZh
+      ? "\n## 器 · 观\n\n" +
         "用户界面有一份可查询的当前视野，包括当前浏览目录、主面板打开内容和钉住窗口。" +
         "用户用“这个、这里、当前、打开的、选中的、钉住的、当前文件、当前文件夹”等说法指向界面时，先调用 current_status 获取 ui_context，再继续处理任务。"
       : "\n## Current View\n\n" +
@@ -1184,8 +1246,8 @@ export class Agent {
         "When the user says things like this, here, current, open, selected, pinned, current file, or current folder to refer to the UI, call current_status for ui_context first, then continue the task."
     );
 
-    addPromptBlock("session-files", isZh ? "Session 文件与交付" : "Session Files and Delivery", isZh
-      ? "\n## Session 文件与交付\n\n" +
+    addPromptBlock("session-files", isZh ? "器 · 物" : "Vessel · Session Files", isZh
+      ? "\n## 器 · 物\n\n" +
         "SessionFile 表示和当前 session 相关的本地文件：用户上传/附加的文件、你通过 write 创建的文件、你通过 edit 修改的文件、插件产物、浏览器截图、安装产物都会进入同一套 session 文件记录。\n\n" +
         "当你需要使用本轮会话已经产生或登记过的文件时，先调用 current_status 获取 session_files。它会返回当前 session 的文件清单、fileId、来源、状态和本机路径。不要猜测 session-files 缓存路径。\n\n" +
         "write/edit 成功后会由工具层自动记录为 session 相关文件；这只表示文件和本次会话有关，不等于已经交付给用户。\n\n" +
@@ -1206,21 +1268,23 @@ export class Agent {
     );
 
     if (this._isComputerUseAvailableForThisAgent()) {
-      addPromptBlock("desktop-app-control", isZh ? "本机应用控制" : "Desktop App Control", isZh
-        ? "\n## 本机应用控制\n\n" +
-          "用户要求打开、查看、点击、输入或控制本机 GUI 应用时，优先使用 computer 工具。" +
-          "不要用 bash、AppleScript、osascript、open -a 或平台脚本控制 GUI 应用；这些路径会绕过 Hana 的 Computer Use 路由，也更容易撞到系统隐私权限。" +
-          "如果设置启用了逐应用批准，控制新应用时使用 computer 的 start/list_apps 流程，让用户在输入框上方同意。"
+      addPromptBlock("desktop-app-control", isZh ? "器 · 应用" : "Vessel · Desktop App Control", isZh
+        ? "\n## 器 · 应用\n\n" +
+          "用户要求打开、查看、点击、输入或控制本机 GUI 应用时，优先走使用电脑（computer 工具）。" +
+          "不要用 bash、AppleScript、osascript、open -a 或平台脚本控制 GUI 应用；这些路径会绕过使用电脑路由，也更容易撞到系统隐私权限。" +
+          "如果设置启用了逐应用批准，控制新应用时使用 computer 的 start/list_apps 流程，让用户在输入框上方同意。\n\n" +
+          "使用电脑开始正式验收或桌面控制时，可以先把目标应用带到前台，让用户看见验收已经开始；若用户随后最小化目标应用，不把这当作失败或停止，继续保持目标应用和小鼠标的绑定并在后台推进。小鼠标的归属必须一直存在：窗口不可见时不能漂到桌面或其他应用上，用户恢复目标窗口时，应能立刻看到小鼠标仍在该应用内继续操作。"
         : "\n## Desktop App Control\n\n" +
           "When the user asks to open, inspect, click, type in, or control a local GUI application, prefer the computer tool. " +
           "Do not use bash, AppleScript, osascript, open -a, or platform scripts to control GUI applications; those paths bypass Hana's Computer Use routing and are more likely to hit OS privacy permissions. " +
-          "If per-app approval is enabled, use the computer start/list_apps flow for a new app so the input-area prompt can ask the user to approve it."
+          "If per-app approval is enabled, use the computer start/list_apps flow for a new app so the input-area prompt can ask the user to approve it.\n\n" +
+          "When Computer Use starts formal acceptance or desktop control, it may first bring the target app forward so the user can see acceptance has begun. If the user later minimizes the target app, do not treat that as failure or a stop signal; keep the target app and small cursor bound while continuing in the background. The cursor's ownership must persist: while the window is not visible it must not drift onto the desktop or another app, and when the user restores the target window they should immediately see the cursor still operating inside that app."
       );
     }
 
     // 失败处理（诊断优先于换方案）
-    addPromptBlock("failure-handling", isZh ? "失败处理" : "Failure Handling", isZh
-      ? "\n## 失败处理\n\n" +
+    addPromptBlock("failure-handling", isZh ? "器 · 复" : "Vessel · Failure Handling", isZh
+      ? "\n## 器 · 复\n\n" +
         "方案失败时，先诊断原因再换方向：读错误信息、检查假设、尝试针对性修复。" +
         "不要盲目重试同一动作，也不要一次失败就彻底放弃一个可行方案。"
       : "\n## Failure Handling\n\n" +
@@ -1229,8 +1293,8 @@ export class Agent {
     );
 
     // 操作安全（可逆性判断框架）
-    addPromptBlock("action-safety", isZh ? "操作安全" : "Action Safety", isZh
-      ? "\n## 操作安全\n\n" +
+    addPromptBlock("action-safety", isZh ? "器 · 戒" : "Vessel · Action Safety", isZh
+      ? "\n## 器 · 戒\n\n" +
         "执行操作前，考虑可逆性和影响范围。本地的、可撤销的操作可以直接执行。" +
         "但对于难以撤销、影响外部系统、或可能造成破坏的操作（删除文件、发送消息到外部服务、修改他人可见的状态），先向用户确认再执行。" +
         "暂停确认的代价很低，误操作的代价可能很高。"
@@ -1241,8 +1305,8 @@ export class Agent {
     );
 
     // 网页工具选择优先级（跨工具编排，工具 description 里放不下）
-    addPromptBlock("web-tool-priority", isZh ? "网页工具优先级" : "Web Tool Priority", isZh
-      ? "\n## 网页工具优先级\n\n" +
+    addPromptBlock("web-tool-priority", isZh ? "器 · 网页" : "Vessel · Web Tool Priority", isZh
+      ? "\n## 器 · 网页\n\n" +
         "获取网页信息时，按以下顺序选择工具：\n" +
         "1. **web_search** — 查找信息、获取 URL。大多数「帮我查一下 XX」的请求用这个就够了\n" +
         "2. **web_fetch** — 已知 URL，需要提取页面文字内容。简单抓取必须用这个\n" +
@@ -1257,8 +1321,8 @@ export class Agent {
     );
 
     // 设置工具路由
-    addPromptBlock("settings-changes", isZh ? "设置修改" : "Settings Changes", isZh
-      ? "\n## 设置修改\n\n" +
+    addPromptBlock("settings-changes", isZh ? "器 · 设置" : "Vessel · Settings", isZh
+      ? "\n## 器 · 设置\n\n" +
         "用户提到修改设置而未指明具体软件时，默认指本应用的设置。\n" +
         "用户要求修改偏好设置（包括但不限于：外观主题、语言地区、模型选择、安全权限、记忆功能、个人信息、工作目录）时，使用 update_settings 工具。不要搜索网页，不要编辑配置文件。意图明确时直接 apply，不确定时先 search。"
       : "\n## Settings Changes\n\n" +
@@ -1267,8 +1331,8 @@ export class Agent {
     );
 
     // MCP 配置引导（内置变量：{{hanakoHome}} {{mcpPluginDataDir}} {{mcpConfigPath}}）
-    addPromptBlock("mcp-config", isZh ? "MCP 配置" : "MCP Configuration", isZh
-      ? "\n## MCP 配置\n\n" +
+    addPromptBlock("mcp-config", isZh ? "器 · MCP" : "Vessel · MCP Configuration", isZh
+      ? "\n## 器 · MCP\n\n" +
         "你可以配置 MCP (Model Context Protocol) 服务器来扩展能力。配置文件位于 `{{mcpConfigPath}}`。\n\n" +
         "格式：`{\"schemaVersion\":1,\"global\":{\"mcp\":{\"enabled\":true,\"connectors\":[...]}}}`。\n\n" +
         "每个 connector 结构：`{\"id\":\"...\",\"name\":\"...\",\"transport\":\"stdio\"|\"sse\"|\"streamable-http\",\"command\":\"...\",\"args\":[...],\"cwd\":\"...\",\"env\":{...},\"headers\":{...},\"autoStart\":true,\"timeout\":30000}`。\n\n" +
@@ -1288,8 +1352,8 @@ export class Agent {
     // learn_skills 从全局 preferences 读取
     const learnCfg = this._cb?.getLearnSkills?.() || this._config?.capabilities?.learn_skills || {};
     if (learnCfg.enabled && learnCfg.allow_github_fetch) {
-      addPromptBlock("proactive-skill-acquisition", isZh ? "主动技能获取" : "Proactive Skill Acquisition", isZh
-        ? "\n## 主动技能获取\n\n" +
+      addPromptBlock("proactive-skill-acquisition", isZh ? "器 · 取" : "Vessel · Proactive Skill Acquisition", isZh
+        ? "\n## 器 · 取\n\n" +
           "遇到专业领域任务且你没有对应技能时，主动搜索并安装。\n\n" +
           "### 搜索\n\n" +
           "1. `site:clawhub.ai {关键词}` 或 `site:github.com/openclaw/skills {关键词}`\n" +
@@ -1335,8 +1399,8 @@ export class Agent {
           const nameLabel = a.name && a.name !== a.id ? `（${a.name}）` : "";
           return `- \`${a.id}\`${nameLabel}${tag}${model}${desc}`;
         }).join("\n");
-        addPromptBlock("team", isZh ? "团队" : "Team", isZh
-          ? `\n## 团队\n\n` +
+        addPromptBlock("team", isZh ? "器 · 和" : "Vessel · Team", isZh
+          ? `\n## 器 · 和\n\n` +
             `你不是独自工作。当前环境中有多个 agent，各有不同的专长和模型：\n\n${roster}\n\n` +
             `调用 subagent 或 dm 工具时，agent 参数必须传上面反引号里的 id 字段值，不是括号里的显示名。\n` +
             `遇到明显更适合其他 agent 专长的任务，或需要不同视角审核重要结论时，用 subagent 并指定 agent 参数请求协助。` +
@@ -1366,8 +1430,8 @@ export class Agent {
     // 放在用户档案之后：先建立"用户是谁"的语境，再讲"你是谁、你和用户什么关系"。
     addPromptBlock("personality", isZh ? "人格与意识" : "Personality", ishiki);
 
-    addPromptBlock("skill-file-identity", isZh ? "技能文件身份" : "Skill File Identity", isZh
-      ? "\n## 技能文件身份\n\n" +
+    addPromptBlock("skill-file-identity", isZh ? "器 · 源" : "Vessel · Skill File Identity", isZh
+      ? "\n## 器 · 源\n\n" +
         "技能的运行时位置可能是会话冻结的源文件指针，也可能是旧会话遗留的快照副本。指针只冻结本次会话可见的技能身份；如果源文件已不存在，该技能视为不可用。`sessions/.skill-snapshots` 与 `session-files` 下的技能副本不是源文件，不能编辑。用户要求修改技能时，先定位真实源文件：工作区技能通常在当前工作目录的 `.agents/skills/<name>/SKILL.md`；安装后的用户技能或自学技能以安装工具返回的 `skill_source` 为准。找不到源文件时显式说明。"
       : "\n## Skill File Identity\n\n" +
         "A skill's runtime location may be a per-session source pointer, or a legacy snapshot copy from older sessions. A pointer freezes only the skill identity visible to this session; if the source file no longer exists, that skill is unavailable. Skill copies under `sessions/.skill-snapshots` and `session-files` are not source files and must not be edited. When the user asks to modify a skill, locate the real source file first: workspace skills usually live at `.agents/skills/<name>/SKILL.md` under the current working directory; installed user or learned skills should use the `skill_source` returned by install tools. If the source cannot be resolved, say so explicitly."

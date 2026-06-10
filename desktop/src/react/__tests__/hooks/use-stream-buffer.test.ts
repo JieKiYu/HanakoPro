@@ -258,6 +258,68 @@ describe('streamBufferManager.ensureMessage 自愈', () => {
     expect(group?.tools?.[0]?.progress).toBeUndefined();
   });
 
+  it('appends session_goal completion as a standalone acceptance conclusion block', () => {
+    streamBufferManager.handle({ type: 'tool_start', sessionPath: PATH, name: 'session_goal', args: { action: 'complete' } });
+    streamBufferManager.handle({
+      type: 'tool_end',
+      sessionPath: PATH,
+      name: 'session_goal',
+      success: true,
+      details: {
+        action: 'complete',
+        summary: '验真已合：已复走预览入口，确认页面可见，目标收束。\n目标用量：39187 tokens，用时约 1分 58 秒。',
+        metrics: { tokenUsage: 39187, elapsedMs: 118000 },
+      },
+    });
+
+    const blocks = getAssistantMessage()?.blocks ?? [];
+    expect(blocks.map((block) => block.type)).toEqual(['tool_group', 'goal_acceptance_conclusion']);
+    const group = blocks[0] as any;
+    const conclusion = blocks[1] as any;
+    expect(group.tools?.[0]).toMatchObject({
+      name: 'session_goal',
+      done: true,
+      success: true,
+    });
+    expect(conclusion).toEqual({
+      type: 'goal_acceptance_conclusion',
+      evidence: '验真已合：已复走预览入口，确认页面可见，目标收束。',
+      usage: '目标用量：39187 tokens，用时约 1分 58 秒。',
+    });
+  });
+
+  it('renders consecutive active tools as separate visible groups', () => {
+    streamBufferManager.handle({ type: 'tool_start', sessionPath: PATH, name: 'terminal_create', args: { cwd: '/tmp' } });
+    streamBufferManager.handle({ type: 'tool_start', sessionPath: PATH, name: 'terminal_write', args: { id: 'term-1' } });
+    streamBufferManager.handle({ type: 'tool_start', sessionPath: PATH, name: 'terminal_wait', args: { id: 'term-1' } });
+
+    const groups = getAssistantMessage()?.blocks?.filter((block) => block.type === 'tool_group') as any[] | undefined;
+    expect(groups).toHaveLength(3);
+    expect(groups?.map((group) => group.tools.map((tool: any) => tool.name))).toEqual([
+      ['terminal_create'],
+      ['terminal_write'],
+      ['terminal_wait'],
+    ]);
+    expect(groups?.every((group) => group.collapsed === false)).toBe(true);
+  });
+
+  it('does not auto-collapse multi-tool groups after completion', () => {
+    streamBufferManager.handle({
+      type: 'file_write_prepare',
+      sessionPath: PATH,
+      name: 'write',
+      prepareKey: 'tool-1',
+      rawPath: 'early.md',
+      fileName: 'early.md',
+    });
+    streamBufferManager.handle({ type: 'tool_start', sessionPath: PATH, name: 'write', args: { path: 'early.md' } });
+    streamBufferManager.handle({ type: 'tool_end', sessionPath: PATH, name: 'write', success: true, details: {} });
+
+    const group = getAssistantMessage()?.blocks?.find((block: { type: string }) => block.type === 'tool_group') as any;
+    expect(group?.tools).toHaveLength(1);
+    expect(group?.collapsed).toBe(false);
+  });
+
   it('file_write_prepare creates an early live file card and tool_start reuses it', () => {
     streamBufferManager.handle({
       type: 'file_write_prepare',

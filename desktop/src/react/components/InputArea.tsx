@@ -25,6 +25,7 @@ import { FileMentionMenu } from './input/FileMentionMenu';
 import { InputStatusBars } from './input/InputStatusBars';
 import { InputContextRow } from './input/InputContextRow';
 import { GoalIcon, InputControlBar } from './input/InputControlBar';
+import { buildGoalPromptMessage } from './input/goal-message';
 import type { PermissionMode } from './input/PlanModeButton';
 import { SessionConfirmationPrompt } from './input/SessionConfirmationPrompt';
 import { serializeEditor } from '../utils/editor-serializer';
@@ -168,38 +169,16 @@ function setEditorPlainText(editor: Editor, text: string, emitUpdate = false): v
   editor.commands.setContent(textToEditorDoc(text), { emitUpdate });
 }
 
-function buildGoalStartPrompt(objective: string, t: (key: string) => string): string {
-  return [
-    t('input.goalStartPrompt'),
-    '',
-    objective.trim(),
-  ].join('\n').trim();
-}
-
-function buildGoalUpdatePrompt(objective: string, t: (key: string) => string): string {
-  return [
-    t('input.goalUpdatePrompt'),
-    '',
-    objective.trim(),
-  ].join('\n').trim();
-}
-
-function buildGoalResumePrompt(objective: string, t: (key: string) => string): string {
-  return [
-    t('input.goalResumePrompt'),
-    '',
-    objective.trim(),
-  ].join('\n').trim();
-}
-
 interface GoalSubmitResult {
   objective: string;
   changed: boolean;
   wasActive: boolean;
+  skills?: string[];
 }
 
 interface SendPlainPromptOptions {
   allowStreaming?: boolean;
+  skills?: string[];
 }
 
 export type { SlashItem };
@@ -494,6 +473,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
   const [goalElapsedNow, setGoalElapsedNow] = useState(() => Date.now());
   const [goalSaving, setGoalSaving] = useState(false);
   const chatDraftBeforeGoalRef = useRef<string | null>(null);
+  const goalEditorSeededFromChatDraftRef = useRef(false);
 
   useEffect(() => {
     if (pendingSessionConfirmation) {
@@ -794,10 +774,9 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
   }, [visibleGoal?.activeStartedAt, visibleGoal?.status, !!visibleGoal]);
 
   const handleSlashToggle = useCallback(() => {
-    if (initialGoalEditing) return;
     if (slashMenuOpen) dismissSlashMenu();
     else openSlashMenu();
-  }, [initialGoalEditing, slashMenuOpen, dismissSlashMenu, openSlashMenu]);
+  }, [slashMenuOpen, dismissSlashMenu, openSlashMenu]);
 
   const handleAttach = useCallback(async () => {
     const paths = await window.platform?.selectFiles?.();
@@ -842,8 +821,19 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     setEditorPlainText(editor, draft, false);
     setInputText(draft);
     chatDraftBeforeGoalRef.current = null;
+    goalEditorSeededFromChatDraftRef.current = false;
     window.requestAnimationFrame(() => editor.commands.focus('end'));
   }, [currentDraft, editor]);
+
+  const clearConsumedChatDraftAfterGoal = useCallback(() => {
+    if (!editor || editor.isDestroyed) return;
+    setEditorPlainText(editor, '', false);
+    setInputText('');
+    chatDraftBeforeGoalRef.current = null;
+    goalEditorSeededFromChatDraftRef.current = false;
+    if (currentSessionPath) clearDraft(currentSessionPath);
+    window.requestAnimationFrame(() => editor.commands.focus('end'));
+  }, [clearDraft, currentSessionPath, editor]);
 
   const openGoalEditor = useCallback(() => {
     setGoalEditing(true);
@@ -852,16 +842,19 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     slashDismissedTextRef.current = null;
 
     if (visibleGoal) {
+      chatDraftBeforeGoalRef.current = null;
+      goalEditorSeededFromChatDraftRef.current = false;
       setGoalDraft(visibleGoal.objective || '');
       return;
     }
     if (!editor || editor.isDestroyed) return;
+    const currentText = editor.getText();
     if (!initialGoalEditing) {
-      chatDraftBeforeGoalRef.current = editor.getText();
+      chatDraftBeforeGoalRef.current = currentText;
+      goalEditorSeededFromChatDraftRef.current = currentText.trim().length > 0;
     }
-    setGoalDraft('');
-    setEditorPlainText(editor, '', false);
-    setInputText('');
+    setGoalDraft(currentText);
+    setInputText(currentText);
     window.requestAnimationFrame(() => editor.commands.focus('end'));
   }, [editor, initialGoalEditing, visibleGoal]);
 
@@ -870,12 +863,15 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     setGoalDraft('');
     if (initialGoalEditing) {
       restoreChatDraftAfterGoal();
+    } else {
+      goalEditorSeededFromChatDraftRef.current = false;
     }
   }, [initialGoalEditing, restoreChatDraftAfterGoal]);
 
   const saveGoalFromEditor = useCallback(async (): Promise<GoalSubmitResult | null> => {
     if (!editor || editor.isDestroyed || goalSaving) return null;
-    const objective = editor.getText().trim();
+    const { text: rawText, skills } = serializeEditor(editor.getJSON());
+    const objective = rawText.trim();
     if (!objective) {
       setGoalEditing(false);
       setGoalDraft('');
@@ -887,8 +883,12 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
       await updateSessionGoal('set', objective);
       setGoalEditing(false);
       setGoalDraft('');
-      restoreChatDraftAfterGoal();
-      return { objective, changed: true, wasActive: false };
+      if (goalEditorSeededFromChatDraftRef.current) {
+        clearConsumedChatDraftAfterGoal();
+      } else {
+        restoreChatDraftAfterGoal();
+      }
+      return { objective, changed: true, wasActive: false, skills };
     } catch (err) {
       addToast(t('input.goalSetFailed'), 'error', 5000);
       console.warn('[goal] save failed', err);
@@ -896,7 +896,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     } finally {
       setGoalSaving(false);
     }
-  }, [addToast, editor, goalSaving, restoreChatDraftAfterGoal, t, updateSessionGoal]);
+  }, [addToast, clearConsumedChatDraftAfterGoal, editor, goalSaving, restoreChatDraftAfterGoal, t, updateSessionGoal]);
 
   const saveGoalDraft = useCallback(async (): Promise<GoalSubmitResult | null> => {
     if (goalSaving) return null;
@@ -972,10 +972,19 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
       const text = editor.getText();
       setInputText(text);
       if (initialGoalEditing) {
-        setSlashMenuOpen(false);
         setFileMenuOpen(false);
         setFileMentionRange(null);
         setFileMentionQuery('');
+        if (slashDismissedTextRef.current && slashDismissedTextRef.current !== text.trim()) {
+          slashDismissedTextRef.current = null;
+        }
+        const slashMatches = getSlashMatches(text, slashCommands);
+        if (slashMatches.length > 0 && slashDismissedTextRef.current !== text.trim()) {
+          setSlashMenuOpen(true);
+          setSlashSelected(0);
+        } else if (text.startsWith('/')) {
+          setSlashMenuOpen(false);
+        }
         requestAnimationFrame(() => editor.commands.scrollIntoView());
         return;
       }
@@ -1165,14 +1174,16 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
       return;
     }
     if (!editor) return;
-    editor.chain()
-      .clearContent()
+    const chain = editor.chain();
+    const shouldReplaceInput = !initialGoalEditing || editor.getText().trim().startsWith('/');
+    if (shouldReplaceInput) chain.clearContent();
+    chain
       .insertContent({ type: 'skillBadge', attrs: { name: item.name } })
       .insertContent(' ')
       .focus()
       .run();
     setSlashMenuOpen(false);
-  }, [editor]);
+  }, [editor, initialGoalEditing]);
 
   const handleFileMentionSelect = useCallback((item: FileMentionItem) => {
     if (!editor || !fileMentionRange) return;
@@ -1220,13 +1231,18 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
       const ws = getWebSocket();
       if (!ws || ws.readyState !== WebSocket.OPEN) return false;
       const sessionPath = useStore.getState().currentSessionPath;
-      ws.send(JSON.stringify({
+      const wsMsg: Record<string, unknown> = {
         type: allowStreaming && isStreaming ? 'interrupt_prompt' : 'prompt',
         text: promptText,
         sessionPath,
         uiContext: collectUiContext(useStore.getState()),
-        displayMessage: { text: displayText },
-      }));
+        displayMessage: {
+          text: displayText,
+          skills: options.skills && options.skills.length > 0 ? options.skills : undefined,
+        },
+      };
+      if (options.skills && options.skills.length > 0) wsMsg.skills = options.skills;
+      ws.send(JSON.stringify(wsMsg));
       return true;
     } finally {
       setSending(false);
@@ -1235,20 +1251,14 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
 
   const sendGoalSubmitPrompt = useCallback(async (result: GoalSubmitResult | null): Promise<boolean> => {
     if (!result) return false;
+    const message = buildGoalPromptMessage(result.objective);
+    if (!message) return false;
     if (result.wasActive) {
       if (!result.changed) return false;
-      return sendPlainPrompt(
-        buildGoalUpdatePrompt(result.objective, t),
-        t('input.goalUpdateDisplay'),
-        { allowStreaming: true },
-      );
+      return sendPlainPrompt(message.promptText, message.displayText, { allowStreaming: true, skills: result.skills });
     }
-    return sendPlainPrompt(
-      buildGoalStartPrompt(result.objective, t),
-      result.objective,
-      { allowStreaming: true },
-    );
-  }, [sendPlainPrompt, t]);
+    return sendPlainPrompt(message.promptText, message.displayText, { allowStreaming: true, skills: result.skills });
+  }, [sendPlainPrompt]);
 
   const pauseGoal = useCallback(async () => {
     if (!visibleGoal || goalSaving) return;
@@ -1273,12 +1283,9 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     try {
       const goal = await updateSessionGoal('resume');
       const objective = (objectiveOverride || goal?.objective || visibleGoal.objective || '').trim();
-      if (objective) {
-        await sendPlainPrompt(
-          buildGoalResumePrompt(objective, t),
-          t('input.goalResumeDisplay'),
-          { allowStreaming: true },
-        );
+      const message = buildGoalPromptMessage(objective);
+      if (message) {
+        await sendPlainPrompt(message.promptText, message.displayText, { allowStreaming: true });
       }
     } catch (err) {
       addToast(t('input.goalSetFailed'), 'error', 5000);
@@ -1291,12 +1298,10 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
   const resumeGoalAfterPausedEdit = useCallback(async () => {
     const objective = await savePausedGoalDraftAndResume();
     if (!objective) return;
-    await sendPlainPrompt(
-      buildGoalResumePrompt(objective, t),
-      t('input.goalResumeDisplay'),
-      { allowStreaming: true },
-    );
-  }, [savePausedGoalDraftAndResume, sendPlainPrompt, t]);
+    const message = buildGoalPromptMessage(objective);
+    if (!message) return;
+    await sendPlainPrompt(message.promptText, message.displayText, { allowStreaming: true });
+  }, [savePausedGoalDraftAndResume, sendPlainPrompt]);
 
   const toggleGoalRunning = useCallback(() => {
     if (visibleGoal?.status === 'active') void pauseGoal();
@@ -1525,6 +1530,17 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
   // ── Key handler ──
   const handleEditorKeyDown = useCallback((e: InputKeyEvent): boolean => {
     if (e.defaultPrevented) return false;
+    if (slashMenuOpen && filteredCommands.length > 0) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setSlashSelected(i => (i + 1) % filteredCommands.length); return true; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setSlashSelected(i => (i - 1 + filteredCommands.length) % filteredCommands.length); return true; }
+      if (e.key === 'Tab' || e.key === 'Enter') {
+        e.preventDefault();
+        const cmd = filteredCommands[slashSelected] || filteredCommands[0];
+        if (cmd) handleSlashSelect(cmd);
+        return true;
+      }
+      if (e.key === 'Escape') { e.preventDefault(); dismissSlashMenu(); return true; }
+    }
     if (initialGoalEditing) {
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -1562,17 +1578,6 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
         setFileMenuOpen(false);
         return true;
       }
-    }
-    if (slashMenuOpen && filteredCommands.length > 0) {
-      if (e.key === 'ArrowDown') { e.preventDefault(); setSlashSelected(i => (i + 1) % filteredCommands.length); return true; }
-      if (e.key === 'ArrowUp') { e.preventDefault(); setSlashSelected(i => (i - 1 + filteredCommands.length) % filteredCommands.length); return true; }
-      if (e.key === 'Tab' || e.key === 'Enter') {
-        e.preventDefault();
-        const cmd = filteredCommands[slashSelected] || filteredCommands[0];
-        if (cmd) handleSlashSelect(cmd);
-        return true;
-      }
-      if (e.key === 'Escape') { e.preventDefault(); dismissSlashMenu(); return true; }
     }
     if (e.key === 'Enter' && !e.shiftKey && !isComposing.current && !e.isComposing) {
       e.preventDefault();

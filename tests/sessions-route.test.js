@@ -540,6 +540,54 @@ describe("sessions route", () => {
     ]);
   });
 
+  it("restores goal acceptance start blocks from hidden auto-review history", async () => {
+    const { createSessionsRoute } = await import("../server/routes/sessions.js");
+    const msgUtils = await import("../core/message-utils.js");
+    const app = new Hono();
+
+    vi.mocked(msgUtils.extractTextContent)
+      .mockReturnValueOnce({ text: "候选交付", images: [], thinking: "", toolUses: [] })
+      .mockReturnValueOnce({
+        text: "",
+        images: [],
+        thinking: "",
+        toolUses: [{ name: "computer", args: { action: "get_app_state" } }],
+      });
+    vi.mocked(msgUtils.loadSessionHistoryEntries).mockResolvedValueOnce([
+      { type: "message", message: { role: "assistant", content: "候选交付" } },
+      {
+        type: "custom_message",
+        customType: "hana-session-goal-auto-review",
+        content: "## 目标模式自动验收\n\n目标：启动守一禅机画布预览.",
+        display: false,
+        details: { objective: "启动守一禅机画布预览." },
+      },
+      { type: "message", message: { role: "assistant", content: [] } },
+    ]);
+
+    const engine = {
+      agentsDir: "/tmp/agents",
+      deferredResults: null,
+    };
+
+    app.route("/api", createSessionsRoute(engine));
+
+    const res = await app.request("/api/sessions/messages");
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.messages).toHaveLength(2);
+    expect(data.blocks).toEqual([
+      expect.objectContaining({
+        type: "goal_acceptance",
+        afterIndex: 1,
+        title: "验真",
+        objective: "启动守一禅机画布预览.",
+        text: expect.stringContaining("这次要验的是：启动守一禅机画布预览."),
+      }),
+    ]);
+  });
+
   it("keeps assistant messages that only contain generated images", async () => {
     const { createSessionsRoute } = await import("../server/routes/sessions.js");
     const msgUtils = await import("../core/message-utils.js");

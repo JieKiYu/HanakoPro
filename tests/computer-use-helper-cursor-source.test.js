@@ -33,4 +33,14 @@ describe("Hana computer-use helper cursor integration", () => {
     expect(main).toContain("AgentCursor.shared.dwellAfterClickSeconds");
     expect(main).toContain("AgentCursor.shared.idleHideDelay");
   });
+
+  it("exposes a private activation command for visible lease starts", () => {
+    const main = fs.readFileSync(path.join(helperSourceDir, "main.swift"), "utf8");
+
+    expect(main).toContain('"hana_activate_app"');
+    expect(main).toContain("NSRunningApplication(processIdentifier: pid)");
+    expect(main).toContain("activateIgnoringOtherApps");
+    expect(main).toContain("kAXRaiseAction");
+    expect(main).toContain('"AXWindowNumber"');
+  });
 });

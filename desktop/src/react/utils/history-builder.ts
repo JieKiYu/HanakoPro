@@ -8,6 +8,7 @@ import type { ChatMessage, ChatListItem, ContentBlock } from '../stores/chat-typ
 import type { TodoItem } from '../types';
 import { parseMoodFromContent, parseCardFromContent, parseUserAttachments } from './message-parser';
 import { renderMarkdown } from './markdown';
+import { isDuplicateGoalConclusionTextBlock, type GoalConclusionBlock } from './goal-conclusion';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- API 历史消息 JSON 结构动态，难以静态收窄 */
 
@@ -16,6 +17,14 @@ type HistoryCompactionMarker = {
   yuan: string;
   afterMessageId: string | null;
   timestamp: number | string | null;
+};
+
+type HistoryToolCall = {
+  name: string;
+  args?: Record<string, unknown>;
+  done?: boolean;
+  success?: boolean;
+  details?: Record<string, unknown>;
 };
 
 // ── API 响应类型 ──
@@ -28,7 +37,7 @@ export interface HistoryApiResponse {
     content: string;
     thinking?: string;
     hasThinking?: boolean;
-    toolCalls?: Array<{ name: string; args?: Record<string, unknown>; done?: boolean; success?: boolean; details?: Record<string, unknown> }>;
+    toolCalls?: HistoryToolCall[];
     images?: Array<{ data: string; mimeType: string }>;
     timestamp?: number | string | null;
   }>;
@@ -69,6 +78,55 @@ export interface HistoryApiResponse {
   }>;
   todos?: TodoItem[];
   hasMore?: boolean;
+}
+
+function finiteNonNegativeInteger(value: unknown): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null;
+}
+
+function nestedRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function formatGoalConclusionElapsed(ms: unknown): string {
+  const safeMs = finiteNonNegativeInteger(ms);
+  if (safeMs === null) return '未知';
+  const totalSeconds = Math.max(0, Math.round(safeMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}分 ${seconds} 秒`;
+}
+
+function goalConclusionUsageLine(details: Record<string, unknown> | null): string {
+  const goal = nestedRecord(details?.goal);
+  const metrics = nestedRecord(details?.metrics) || nestedRecord(goal?.metrics);
+  const tokens = finiteNonNegativeInteger(metrics?.tokenUsage ?? metrics?.estimatedTokens);
+  const elapsedMs = finiteNonNegativeInteger(metrics?.elapsedMs ?? goal?.elapsedMs);
+  return `目标用量：${tokens === null ? '未记录' : tokens} tokens，用时约 ${formatGoalConclusionElapsed(elapsedMs)}。`;
+}
+
+function goalConclusionEvidence(details: Record<string, unknown> | null): string {
+  const goal = nestedRecord(details?.goal);
+  const summary = typeof details?.summary === 'string' ? details.summary.trim() : '';
+  const firstSummaryLine = summary.split('\n').find(line => line.trim() && !line.includes('目标用量：'))?.trim();
+  if (firstSummaryLine) return firstSummaryLine;
+  const note = typeof goal?.note === 'string' ? goal.note.trim() : '';
+  if (note) return note.startsWith('验真已合') ? note : `验真已合：${note}`;
+  return '验真已合：验收已通过，目标终态已确认。';
+}
+
+function goalConclusionBlockFromToolCall(tool: HistoryToolCall): Extract<ContentBlock, { type: 'goal_acceptance_conclusion' }> | null {
+  if (tool.name !== 'session_goal' || tool.success === false) return null;
+  const details = nestedRecord(tool.details);
+  if (details?.action !== 'complete') return null;
+  return {
+    type: 'goal_acceptance_conclusion',
+    evidence: goalConclusionEvidence(details),
+    usage: goalConclusionUsageLine(details),
+  };
 }
 
 // ── 兼容层 ──
@@ -155,10 +213,16 @@ function insertMoodNearTurnStart(blocks: ContentBlock[] | undefined, moodBlock: 
   return true;
 }
 
+function stripHistoryBlockEnvelope(block: any): ContentBlock {
+  const { afterIndex: _afterIndex, ...contentBlock } = block || {};
+  return contentBlock as ContentBlock;
+}
+
 export function buildItemsFromHistory(data: HistoryApiResponse): ChatListItem[] {
   const items: ChatListItem[] = [];
   let turnFirstAssistant: ChatMessage | null = null;
   let turnMoodPlaced = false;
+  let turnGoalConclusions: GoalConclusionBlock[] = [];
 
   // 防御：服务端可能返回 { error: "..." } 等非预期形状
   const messages = Array.isArray(data?.messages) ? data.messages : [];
@@ -197,6 +261,7 @@ export function buildItemsFromHistory(data: HistoryApiResponse): ChatListItem[] 
     if (m.role === 'user') {
       turnFirstAssistant = null;
       turnMoodPlaced = false;
+      turnGoalConclusions = [];
 
       // strip steer 前缀（内部标记，不应展示给用户）
       const rawContent = (m.content || '')
@@ -255,6 +320,9 @@ export function buildItemsFromHistory(data: HistoryApiResponse): ChatListItem[] 
       }
     } else if (m.role === 'assistant') {
       const blocks: ContentBlock[] = [];
+      const msgBlocks = blockMap[i] || [];
+      const leadingMsgBlocks = msgBlocks.filter(b => b?.type === 'goal_acceptance');
+      const trailingMsgBlocks = msgBlocks.filter(b => b?.type !== 'goal_acceptance');
 
       // 1. Thinking
       if (m.thinking || m.hasThinking) {
@@ -265,6 +333,11 @@ export function buildItemsFromHistory(data: HistoryApiResponse): ChatListItem[] 
       const { mood, yuan, text: afterMood } = parseMoodFromContent(m.content);
       if (mood && yuan) {
         blocks.push({ type: 'mood', yuan, text: mood });
+      }
+
+      // 2.5. 验真开场：实时流里出现在验收工具前，历史恢复也保持同序。
+      for (const b of leadingMsgBlocks) {
+        blocks.push(stripHistoryBlockEnvelope(b));
       }
 
       // 3. Tool calls
@@ -280,6 +353,8 @@ export function buildItemsFromHistory(data: HistoryApiResponse): ChatListItem[] 
           })),
           collapsed: m.toolCalls.length > 1,
         });
+        const goalConclusion = m.toolCalls.map(goalConclusionBlockFromToolCall).find(Boolean);
+        if (goalConclusion) blocks.push(goalConclusion);
       }
 
       // 4. 主文本（去掉 mood 和 card 后的内容）
@@ -299,9 +374,26 @@ export function buildItemsFromHistory(data: HistoryApiResponse): ChatListItem[] 
       }
 
       // 6. Content Blocks from unified sideband
-      const msgBlocks = blockMap[i];
-      if (msgBlocks) {
-        for (const b of msgBlocks) blocks.push(b);
+      if (trailingMsgBlocks.length > 0) {
+        for (const b of trailingMsgBlocks) blocks.push(stripHistoryBlockEnvelope(b));
+      }
+
+      if (turnGoalConclusions.length > 0) {
+        for (let j = blocks.length - 1; j >= 0; j -= 1) {
+          if (isDuplicateGoalConclusionTextBlock(blocks[j], turnGoalConclusions)) {
+            blocks.splice(j, 1);
+          }
+        }
+      }
+      const ownGoalConclusions = blocks.filter(
+        (block): block is GoalConclusionBlock => block.type === 'goal_acceptance_conclusion',
+      );
+      if (ownGoalConclusions.length > 0) {
+        turnGoalConclusions = [...turnGoalConclusions, ...ownGoalConclusions];
+      }
+
+      if (blocks.length === 0) {
+        continue;
       }
 
       const msg: ChatMessage = { id, sourceEntryId: m.entryId, role: 'assistant', blocks };

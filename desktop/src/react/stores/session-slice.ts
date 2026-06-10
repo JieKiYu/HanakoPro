@@ -8,6 +8,16 @@ export interface SessionGoal {
   createdAt: string;
   updatedAt: string;
   elapsedMs?: number;
+  metrics?: {
+    elapsedMs?: number;
+    tokenUsage?: number;
+    estimatedTokens?: number;
+    contextBaselineTokens?: number;
+    contextCurrentTokens?: number;
+    tokenUsageSource?: string;
+    contextBaselineAt?: string;
+    computedAt?: string;
+  } | null;
   activeStartedAt?: string | null;
   pausedAt?: string | null;
   completedAt?: string | null;

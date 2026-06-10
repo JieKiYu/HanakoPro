@@ -2,6 +2,7 @@ import { memo, useCallback, useMemo } from 'react';
 import type { ChatListItem, ContentBlock } from '../../stores/chat-types';
 import { UserMessage } from './UserMessage';
 import { AssistantMessage, browserReplyTargetFromBlocks } from './AssistantMessage';
+import { isDuplicateGoalConclusionTextBlock, type GoalConclusionBlock } from '../../utils/goal-conclusion';
 import styles from './Chat.module.css';
 
 interface Props {
@@ -60,28 +61,73 @@ export const ChatTranscript = memo(function ChatTranscript({
     return browserReplyTargetFromBlocks(blocks);
   }, [items, latestAssistantIndex, latestUserIndex]);
 
+  const displayItems = useMemo(() => removeCrossMessageDuplicateGoalConclusions(items), [items]);
+  const latestVisibleAssistantOriginalIndex = useMemo(() => {
+    for (let i = displayItems.length - 1; i >= 0; i -= 1) {
+      const item = displayItems[i]?.item;
+      if (item?.type === 'message' && item.data.role === 'assistant') return displayItems[i].originalIndex;
+    }
+    return -1;
+  }, [displayItems]);
+
   return (
     <>
-      {items.map((item, index) => (
+      {displayItems.map(({ item, originalIndex }, index) => (
         <TranscriptItemView
           key={item.type === 'message' ? item.data.id : `c-${index}`}
           item={item}
-          prevItem={index > 0 ? items[index - 1] : undefined}
+          prevItem={index > 0 ? displayItems[index - 1]?.item : undefined}
           sessionPath={sessionPath}
           agentId={agentId}
           readOnly={readOnly}
           hideUserIdentity={hideUserIdentity}
           userIdentity={userIdentity}
-          isLatestUserMessage={index === latestUserIndex}
-          isLatestAssistantMessage={index === latestAssistantIndex}
-          precedingUserTimestamp={index === latestAssistantIndex ? latestAssistantPrecedingUserTimestamp : undefined}
-          browserReplyTarget={index === latestAssistantIndex ? latestTurnBrowserTarget : null}
+          isLatestUserMessage={originalIndex === latestUserIndex}
+          isLatestAssistantMessage={originalIndex === latestVisibleAssistantOriginalIndex}
+          precedingUserTimestamp={originalIndex === latestVisibleAssistantOriginalIndex ? latestAssistantPrecedingUserTimestamp : undefined}
+          browserReplyTarget={originalIndex === latestVisibleAssistantOriginalIndex ? latestTurnBrowserTarget : null}
           registerMessageElement={registerMessageElement}
         />
       ))}
     </>
   );
 });
+
+function removeCrossMessageDuplicateGoalConclusions(items: ChatListItem[]): Array<{ item: ChatListItem; originalIndex: number }> {
+  const result: Array<{ item: ChatListItem; originalIndex: number }> = [];
+  let turnConclusions: GoalConclusionBlock[] = [];
+
+  for (let i = 0; i < items.length; i += 1) {
+    const item = items[i];
+    if (item.type !== 'message') {
+      result.push({ item, originalIndex: i });
+      continue;
+    }
+
+    if (item.data.role === 'user') {
+      turnConclusions = [];
+      result.push({ item, originalIndex: i });
+      continue;
+    }
+
+    const blocks = item.data.blocks || [];
+    const filteredBlocks = turnConclusions.length > 0
+      ? blocks.filter(block => !isDuplicateGoalConclusionTextBlock(block, turnConclusions))
+      : blocks;
+    const ownConclusions = filteredBlocks.filter(
+      (block): block is GoalConclusionBlock => block.type === 'goal_acceptance_conclusion',
+    );
+    if (ownConclusions.length > 0) turnConclusions = [...turnConclusions, ...ownConclusions];
+
+    if (filteredBlocks.length === 0 && blocks.length > 0) continue;
+    result.push({
+      item: filteredBlocks === blocks ? item : { ...item, data: { ...item.data, blocks: filteredBlocks } },
+      originalIndex: i,
+    });
+  }
+
+  return result;
+}
 
 const TranscriptItemView = memo(function TranscriptItemView({
   item,

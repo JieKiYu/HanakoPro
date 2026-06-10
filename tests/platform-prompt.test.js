@@ -34,6 +34,24 @@ describe("getPlatformPromptNote", () => {
     expect(out).not.toContain("platform-adaptive");
   });
 
+  it("emits Dao-style Chinese terminal guidance when locale is zh", () => {
+    const out = getPlatformPromptNote({ ...baseOpts, platform: "darwin", locale: "zh-CN" });
+    expect(out).toContain("Platform: darwin");
+    expect(out).toContain("Shell: bash");
+    expect(out).toContain("OS Version: TestOS 1.2.3");
+    expect(out).toContain("## 器 · 终端");
+    expect(out).toContain("`terminal_*`");
+    expect(out).toContain("共享可见终端");
+    expect(out).toContain("终端链路开始前只有在进入新阶段且确有助于理解时才给一句说明");
+    expect(out).toContain("terminal_list / terminal_create / terminal_write / terminal_wait / terminal_read 之间静默接上");
+    expect(out).toContain("若已经说过某个入口、URL、路径、端口或服务地址");
+    expect(out).toContain("视为已播报对象");
+    expect(out).toContain("“已找到/已定位/现在启动/下一步打开”等近义句复述它");
+    expect(out).toContain("如果下一句只是“我将/现在/下一步 + 同一对象”的铺垫");
+    expect(out).not.toContain("一条终端链路只在开始前给一句阶段说明");
+    expect(out).not.toContain("Shell tool selection guidance:");
+  });
+
   it("keeps Shell: bash on POSIX platforms regardless of $SHELL", () => {
     const out = getPlatformPromptNote({ ...baseOpts, platform: "darwin" });
     expect(out).toContain("Shell: bash");

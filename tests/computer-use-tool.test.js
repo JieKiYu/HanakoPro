@@ -159,6 +159,55 @@ function makeHybridCoordinateTool() {
   return { tool, ctx, emitted };
 }
 
+function makeScreenshotlessCoordinateTool() {
+  const provider = createMockComputerProvider({ providerId: "macos:cua" });
+  provider.capabilities.pointClick = "allowed";
+  provider.capabilities.drag = "allowed";
+  provider.createLease = async (_ctx, target) => ({
+    providerId: "macos:cua",
+    appId: target?.appId || "app.notes",
+    windowId: target?.windowId || "win-1",
+    allowedActions: ["click_element", "click_point", "double_click", "type_text", "press_key", "scroll", "drag", "stop"],
+    providerState: {},
+  });
+  provider.getAppState = async (_ctx, lease) => ({
+    mode: "vision-native",
+    appId: lease.appId,
+    windowId: lease.windowId || "win-1",
+    screenshot: null,
+    display: { width: 800, height: 600, scaleFactor: 1 },
+    elements: [
+      {
+        elementId: "mock-button",
+        role: "button",
+        label: "Continue",
+        enabled: true,
+      },
+    ],
+  });
+  const providers = new ComputerProviderRegistry();
+  providers.register(provider);
+  const host = new ComputerHost({
+    providers,
+    defaultProviderId: "macos:cua",
+    getSettings: () => ({ enabled: true }),
+  });
+  const emitted = [];
+  const tool = createComputerUseTool({
+    getComputerHost: () => host,
+    getSessionModel: () => ({ id: "gpt-5.5", provider: "openai", input: ["text", "image"] }),
+    getAgentId: () => "hana",
+    isAgentToolEnabled: () => true,
+    emitEvent: (event, sessionPath) => emitted.push({ event, sessionPath }),
+  });
+  const ctx = {
+    sessionManager: { getSessionFile: () => "/tmp/session.jsonl" },
+    agentId: "hana",
+    model: { id: "gpt-5.5", provider: "openai", input: ["text", "image"] },
+  };
+  return { tool, ctx, emitted };
+}
+
 function makeCleanElementOnlyTool() {
   const provider = createMockComputerProvider({ providerId: "macos:cua" });
   provider.capabilities.pointClick = "unsupported";
@@ -250,6 +299,7 @@ describe("computer tool", () => {
     expect(tool.parameters.properties).toHaveProperty("fromY");
     expect(tool.parameters.properties).toHaveProperty("toX");
     expect(tool.parameters.properties).toHaveProperty("toY");
+    expect(tool.parameters.properties).toHaveProperty("windowTitle");
   });
 
   it("creates a lease and reads app state", async () => {
@@ -270,6 +320,56 @@ describe("computer tool", () => {
     expect(state.content[1].type).toBe("image");
     expect(state.details.snapshotId).toBeTruthy();
     expect(state.details.elements[0].elementId).toBe("mock-button");
+  });
+
+  it("resolves a start target by app name and preferred window title", async () => {
+    const provider = createMockComputerProvider({ providerId: "mock" });
+    provider.listApps = async () => [{
+      appId: "com.hanakopro.app",
+      name: "HanakoPro",
+      windows: [
+        { windowId: "main-win", title: "HanakoPro" },
+        { windowId: "browser-win", title: "Browser" },
+      ],
+    }];
+    const createLease = vi.fn(async (_ctx, target) => ({
+      providerId: "mock",
+      appId: target.appId,
+      windowId: target.windowId,
+      allowedActions: ["click_element", "stop"],
+      providerState: { windowTitle: target.windowTitle },
+    }));
+    provider.createLease = createLease;
+    const providers = new ComputerProviderRegistry();
+    providers.register(provider);
+    const host = new ComputerHost({
+      providers,
+      defaultProviderId: "mock",
+      getSettings: () => ({ enabled: true }),
+    });
+    const tool = createComputerUseTool({
+      getComputerHost: () => host,
+      getSessionModel: () => ({ id: "gpt-5.5", provider: "openai", input: ["text", "image"] }),
+      getAgentId: () => "hana",
+    });
+    const ctx = {
+      sessionManager: { getSessionFile: () => "/tmp/session.jsonl" },
+      agentId: "hana",
+      model: { id: "gpt-5.5", provider: "openai", input: ["text", "image"] },
+    };
+
+    const started = await tool.execute("call-window-title", {
+      action: "start",
+      appName: "HanakoPro",
+      windowTitle: "Browser",
+    }, null, null, ctx);
+
+    expect(started.details.windowId).toBe("browser-win");
+    expect(createLease).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({
+      appId: "com.hanakopro.app",
+      windowId: "browser-win",
+      windowTitle: "Browser",
+    }));
   });
 
   it("includes a concise element summary in app state results", async () => {
@@ -347,6 +447,26 @@ describe("computer tool", () => {
 
     expect(state.content[0].text).toContain("Use element ids with click_element, type_text, scroll, or perform_secondary_action");
     expect(state.content[0].text).toContain("Use screenshot coordinates with click_point or double_click");
+  });
+
+  it("keeps screenshotless background snapshots usable without advertising coordinate clicks", async () => {
+    const { tool, ctx } = makeScreenshotlessCoordinateTool();
+    await tool.execute("call-1", {
+      action: "start",
+      appId: "app.notes",
+      windowId: "win-1",
+    }, null, null, ctx);
+
+    const state = await tool.execute("call-2", {
+      action: "get_app_state",
+    }, null, null, ctx);
+
+    expect(state.content).toHaveLength(1);
+    expect(state.content[0].text).toContain("Use element ids with click_element, type_text, or scroll");
+    expect(state.content[0].text).toContain("No screenshot was returned");
+    expect(state.content[0].text).not.toContain("Use screenshot coordinates");
+    expect(state.content[0].text).not.toContain("Use drag with fromX/fromY/toX/toY");
+    expect(state.details.elements).toHaveLength(1);
   });
 
   it("does not mention coordinate or double-click actions for clean element-only providers", async () => {

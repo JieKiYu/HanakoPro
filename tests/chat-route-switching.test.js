@@ -146,6 +146,63 @@ describe("chat route session goal events", () => {
     ]));
   });
 
+  it("streams a dedicated goal acceptance start block during auto-review", () => {
+    let createHandlers;
+    let subscriber;
+    const upgradeWebSocket = vi.fn((factory) => {
+      createHandlers = factory;
+      return () => new Response(null);
+    });
+    const hub = {
+      subscribe: vi.fn((cb) => {
+        subscriber = cb;
+      }),
+      send: vi.fn(async () => {}),
+    };
+    const engine = {
+      agentName: "Hana",
+      abortAllStreaming: vi.fn(async () => {}),
+      getSessionByPath: vi.fn(() => null),
+      isSessionStreaming: vi.fn(() => false),
+      isSessionSwitching: vi.fn(() => false),
+      steerSession: vi.fn(() => false),
+      slashDispatcher: null,
+    };
+
+    createChatRoute(engine, hub, { upgradeWebSocket });
+    const handlers = createHandlers({});
+    const ws = {
+      readyState: 1,
+      send: vi.fn(),
+    };
+
+    handlers.onOpen({}, ws);
+    subscriber({ type: "session_status", isStreaming: true, reason: "goal_auto_review" }, "/tmp/session.jsonl");
+    subscriber({
+      type: "goal_acceptance_start",
+      reason: "goal_auto_review",
+      block: {
+        type: "goal_acceptance",
+        title: "验真",
+        objective: "finish acceptance",
+        text: "这次要验的是：finish acceptance\n我会站到用户手边，把主路重新走一遍。",
+      },
+    }, "/tmp/session.jsonl");
+
+    const sent = ws.send.mock.calls.map(([raw]) => JSON.parse(raw));
+    expect(sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "content_block",
+        sessionPath: "/tmp/session.jsonl",
+        block: expect.objectContaining({
+          type: "goal_acceptance",
+          title: "验真",
+          text: "这次要验的是：finish acceptance\n我会站到用户手边，把主路重新走一遍。",
+        }),
+      }),
+    ]));
+  });
+
   it("does not schedule another goal auto-review when the current stream is the auto-review", async () => {
     vi.useFakeTimers();
     try {
@@ -188,6 +245,62 @@ describe("chat route session goal events", () => {
 
       await vi.advanceTimersByTimeAsync(500);
       expect(triggerSessionGoalAutoReview).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("starts goal auto-review after active-goal idle stop even without provider turn_end", async () => {
+    vi.useFakeTimers();
+    try {
+      let createHandlers;
+      let subscriber;
+      const triggerSessionGoalAutoReview = vi.fn(async () => ({ ok: true }));
+      const upgradeWebSocket = vi.fn((factory) => {
+        createHandlers = factory;
+        return () => new Response(null);
+      });
+      const hub = {
+        subscribe: vi.fn((cb) => {
+          subscriber = cb;
+        }),
+        send: vi.fn(async () => {}),
+      };
+      const engine = {
+        agentName: "Hana",
+        abortAllStreaming: vi.fn(async () => {}),
+        getSessionByPath: vi.fn(() => null),
+        getSessionGoal: vi.fn(() => ({ objective: "open localhost and verify UI", status: "active" })),
+        isSessionStreaming: vi.fn(() => false),
+        isSessionSwitching: vi.fn(() => false),
+        steerSession: vi.fn(() => false),
+        triggerSessionGoalAutoReview,
+        slashDispatcher: null,
+      };
+
+      createChatRoute(engine, hub, { upgradeWebSocket });
+      const handlers = createHandlers({});
+      const ws = {
+        readyState: 1,
+        send: vi.fn(),
+      };
+
+      handlers.onOpen({}, ws);
+      subscriber({ type: "session_status", isStreaming: true }, "/tmp/session.jsonl");
+      subscriber({ type: "message_update", assistantMessageEvent: { type: "toolcall_start" } }, "/tmp/session.jsonl");
+      subscriber({ type: "session_status", isStreaming: false }, "/tmp/session.jsonl");
+
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(triggerSessionGoalAutoReview).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(501);
+      expect(triggerSessionGoalAutoReview).toHaveBeenCalledWith("/tmp/session.jsonl");
+
+      const sent = ws.send.mock.calls.map(([raw]) => JSON.parse(raw));
+      expect(sent).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: "turn_end", sessionPath: "/tmp/session.jsonl" }),
+        expect.objectContaining({ type: "status", isStreaming: false, sessionPath: "/tmp/session.jsonl" }),
+      ]));
     } finally {
       vi.useRealTimers();
     }

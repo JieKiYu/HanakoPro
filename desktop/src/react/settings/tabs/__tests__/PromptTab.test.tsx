@@ -6,6 +6,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PromptTab } from '../PromptTab';
 import { useSettingsStore } from '../../store';
+import { composeOriginPromptTemplate } from '../../../../../../shared/prompt-composer.js';
 
 const legacyDaoPrompt = [
   '# 核',
@@ -59,6 +60,7 @@ function readPreviewBody(options?: unknown) {
 
 function previewFromRequest(options?: unknown) {
   const body = readPreviewBody(options) as {
+    templatePreview?: boolean;
     includeRuntimeFoundation?: boolean;
     promptComposer?: {
       origin?: {
@@ -71,8 +73,15 @@ function previewFromRequest(options?: unknown) {
     };
   };
   const promptComposer = body.promptComposer || {};
+  if (body.templatePreview === true) {
+    return composeOriginPromptTemplate(promptComposer) || '';
+  }
   const runtimeFoundation = body.includeRuntimeFoundation === true
-    ? compactSection('运行底座', '底层运行规则')
+    ? [
+      '器是 HanakoPro 的工具行法',
+      '## 行 · 终端',
+      '终端链路开始前只有在进入新阶段且确有助于理解时才给一句说明',
+    ].join('\n\n')
     : '';
   const typedComposer = promptComposer as {
     origin?: {
@@ -89,11 +98,10 @@ function previewFromRequest(options?: unknown) {
     compactSection('形', '身份设定'),
     compactSection('时', '当前环境'),
     compactSection('忆', '记忆事实'),
-    compactSection('器', '可用技能'),
+    compactSection('器', [runtimeFoundation, '可用技能'].filter(Boolean).join('\n\n')),
     compactSection('令', '追加规则'),
     ...(origin.includeMood === false ? [] : [origin.mood || '']),
     origin.conduct || '',
-    runtimeFoundation,
   ].filter(Boolean).join('\n\n---\n\n');
 }
 
@@ -129,7 +137,7 @@ function latestPreviewRequestComposer() {
 
 function latestPreviewRequestBody() {
   const previewCalls = mocks.hanaFetch.mock.calls.filter(([url]) => String(url).endsWith('/system-prompt-preview'));
-  return readPreviewBody(previewCalls.at(-1)?.[1]) as { includeRuntimeFoundation?: boolean };
+  return readPreviewBody(previewCalls.at(-1)?.[1]) as { includeRuntimeFoundation?: boolean; templatePreview?: boolean };
 }
 
 function latestSavedComposer() {
@@ -228,7 +236,7 @@ describe('PromptTab dao prompt editor', () => {
     });
 
     const bodyText = document.body.textContent || '';
-    expect(bodyText).toContain('模块里保留可编辑模板变量');
+    expect(bodyText).toContain('模块保留模板变量');
     for (const moduleKey of ['核', '形', '时', '忆', '器', '令', '照', '德']) {
       expect(bodyText).toContain(moduleKey);
     }
@@ -257,22 +265,38 @@ describe('PromptTab dao prompt editor', () => {
     }
 
     const preview = await screen.findByRole('dialog', { name: '完整提示词' });
-    expect(within(preview).getByText('仅提示词正文')).toBeInTheDocument();
-    expect(within(preview).getByRole('button', { name: '运行底座' })).toHaveAttribute('aria-pressed', 'false');
-    expect(latestPreviewRequestBody().includeRuntimeFoundation).toBe(false);
-    expect(preview.textContent || '').not.toContain('底层运行规则');
+    expect(within(preview).getByText('运行时展开')).toBeInTheDocument();
+    expect(latestPreviewRequestBody().includeRuntimeFoundation).toBe(true);
+    expect(latestPreviewRequestBody().templatePreview).not.toBe(true);
+    expect(preview.textContent || '').toContain('器是 HanakoPro 的工具行法');
+    expect(preview.textContent || '').toContain('可用技能');
     expect(within(preview).getByRole('button', { name: 'Markdown' })).toHaveAttribute('aria-pressed', 'true');
     expect(within(preview).getByRole('heading', { name: '核', level: 1 })).toBeInTheDocument();
     expect(within(preview).getByRole('heading', { name: '形', level: 1 })).toBeInTheDocument();
-    fireEvent.click(within(preview).getByRole('button', { name: '运行底座' }));
-    await waitFor(() => {
-      expect(latestPreviewRequestBody().includeRuntimeFoundation).toBe(true);
-    });
-    expect(within(preview).getByText('含运行底座')).toBeInTheDocument();
-    expect(preview.textContent || '').toContain('底层运行规则');
+    expect(preview.textContent || '').not.toContain('{{runtimeFoundation}}');
+    expect(preview.textContent || '').not.toContain('{{skills}}');
     fireEvent.click(within(preview).getByRole('button', { name: '纯文本' }));
     expect(within(preview).getByRole('button', { name: '纯文本' })).toHaveAttribute('aria-pressed', 'true');
     expect(preview.querySelector('pre')?.textContent || '').toContain('# 形\n\n身份设定');
+  });
+
+  it('keeps the readonly 器 module as template variables without preview backfilling', async () => {
+    render(<PromptTab />);
+
+    const vesselButton = screen.getByRole('button', { name: '查看 器' });
+    expect(vesselButton).toHaveTextContent('{{runtimeFoundation}}');
+    expect(vesselButton).toHaveTextContent('{{skills}}');
+    expect(vesselButton).not.toHaveTextContent('器是 HanakoPro 的工具行法');
+
+    fireEvent.click(vesselButton);
+    const dialog = await screen.findByRole('dialog', { name: '器 工具行法与可用技能' });
+    expect(dialog.textContent || '').toContain('# 器');
+    expect(dialog.textContent || '').toContain('{{runtimeFoundation}}');
+    expect(dialog.textContent || '').toContain('{{skills}}');
+    expect(dialog.textContent || '').not.toContain('器是 HanakoPro 的工具行法');
+
+    const previewCalls = mocks.hanaFetch.mock.calls.filter(([url]) => String(url).endsWith('/system-prompt-preview'));
+    expect(previewCalls).toHaveLength(0);
   });
 
   it('uses conduct as 德 and clears the old standalone anchor without merging it', async () => {
@@ -359,13 +383,6 @@ describe('PromptTab dao prompt editor', () => {
 
     render(<PromptTab />);
 
-    await waitFor(() => {
-      expect(mocks.hanaFetch).toHaveBeenCalledWith(
-        '/api/agents/agent-a/system-prompt-preview',
-        expect.objectContaining({ method: 'POST' }),
-      );
-    });
-
     fireEvent.click(screen.getByRole('button', { name: '编辑 核' }));
 
     const rootField = screen.getByLabelText('核内容') as HTMLTextAreaElement;
@@ -373,6 +390,8 @@ describe('PromptTab dao prompt editor', () => {
     expect(rootField.value).not.toContain('道经全文');
     expect(rootField.value).not.toContain('运行时内容不属于核');
 
+    fireEvent.click(screen.getByRole('button', { name: '查看完整提示词' }));
+    await screen.findByRole('dialog', { name: '完整提示词' });
     const latestPreview = latestPreviewRequestText();
     expect(latestPreview).not.toContain('道经全文');
     expect(latestPreview).not.toContain('运行时内容不属于核');
@@ -392,13 +411,6 @@ describe('PromptTab dao prompt editor', () => {
 
     render(<PromptTab />);
 
-    await waitFor(() => {
-      expect(mocks.hanaFetch).toHaveBeenCalledWith(
-        '/api/agents/agent-a/system-prompt-preview',
-        expect.objectContaining({ method: 'POST' }),
-      );
-    });
-
     fireEvent.click(screen.getByRole('button', { name: '编辑 核' }));
     fireEvent.change(screen.getByLabelText('核内容'), { target: { value: '新核\n\n---\n\n内部横线仍属于核' } });
     closeActiveModuleDialog();
@@ -411,6 +423,7 @@ describe('PromptTab dao prompt editor', () => {
     fireEvent.change(screen.getByLabelText('德内容'), { target: { value: '新德' } });
     closeActiveModuleDialog();
 
+    fireEvent.click(screen.getByRole('button', { name: '查看完整提示词' }));
     await waitFor(() => {
       const latestPreview = latestPreviewRequestText();
       expect(latestPreview).toContain('新核');
@@ -423,7 +436,6 @@ describe('PromptTab dao prompt editor', () => {
       expect(latestPreview).not.toContain('旧德');
     }, { timeout: 2000 });
 
-    fireEvent.click(screen.getByRole('button', { name: '查看完整提示词' }));
     const preview = await screen.findByRole('dialog', { name: '完整提示词' });
     expect(preview.textContent || '').toContain('新核');
     expect(preview.textContent || '').toContain('内部横线仍属于核');
@@ -445,13 +457,6 @@ describe('PromptTab dao prompt editor', () => {
 
     render(<PromptTab />);
 
-    await waitFor(() => {
-      expect(mocks.hanaFetch).toHaveBeenCalledWith(
-        '/api/agents/agent-a/system-prompt-preview',
-        expect.objectContaining({ method: 'POST' }),
-      );
-    });
-
     fireEvent.click(screen.getByRole('button', { name: '编辑 核' }));
     expect(screen.getByLabelText('核内容')).toHaveValue('# 核\n\n短核');
     closeActiveModuleDialog();
@@ -464,6 +469,8 @@ describe('PromptTab dao prompt editor', () => {
     expect(screen.getByLabelText('德内容')).toHaveValue('# 德\n\n短德');
     closeActiveModuleDialog();
 
+    fireEvent.click(screen.getByRole('button', { name: '查看完整提示词' }));
+    await screen.findByRole('dialog', { name: '完整提示词' });
     const sentComposer = readPromptComposer(mocks.hanaFetch.mock.calls.find(([url]) => String(url).endsWith('/system-prompt-preview'))?.[1]) as {
       origin?: { root?: string; mood?: string; conduct?: string };
     };
@@ -511,18 +518,13 @@ describe('PromptTab dao prompt editor', () => {
 
     render(<PromptTab />);
 
-    await waitFor(() => {
-      expect(mocks.hanaFetch).toHaveBeenCalledWith(
-        '/api/agents/agent-a/system-prompt-preview',
-        expect.objectContaining({ method: 'POST' }),
-      );
-    });
-
     fireEvent.click(screen.getByRole('button', { name: '编辑 核' }));
     const rootField = screen.getByLabelText('核内容') as HTMLTextAreaElement;
     expect(rootField.value).toBe(fullRoot);
     expect(rootField.value).toContain('道经全文第二段');
     expect(rootField.value).toContain('阴符经全文');
+    fireEvent.click(screen.getByRole('button', { name: '查看完整提示词' }));
+    await screen.findByRole('dialog', { name: '完整提示词' });
     expect(latestPreviewRequestComposer().origin?.root).toBe(fullRoot);
     expect(latestPreviewRequestText()).toContain(fullRoot);
   });
@@ -541,41 +543,30 @@ describe('PromptTab dao prompt editor', () => {
 
     render(<PromptTab />);
 
-    await waitFor(() => {
-      expect(mocks.hanaFetch).toHaveBeenCalledWith(
-        '/api/agents/agent-a/system-prompt-preview',
-        expect.objectContaining({ method: 'POST' }),
-      );
-    });
-
     fireEvent.click(screen.getByRole('button', { name: '编辑 核' }));
     const rootField = screen.getByLabelText('核内容') as HTMLTextAreaElement;
     fireEvent.change(rootField, { target: { value: '# 核\n\n只保留编辑框里的核' } });
-    await waitFor(() => {
-      expect(latestPreviewRequestComposer().origin?.root).toBe('# 核\n\n只保留编辑框里的核');
-    }, { timeout: 2000 });
     expect(rootField).toHaveValue('# 核\n\n只保留编辑框里的核');
     closeActiveModuleDialog();
 
     fireEvent.click(screen.getByRole('button', { name: '编辑 照' }));
     const moodField = screen.getByLabelText('照内容') as HTMLTextAreaElement;
     fireEvent.change(moodField, { target: { value: '# 照\n\n只保留编辑框里的照' } });
-    await waitFor(() => {
-      expect(latestPreviewRequestComposer().origin?.mood).toBe('# 照\n\n只保留编辑框里的照');
-    }, { timeout: 2000 });
     expect(moodField).toHaveValue('# 照\n\n只保留编辑框里的照');
     closeActiveModuleDialog();
 
     fireEvent.click(screen.getByRole('button', { name: '编辑 德' }));
     const conductField = screen.getByLabelText('德内容') as HTMLTextAreaElement;
     fireEvent.change(conductField, { target: { value: '# 德\n\n只保留编辑框里的德' } });
-    await waitFor(() => {
-      const composer = latestPreviewRequestComposer();
-      expect(composer.origin?.conduct).toBe('# 德\n\n只保留编辑框里的德');
-      expect(composer.origin?.anchor).toBe('');
-    }, { timeout: 2000 });
     expect(conductField).toHaveValue('# 德\n\n只保留编辑框里的德');
 
+    fireEvent.click(screen.getByRole('button', { name: '查看完整提示词' }));
+    await screen.findByRole('dialog', { name: '完整提示词' });
+    const composer = latestPreviewRequestComposer();
+    expect(composer.origin?.root).toBe('# 核\n\n只保留编辑框里的核');
+    expect(composer.origin?.mood).toBe('# 照\n\n只保留编辑框里的照');
+    expect(composer.origin?.conduct).toBe('# 德\n\n只保留编辑框里的德');
+    expect(composer.origin?.anchor).toBe('');
     const latestPreview = latestPreviewRequestText();
     expect(latestPreview).toContain('# 核\n\n只保留编辑框里的核');
     expect(latestPreview).toContain('# 照\n\n只保留编辑框里的照');

@@ -571,6 +571,7 @@ export function createAgentsRoute(engine) {
         memoryEnabled: body.memoryEnabled !== false,
         workspaceFolders,
         includeRuntimeFoundation: body.includeRuntimeFoundation === true,
+        templatePreview: body.templatePreview === true,
         ...(hasOwn(body, "promptComposer") ? { promptComposer: body.promptComposer } : {}),
       });
       return c.json(preview);
