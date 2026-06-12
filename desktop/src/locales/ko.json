@@ -2181,7 +2181,7 @@
     },
     "sessionGoal": {
       "label": "세션 목표",
-      "description": "현재 세션 목표 상태를 업데이트합니다. 목표 모드의 검증은 일반 코드 리뷰가 아닙니다. 사용자처럼 결과를 열고, 확인하고, 클릭하고, 실행하거나 조작해야 합니다. UI, 웹, 미리보기, Hanako 내부 브라우저 또는 데스크톱 앱이 관련된 경우 검수에는 반드시 Computer Use를 사용합니다. 웹은 먼저 Hanako built-in browser로 URL을 열 수 있지만, 작은 커서는 HanakoPro의 Browser/내부 브라우저 창에 바인딩된 상태로 확인해야 합니다. complete/blocked 뒤에는 이 검수의 Computer Use 커서를 자동으로 정리합니다. 목표가 완료되고 검수를 통과했거나 더 이상 진행할 수 없음을 확인했을 때만 사용하세요. 사용자의 목표를 지우는 용도로 쓰지 마세요.",
+      "description": "현재 세션 목표 상태를 업데이트합니다. 목표 모드의 검증은 일반 코드 리뷰가 아닙니다. 사용자처럼 결과를 열고, 확인하고, 클릭하고, 실행하거나 조작해야 합니다. UI, 웹, 미리보기, Hanako 내부 브라우저 또는 데스크톱 앱이 관련된 경우 검수에는 반드시 Computer Use를 사용합니다. 웹은 먼저 Hanako built-in browser로 URL을 열 수 있지만, Computer Use visible control cursor는 HanakoPro의 Browser/내부 브라우저 창에 바인딩된 상태로 확인해야 합니다. complete/blocked 뒤에는 이 검수의 Computer Use visible control cursor를 자동으로 정리합니다. 목표가 완료되고 검수를 통과했거나 더 이상 진행할 수 없음을 확인했을 때만 사용하세요. 사용자의 목표를 지우는 용도로 쓰지 마세요.",
       "actionDesc": "목표 상태: complete는 완료, blocked는 진행 불가",
       "noteDesc": "완료 근거 또는 막힌 이유에 대한 짧은 설명",
       "missingSession": "현재 세션이 없어 목표 상태를 업데이트할 수 없습니다.",

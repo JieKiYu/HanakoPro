@@ -2254,7 +2254,7 @@
     },
     "sessionGoal": {
       "label": "Session Goal",
-      "description": "Update the current session goal status. Goal-mode verification is not ordinary code review: open, inspect, click, run, or operate the result as a user would. When UI, web, previews, Hanako's internal browser, or desktop apps matter, acceptance must use Computer Use; web targets may first use Hanako's built-in browser to open the URL, but the small cursor must bind to HanakoPro's Browser/internal-browser window for confirmation. complete/blocked automatically settles this review's Computer Use cursor. Use only when the goal is completed and acceptance passes, or when you have confirmed you cannot continue; do not use it to clear the user's goal.",
+      "description": "Update the current session goal status. Goal-mode verification is not ordinary code review: open, inspect, click, run, or operate the result as a user would. When UI, web, previews, Hanako's internal browser, or desktop apps matter, acceptance must use Computer Use; web targets may first use Hanako's built-in browser to open the URL, but the Computer Use visible control cursor must bind to HanakoPro's Browser/internal-browser window for confirmation. complete/blocked automatically settles this review's Computer Use visible control cursor. Use only when the goal is completed and acceptance passes, or when you have confirmed you cannot continue; do not use it to clear the user's goal.",
       "actionDesc": "Goal status: complete means finished, blocked means unable to continue",
       "noteDesc": "Brief completion evidence or blocking reason",
       "missingSession": "No current session is available, so the goal status cannot be updated.",

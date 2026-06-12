@@ -7,7 +7,7 @@
  * - DropText 子组件
  */
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect, type CSSProperties } from 'react';
 import { useStore } from './stores';
 import { hanaFetch } from './hooks/use-hana-fetch';
 import { toSlash, baseName } from './utils/format';
@@ -197,7 +197,22 @@ export function MainContent({ children }: { children: React.ReactNode }) {
   const dragCounter = useRef(0);
   const welcomeVisible = useStore(s => s.welcomeVisible);
   const currentTab = useStore(s => s.currentTab);
+  const inlineTerminalOpen = useStore(s => s.inlineTerminalOpen);
+  const inlineTerminalHeight = useStore(s => s.inlineTerminalHeight);
+  const setInlineTerminalHeight = useStore(s => s.setInlineTerminalHeight);
   const welcomeMode = welcomeVisible && currentTab === 'chat';
+  const terminalMode = inlineTerminalOpen && currentTab === 'chat';
+  const mainStyle = {
+    '--inline-terminal-h': `${inlineTerminalHeight}px`,
+  } as CSSProperties;
+
+  useEffect(() => {
+    const onResize = () => {
+      setInlineTerminalHeight(useStore.getState().inlineTerminalHeight, window.innerHeight);
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [setInlineTerminalHeight]);
 
   const onDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -219,7 +234,8 @@ export function MainContent({ children }: { children: React.ReactNode }) {
 
   return (
     <div
-      className={`main-content${welcomeMode ? ' welcome-mode' : ''}`}
+      className={`main-content${welcomeMode ? ' welcome-mode' : ''}${terminalMode ? ' inline-terminal-mode' : ''}`}
+      style={mainStyle}
       onDragEnter={onDragEnter}
       onDragLeave={onDragLeave}
       onDragOver={onDragOver}

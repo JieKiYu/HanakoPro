@@ -13,7 +13,7 @@ const os = require("os");
 const path = require("path");
 const { spawn, execFile } = require("child_process");
 const fs = require("fs");
-const { pathToFileURL } = require("url");
+const { pathToFileURL, fileURLToPath } = require("url");
 const { PNG } = require("pngjs");
 const { initAutoUpdater, checkForUpdatesAuto, setMainWindow: setUpdaterMainWindow, setUpdateChannel, installDownloadedUpdate } = require("./auto-updater.cjs");
 const {
@@ -222,6 +222,55 @@ function loadWindowURL(win, pageName, opts) {
       win.loadFile(path.join(__dirname, "src", `${pageName}.html`), opts);
     }
   }
+}
+
+function isHttpUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function appPageFileCandidates(pageName) {
+  return [
+    path.join(_distRenderer, `${pageName}.html`),
+    path.join(__dirname, "src", `${pageName}.html`),
+  ];
+}
+
+function isAppPageNavigation(url, pageName) {
+  try {
+    const parsed = new URL(url);
+    if (_isDev && process.env.VITE_DEV_URL) {
+      const expected = new URL(`${process.env.VITE_DEV_URL}/${pageName}.html`);
+      return parsed.origin === expected.origin && parsed.pathname === expected.pathname;
+    }
+    if (parsed.protocol !== "file:") return false;
+    const targetPath = fileURLToPath(parsed);
+    return appPageFileCandidates(pageName).includes(targetPath);
+  } catch {
+    return false;
+  }
+}
+
+function openExternalIfAllowed(url) {
+  if (!isHttpUrl(url)) return;
+  shell.openExternal(url);
+}
+
+function installAppWindowNavigationGuard(win, pageName) {
+  win.webContents.on("will-navigate", (event, url) => {
+    if (isAppPageNavigation(url, pageName)) return;
+    event.preventDefault();
+    openExternalIfAllowed(url);
+  });
+
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    openExternalIfAllowed(url);
+    return { action: "deny" };
+  });
 }
 
 /** 校验浏览器 URL：仅允许 http/https */
@@ -890,10 +939,34 @@ function monitorServer() {
  * 显示主窗口（优先 onboardingWindow，其次 mainWindow）
  */
 function showPrimaryWindow() {
-  if (process.platform === "darwin") app.dock.show();
-  const win = mainWindow || onboardingWindow;
+  _startHiddenAtLogin = false;
+  if (process.platform === "darwin") {
+    try { app.setActivationPolicy?.("regular"); } catch {}
+    try { app.dock.show(); } catch {}
+  }
+  let win = mainWindow || onboardingWindow;
+  if (!win || win.isDestroyed()) {
+    if (serverPort) {
+      createMainWindow();
+      win = mainWindow;
+    } else {
+      return;
+    }
+  }
+  if (win.setSkipTaskbar) win.setSkipTaskbar(false);
+  if (win.setOpacity) win.setOpacity(1);
+  if (win.setFocusable) win.setFocusable(true);
+  if (win.isMinimized?.()) win.restore?.();
+  try {
+    win.show();
+  } catch (err) {
+    console.warn("[desktop] showPrimaryWindow: win.show failed:", redactMainLogText(err?.message || String(err)));
+  }
+  try { app.focus?.({ steal: true }); } catch (err) {
+    console.warn("[desktop] showPrimaryWindow: app.focus failed:", redactMainLogText(err?.message || String(err)));
+  }
   focusExistingWindow(win);
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try { win.moveTop?.(); } catch {}
   if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.show();
   if (browserViewerWindow && !browserViewerWindow.isDestroyed()) browserViewerWindow.show();
   for (const [, vw] of _viewerWindows) {
@@ -1461,6 +1534,8 @@ function createMainWindow() {
     ...titleBarOpts({ x: 16, y: 16 }),
     backgroundColor: getThemeBackgroundColor(initialTheme),
     show: false,
+    paintWhenInitiallyHidden: true,
+    acceptFirstMouse: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.bundle.cjs"),
       contextIsolation: true,
@@ -1496,18 +1571,31 @@ function createMainWindow() {
   loadWindowURL(mainWindow, "index");
 
   // 前端初始化超时保护：30 秒内没收到 app-ready 就强制显示（防止用户卡在空白）
+  const revealTimer = setTimeout(() => {
+    if (_startHiddenAtLogin) return;
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      console.warn("[desktop] 主窗口创建后未显示，执行短兜底显示");
+      showPrimaryWindow();
+    }
+  }, 1200);
   const initTimeout = setTimeout(() => {
     if (_startHiddenAtLogin) return;
     console.warn("[desktop] ⚠ 主窗口初始化超时（30s），强制显示");
     if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
-      mainWindow.show();
+      showPrimaryWindow();
     }
   }, 30000);
   mainWindow.webContents.once("did-finish-load", () => {
     // did-finish-load 只是 HTML 加载完成，JS init 可能还在跑
     console.log("[desktop] 主窗口 HTML 加载完成，等待前端 init...");
   });
-  mainWindow.once("show", () => clearTimeout(initTimeout));
+  mainWindow.webContents.on("did-fail-load", (_event, code, description, validatedUrl) => {
+    console.error("[desktop] 主窗口加载失败:", code, redactMainLogText(description), redactMainLogText(validatedUrl || ""));
+  });
+  mainWindow.on("show", () => {
+    clearTimeout(revealTimer);
+    clearTimeout(initTimeout);
+  });
 
   if (process.argv.includes("--dev")) {
     mainWindow.webContents.openDevTools();
@@ -1535,16 +1623,8 @@ function createMainWindow() {
   mainWindow.on("resize", saveWindowState);
   mainWindow.on("move", saveWindowState);
 
-  // 拦截页面内链接导航：外部 URL 用系统浏览器打开，不要导航 Electron 窗口
-  mainWindow.webContents.on("will-navigate", (event, url) => {
-    try {
-      const parsed = new URL(url);
-      if (parsed.protocol === "https:" || parsed.protocol === "http:") {
-        event.preventDefault();
-        shell.openExternal(url);
-      }
-    } catch {}
-  });
+  // 拦截页面内链接导航：外部 URL 用系统浏览器打开，本地/相对链接不允许导航 Electron 主窗口。
+  installAppWindowNavigationGuard(mainWindow, "index");
 
   // 广播最大化状态变化（Windows/Linux 自绘标题栏的最大化/还原按钮需要）
   mainWindow.on("maximize", () => mainWindow.webContents.send("window-maximized"));
@@ -1650,15 +1730,7 @@ function createSettingsWindow(tab, theme) {
   }
 
   // 拦截设置窗口内的链接导航
-  settingsWindow.webContents.on("will-navigate", (event, url) => {
-    try {
-      const parsed = new URL(url);
-      if (parsed.protocol === "https:" || parsed.protocol === "http:") {
-        event.preventDefault();
-        shell.openExternal(url);
-      }
-    } catch {}
-  });
+  installAppWindowNavigationGuard(settingsWindow, "settings");
 
   // renderer 崩溃恢复：标记为 null，下次打开时重建
   settingsWindow.webContents.on("render-process-gone", (_event, details) => {
@@ -1728,15 +1800,7 @@ function createTerminalWindow(initialCwd, opts = {}) {
   });
 
   // 拦截窗口内导航（只允许保留在终端页面）
-  terminalWindow.webContents.on("will-navigate", (event, url) => {
-    try {
-      const parsed = new URL(url);
-      if (parsed.protocol === "https:" || parsed.protocol === "http:") {
-        event.preventDefault();
-        shell.openExternal(url);
-      }
-    } catch {}
-  });
+  installAppWindowNavigationGuard(terminalWindow, "terminal");
 
   terminalWindow.webContents.on("render-process-gone", (_event, details) => {
     console.error(`[desktop] terminal renderer 崩溃: ${details.reason} (code: ${details.exitCode})`);
@@ -3711,8 +3775,8 @@ wrapIpcBestEffortHandler("refocus-webcontents", (event) => {
 
 // 前端初始化完成后调用，关闭 splash / onboarding，显示主窗口
 wrapIpcBestEffortHandler("app-ready", () => {
-  if (mainWindow && !_startHiddenAtLogin) {
-    mainWindow.show();
+  if (mainWindow && !_startHiddenAtLogin && !mainWindow.isDestroyed()) {
+    showPrimaryWindow();
   }
 
   // 首次启动时请求通知权限（macOS）
@@ -3847,12 +3911,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0 && serverPort) {
-    createMainWindow();
-    // 不在这里 show()，前端 init 完成后会通过 app-ready IPC 触发显示
-  } else if (mainWindow) {
-    mainWindow.show();
-  }
+  showPrimaryWindow();
 });
 
 // ── 优雅关闭 ──

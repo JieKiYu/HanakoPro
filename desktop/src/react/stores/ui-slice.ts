@@ -1,5 +1,6 @@
 import type { ActivePanel, RightWorkspaceTab, TabType } from '../types';
 import type { FileRef } from '../types/file-ref';
+import { INLINE_TERMINAL_DEFAULT_HEIGHT, clampInlineTerminalHeight } from '../terminal/inline-terminal-height';
 
 export interface MediaViewerState {
   files: FileRef[];
@@ -10,6 +11,13 @@ export interface MediaViewerState {
 export interface SettingsModalState {
   open: boolean;
   activeTab: string;
+}
+
+export interface InlineTerminalRecord {
+  id: string;
+  title?: string;
+  cwd?: string;
+  alive?: boolean;
 }
 
 export interface UiSlice {
@@ -34,6 +42,12 @@ export interface UiSlice {
   channelCreateOverlayVisible: boolean;
   /** 聊天搜索查询（从左侧会话搜索传入） */
   chatSearchQuery: string | null;
+  /** 主窗口底部内嵌终端是否打开 */
+  inlineTerminalOpen: boolean;
+  /** 主窗口底部内嵌终端高度 px */
+  inlineTerminalHeight: number;
+  /** 每个会话自己的默认底部终端 */
+  inlineTerminalBySession: Record<string, InlineTerminalRecord>;
   setSidebarOpen: (open: boolean) => void;
   setSidebarAutoCollapsed: (collapsed: boolean) => void;
   setJianOpen: (open: boolean) => void;
@@ -52,6 +66,10 @@ export interface UiSlice {
   toggleSidebar: () => void;
   toggleJian: () => void;
   setChatSearchQuery: (query: string | null) => void;
+  setInlineTerminalOpen: (open: boolean) => void;
+  toggleInlineTerminal: () => void;
+  setInlineTerminalHeight: (height: number, viewportHeight?: number) => void;
+  setInlineTerminalForSession: (sessionPath: string, terminal: InlineTerminalRecord | null) => void;
 }
 
 export const createUiSlice = (
@@ -75,6 +93,9 @@ export const createUiSlice = (
   settingsModal: { open: false, activeTab: 'agent' },
   channelCreateOverlayVisible: false,
   chatSearchQuery: null,
+  inlineTerminalOpen: false,
+  inlineTerminalHeight: INLINE_TERMINAL_DEFAULT_HEIGHT,
+  inlineTerminalBySession: {},
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   setSidebarAutoCollapsed: (collapsed) => set({ sidebarAutoCollapsed: collapsed }),
   setJianOpen: (open) => set({ jianOpen: open }),
@@ -95,4 +116,25 @@ export const createUiSlice = (
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   toggleJian: () => set((s) => ({ jianOpen: !s.jianOpen })),
   setChatSearchQuery: (query) => set({ chatSearchQuery: query }),
+  setInlineTerminalOpen: (open) => set({ inlineTerminalOpen: open }),
+  toggleInlineTerminal: () => set((s) => ({ inlineTerminalOpen: !s.inlineTerminalOpen })),
+  setInlineTerminalHeight: (height, viewportHeight) => set({
+    inlineTerminalHeight: clampInlineTerminalHeight(
+      height,
+      viewportHeight ?? (typeof window !== 'undefined' ? window.innerHeight : 900),
+    ),
+  }),
+  setInlineTerminalForSession: (sessionPath, terminal) =>
+    set((s) => {
+      if (!terminal) {
+        const { [sessionPath]: _, ...rest } = s.inlineTerminalBySession;
+        return { inlineTerminalBySession: rest };
+      }
+      return {
+        inlineTerminalBySession: {
+          ...s.inlineTerminalBySession,
+          [sessionPath]: terminal,
+        },
+      };
+    }),
 });

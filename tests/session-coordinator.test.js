@@ -526,6 +526,89 @@ describe("SessionCoordinator", () => {
     expect(result.messages[1].content[0].text).toContain("自然触发");
   });
 
+  it("does not inject recalled memory again after a tool result continuation", async () => {
+    const agentDir = path.join(tempDir, "agents", "hana");
+    const sessionFile = path.join(agentDir, "sessions", "memory-tool-continuation.jsonl");
+    fs.mkdirSync(path.join(agentDir, "sessions"), { recursive: true });
+    fs.writeFileSync(
+      path.join(agentDir, "pinned.md"),
+      "- 用户希望 Hanako 记忆改造采用钉络镜笺四层结构\n",
+      "utf-8",
+    );
+    const agent = {
+      id: "hana",
+      agentDir,
+      sessionDir: path.join(agentDir, "sessions"),
+      sessionMemoryEnabled: true,
+      memoryMasterEnabled: true,
+      config: { locale: "zh", memory: { enabled: true, use: true } },
+      summaryManager: { getAllSummaries: () => [] },
+      setMemoryEnabled: vi.fn(),
+      buildSystemPrompt: () => "BASE",
+      getToolsSnapshot: vi.fn(() => []),
+      tools: [],
+    };
+    createAgentSessionMock.mockResolvedValueOnce({
+      session: {
+        sessionManager: { getSessionFile: () => sessionFile },
+        subscribe: vi.fn(() => vi.fn()),
+        setActiveToolsByName: vi.fn(),
+      },
+    });
+
+    const coordinator = new SessionCoordinator({
+      agentsDir: path.join(tempDir, "agents"),
+      getAgent: () => agent,
+      getActiveAgentId: () => "hana",
+      getModels: () => ({
+        currentModel: { name: "test-model" },
+        authStorage: {},
+        modelRegistry: {},
+        resolveThinkingLevel: () => "medium",
+      }),
+      getResourceLoader: () => ({
+        getSystemPrompt: () => "BASE",
+        getAppendSystemPrompt: () => [],
+        getExtensions: () => ({ extensions: [], errors: [] }),
+        getAgentsFiles: () => ({ agentsFiles: [] }),
+      }),
+      getSkills: () => null,
+      buildTools: () => ({ tools: [], customTools: [] }),
+      emitEvent: () => {},
+      getHomeCwd: () => tempDir,
+      agentIdFromSessionPath: () => null,
+      switchAgentOnly: async () => {},
+      getConfig: () => ({}),
+      getPrefs: () => ({ getThinkingLevel: () => "medium" }),
+      getAgents: () => new Map(),
+      getActivityStore: () => null,
+      getAgentById: () => agent,
+      listAgents: () => [],
+    });
+
+    await coordinator.createSession(null, tempDir, true);
+
+    const resourceLoader = createAgentSessionMock.mock.calls[0][0].resourceLoader;
+    const memoryExtension = resourceLoader
+      .getExtensions()
+      .extensions
+      .find((extension) => extension.path === "hana-memory-recall-context");
+    const contextHandler = memoryExtension.handlers.get("context")[0];
+    const result = await contextHandler(
+      {
+        messages: [
+          { role: "system", content: "BASE" },
+          { role: "user", content: "Hanako 记忆改造怎么做得自然？" },
+          { role: "assistant", content: [{ type: "toolCall", id: "call_grep", name: "grep", arguments: {} }] },
+          { role: "toolResult", toolCallId: "call_grep", toolName: "grep", content: [{ type: "text", text: "grep result" }] },
+        ],
+      },
+      { sessionManager: { getSessionFile: () => sessionFile } },
+    );
+
+    expect(result).toBeUndefined();
+  });
+
   it("passes the frozen experience state into the agent tool snapshot", async () => {
     const sessionFile = path.join(tempDir, "agents", "hana", "sessions", "experience.jsonl");
     const agent = {
@@ -1805,11 +1888,11 @@ describe("SessionCoordinator", () => {
     expect(reviewContent).toContain("本轮验收侧重点");
     expect(reviewContent).toContain("用户视角必须落到使用电脑（computer 工具）");
     expect(reviewContent).toContain("打开页面只允许用 Hanako 内置浏览器（browser 工具）直接 navigate 到真实 URL");
-    expect(reviewContent).toContain("不要通过使用电脑去 Chrome/Safari");
+    expect(reviewContent).toContain("不要通过使用电脑在 Chrome/Safari");
     expect(reviewContent).toContain("browser.navigate 打开真实 URL → browser.show");
     expect(reviewContent).toContain("appId=\"com.hanakopro.app\" 且 windowTitle=\"Browser\"");
-    expect(reviewContent).toContain("使用电脑只负责把小鼠标绑定到 HanakoPro 的 Browser/内置浏览器窗口");
-    expect(reviewContent).toContain("目标应用和小鼠标的绑定必须持续存在");
+    expect(reviewContent).toContain("使用电脑只负责把 Computer Use 可视控制光标绑定到 HanakoPro 的 Browser/内置浏览器窗口");
+    expect(reviewContent).toContain("Computer Use 会话与目标应用窗口的绑定必须持续存在");
     expect(reviewContent).not.toContain("browser 工具只作");
     expect(reviewContent).toContain("不要重复复述");
     expect(reviewContent).toContain("不要为了推进验收而调用 todo_write");

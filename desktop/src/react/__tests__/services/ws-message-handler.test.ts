@@ -119,6 +119,23 @@ describe('ws-message-handler applyStreamingStatus', () => {
     expect(useStore.getState().streamingSessions).toEqual(['/focused.jsonl']);
   });
 
+  it('忽略 abort-like error，不显示输入区红色错误提示', () => {
+    useStore.setState({
+      currentSessionPath: '/focused.jsonl',
+      streamingSessions: ['/focused.jsonl'],
+      inlineErrors: {},
+    } as never);
+
+    handleServerMessage({
+      type: 'error',
+      sessionPath: '/focused.jsonl',
+      message: 'signal is aborted without reason',
+    });
+
+    expect(useStore.getState().inlineErrors['/focused.jsonl']).toBeNull();
+    expect(useStore.getState().streamingSessions).toEqual([]);
+  });
+
   it('目标自动验收结束后，主界面按钮从停止态恢复到发送态', () => {
     useStore.setState({
       currentSessionPath: '/focused.jsonl',

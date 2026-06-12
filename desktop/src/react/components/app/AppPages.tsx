@@ -13,6 +13,7 @@ import { ChannelMessages, ChannelMembers, ChannelInput, ChannelReadonly, Channel
 import { ChannelHeader } from '../channels/ChannelHeader';
 import { MainContent } from '../../MainContent';
 import { RegionalErrorBoundary } from '../RegionalErrorBoundary';
+import { InlineTerminalPanel } from '../../terminal/InlineTerminalPanel';
 
 const tr = (key: string, vars?: Record<string, string | number>) => window.t?.(key, vars) ?? key;
 
@@ -28,6 +29,7 @@ function WelcomeContainer() {
 function ChatPage({ inputCardRef }: { inputCardRef: Ref<HTMLDivElement> }) {
   const welcomeVisible = useStore(s => s.welcomeVisible);
   const currentSessionPath = useStore(s => s.currentSessionPath);
+  const inlineTerminalOpen = useStore(s => s.inlineTerminalOpen);
   const hasPanels = !welcomeVisible && !!currentSessionPath;
 
   return (
@@ -41,6 +43,11 @@ function ChatPage({ inputCardRef }: { inputCardRef: Ref<HTMLDivElement> }) {
       <div className="input-area">
         <RegionalErrorBoundary region="input" resetKeys={[currentSessionPath]}>
           <InputArea key={currentSessionPath || '__new'} cardRef={inputCardRef} />
+        </RegionalErrorBoundary>
+      </div>
+      <div className={`inline-terminal-slot${inlineTerminalOpen ? ' open' : ''}`} aria-hidden={!inlineTerminalOpen}>
+        <RegionalErrorBoundary region="inline-terminal" resetKeys={[currentSessionPath]}>
+          <InlineTerminalPanel active={inlineTerminalOpen} />
         </RegionalErrorBoundary>
       </div>
     </>

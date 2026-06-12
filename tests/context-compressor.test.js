@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveContextConfig, shouldTriggerCompression, splitMessages, executeCompression } from "../core/context-compressor.js";
+import { CONTINUATION_PACK_MODE, resolveContextConfig, shouldTriggerCompression, splitMessages, executeCompression } from "../core/context-compressor.js";
 import { DEFAULT_CONTEXT_COMPRESSION } from "../shared/context-compression.js";
 
 describe("resolveContextConfig", () => {
@@ -169,14 +169,14 @@ describe("splitMessages", () => {
       { role: "assistant", content: "a3" },
     ];
     // protect=1 → retain only u3+a3, compressible = system+u1+a1+tool+u2+a2
-    const { compressible, retained } = splitMessages(msgsWithAll, 1, { systemPrompt: false, recentToolResults: false });
+    const { compressible } = splitMessages(msgsWithAll, 1, { systemPrompt: false, recentToolResults: false });
     expect(compressible.some(m => m.role === "system")).toBe(true);
     expect(compressible.some(m => m.role === "tool")).toBe(true);
   });
 });
 
 describe("executeCompression", () => {
-  const mockGenerate = async (prompt) => "test summary";
+  const mockGenerate = async (_prompt) => "test summary";
 
   it("calls rolling-summary by default", async () => {
     const result = await executeCompression({
@@ -202,6 +202,24 @@ describe("executeCompression", () => {
     });
     expect(result).toBe("custom result");
     expect(receivedPrompt).toContain("Compress:");
+  });
+
+  it("builds a continuation-pack prompt for manual compress fork", async () => {
+    let receivedPrompt = "";
+    const result = await executeCompression({
+      messages: [{ role: "user", content: "当前目标是修主动压缩" }],
+      mode: CONTINUATION_PACK_MODE,
+      model: {},
+      generateFn: async (prompt) => {
+        receivedPrompt = prompt;
+        return "接续包";
+      },
+    });
+
+    expect(result).toBe("接续包");
+    expect(receivedPrompt).toContain("主动压缩并开启新对话");
+    expect(receivedPrompt).toContain("新会话不携带旧消息原文");
+    expect(receivedPrompt).toContain("当前目标是修主动压缩");
   });
 
   it("falls back to rolling-summary for unknown mode", async () => {

@@ -16,7 +16,7 @@
  *
  * 注意：ws 关闭不等于 PTY 退出。仅当收到 type:"exit" 才标记 dead。
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef, type CSSProperties } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -27,10 +27,20 @@ interface Props {
   termId: string;
   serverPort: string;
   serverToken: string;
+  themeTokens?: TerminalThemeTokens;
+  variant?: 'window' | 'inline';
+  onMissing?: () => void;
   onExit?: () => void;
 }
 
-const THEME = {
+export interface TerminalThemeTokens {
+  background?: string;
+  foreground?: string;
+  cursor?: string;
+  selectionBackground?: string;
+}
+
+const DEFAULT_THEME = {
   background: '#1e1e1e',
   foreground: '#d4d4d4',
   cursor: '#d4d4d4',
@@ -53,16 +63,27 @@ const THEME = {
   brightWhite: '#e5e5e5',
 };
 
-export function TerminalPane({ termId, serverPort, serverToken, onExit }: Props) {
+function buildTheme(tokens?: TerminalThemeTokens) {
+  return {
+    ...DEFAULT_THEME,
+    ...tokens,
+    selectionInactiveBackground: tokens?.selectionBackground ?? DEFAULT_THEME.selectionBackground,
+  };
+}
+
+export function TerminalPane({ termId, serverPort, serverToken, themeTokens, variant = 'window', onMissing, onExit }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const theme = useMemo(() => buildTheme(themeTokens), [themeTokens]);
 
   // onExit 走 ref，避免父组件每次 re-render 产生的新闭包让 useEffect 重跑导致
   // xterm 销毁重建（历史 / scrollback 会全丢）。
   const onExitRef = useRef(onExit);
   useEffect(() => { onExitRef.current = onExit; }, [onExit]);
+  const onMissingRef = useRef(onMissing);
+  useEffect(() => { onMissingRef.current = onMissing; }, [onMissing]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -70,8 +91,8 @@ export function TerminalPane({ termId, serverPort, serverToken, onExit }: Props)
 
     // ── xterm 实例 ──
     const term = new Terminal({
-      theme: THEME,
-      fontFamily: '"Cascadia Mono", "Cascadia Code", Consolas, "Courier New", monospace',
+      theme,
+      fontFamily: 'var(--font-mono, "Cascadia Mono", "Cascadia Code", Consolas, "Courier New", monospace)',
       fontSize: 13,
       lineHeight: 1.2,
       cursorBlink: true,
@@ -94,6 +115,7 @@ export function TerminalPane({ termId, serverPort, serverToken, onExit }: Props)
     const containerHasSize = () => container.offsetWidth > 0 && container.offsetHeight > 0;
     let lastSentCols = -1;
     let lastSentRows = -1;
+    let resizeFrame: number | null = null;
     const trySyncSize = () => {
       if (!containerHasSize()) return;
       try { fit.fit(); } catch { return; }
@@ -108,6 +130,13 @@ export function TerminalPane({ termId, serverPort, serverToken, onExit }: Props)
           lastSentRows = rows;
         } catch {}
       }
+    };
+    const scheduleSyncSize = () => {
+      if (resizeFrame !== null) return;
+      resizeFrame = requestAnimationFrame(() => {
+        resizeFrame = null;
+        trySyncSize();
+      });
     };
 
     // ── WebSocket ──
@@ -139,6 +168,9 @@ export function TerminalPane({ termId, serverPort, serverToken, onExit }: Props)
         onExitRef.current?.();
       } else if (msg.type === 'error' && msg.error) {
         term.write(`\r\n\x1b[31m[终端错误: ${msg.error}]\x1b[0m\r\n`);
+        if (String(msg.error).toLowerCase().includes('not found')) {
+          onMissingRef.current?.();
+        }
       }
     };
 
@@ -161,14 +193,20 @@ export function TerminalPane({ termId, serverPort, serverToken, onExit }: Props)
 
     // ── 容器尺寸变化 → fit + 通知 server ──
     // 走 trySyncSize：0×0 时不发 resize，避免后台 tab 的 conpty 把 ring buffer 冲掉
-    const ro = new ResizeObserver(() => { trySyncSize(); });
-    ro.observe(container);
+    const ro = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(() => { scheduleSyncSize(); })
+      : null;
+    ro?.observe(container);
+    const onWindowResize = () => { scheduleSyncSize(); };
+    if (!ro) window.addEventListener('resize', onWindowResize);
     // display:none → display:block 不一定立刻触发 ResizeObserver；下一帧主动同步一次
-    requestAnimationFrame(() => { trySyncSize(); });
+    scheduleSyncSize();
 
     // ── cleanup ──
     return () => {
-      ro.disconnect();
+      if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
+      ro?.disconnect();
+      if (!ro) window.removeEventListener('resize', onWindowResize);
       inputDisp.dispose();
       try { ws.close(); } catch {}
       try { term.dispose(); } catch {}
@@ -178,7 +216,18 @@ export function TerminalPane({ termId, serverPort, serverToken, onExit }: Props)
     };
     // 故意不把 onExit 放进 deps，由 onExitRef 转发最新值。
     // 这样切 tab 引起的父组件 re-render 不会重建 xterm，scrollback 得以保留。
-  }, [termId, serverPort, serverToken]);
+  }, [termId, serverPort, serverToken, theme]);
 
-  return <div ref={containerRef} className={s.xtermContainer} />;
+  const style = {
+    '--terminal-pane-bg': theme.background,
+    '--terminal-pane-fg': theme.foreground,
+  } as CSSProperties;
+
+  return (
+    <div
+      ref={containerRef}
+      className={`${s.xtermContainer}${variant === 'inline' ? ` ${s.xtermContainerInline}` : ''}`}
+      style={style}
+    />
+  );
 }

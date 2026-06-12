@@ -42,9 +42,9 @@ export function getPlatformPromptNote({
     lines.push(
       "",
       "## 器 · 终端",
-      "- `terminal_*`（terminal_list / terminal_create / terminal_read / terminal_write / terminal_wait / terminal_interrupt / terminal_kill）是共享可见终端。用户能看到正在跑什么，你也能用 terminal_interrupt 中断。",
+      "- `terminal_*`（terminal_list / terminal_create / terminal_read / terminal_write / terminal_wait / terminal_interrupt / terminal_kill）是共享可见终端。用户能看到正在执行的命令，你也能用 terminal_interrupt 中断。",
       "- 可能需要用户观看、耗时超过几秒、会长期运行、需要交互、开发服务器、watcher、ping、build，或中途可能要打断的命令，优先用 `terminal_*`。",
-      "- `bash` 只用于短、确定、一次性、需要完整捕获输出的命令，比如读文件、快速计算、一次性脚本。`bash` 会等到退出，卡住时不方便优雅中断。",
+      "- `bash` 只用于短、确定、一次性、需要完整捕获输出的命令，比如读文件、快速计算、一次性脚本。`bash` 会等待命令退出，异常挂起时无法由用户侧可靠中断。",
       "- 用户明确说“在终端运行”“启动”，或语义上是可观看、可取消的命令时，选择 `terminal_*`，不要改用 `bash`。",
       "- 常见链路：必要时 terminal_list → 复用已有会话或 terminal_create → terminal_write 提交命令 → terminal_wait 等输出稳定/进程退出/用户打断 → terminal_read 看结果 → 必要时 terminal_interrupt 停止。",
       "- terminal_write 之后优先用一次覆盖预期时长的 terminal_wait，不要连着很多短 wait；这样用户看到的是一张干净的输出卡片。",
@@ -52,7 +52,7 @@ export function getPlatformPromptNote({
       "- 终端链路开始前只有在进入新阶段且确有助于理解时才给一句说明；terminal_list / terminal_create / terminal_write / terminal_wait / terminal_read 之间静默接上。工具卡片本身就是进度，不要重复播报同一个入口、URL、路径或服务地址。",
       "- 若已经说过某个入口、URL、路径、端口或服务地址，把它视为已播报对象；后续终端启动、等待、读取时不要再用“已找到/已定位/现在启动/下一步打开”等近义句复述它。说完入口后直接执行工具，最后用一次结果收束。",
       "- 如果下一句只是“我将/现在/下一步 + 同一对象”的铺垫，而不是新发现、失败、需要用户选择或最终证据，就不要发这句正文。",
-      "- 用户在终端卡片上按了“打断”时，只做两件事：自然致歉并询问下一步；停止当前计划。不要重跑刚被打断的命令，也不要把内部字段名讲给用户听。",
+      "- 用户在终端卡片上按了“打断”时，只做两件事：自然致歉并询问下一步；停止当前计划。不要重新执行刚被打断的命令，也不要向用户暴露内部字段名。",
     );
   } else {
     lines.push(
@@ -68,7 +68,7 @@ export function getPlatformPromptNote({
       "- Before a terminal execution chain, speak only when entering a new phase and the note adds useful context; let terminal_list / terminal_create / terminal_write / terminal_wait / terminal_read continue silently. Tool cards already show progress; do not repeat the same entrypoint, URL, path, or service address in text.",
       "- If you have already mentioned an entrypoint, URL, path, port, or service address, treat it as a reported object; do not restate it during later terminal start/wait/read steps with synonyms such as found, located, starting, or opening next. After mentioning the entrypoint, run the tool directly, then close once with the result.",
       "- If the next sentence is only 'I will / now / next + the same object' setup, and not a new finding, failure, user choice, or final evidence, do not send that prose sentence.",
-      "- 当用户在对话内嵌的终端卡片上按了「打断」按钮时，你会通过 terminal_wait 的 reason=human_interrupt 或 details.humanInterruptsInWindow / details.humanInterrupts 非空 感知到。此时**只**做两件事：用一句自然的话向用户致歉并询问下一步想怎么做；停止你当前的整套计划。绝对不要重跑刚才被打断的命令，也不要把上述字段名（reason、human_interrupt、terminal_wait 等内部机制）讲给用户听，那些是你内部的实现细节，用户不需要知道。",
+      "- When the user presses the interrupt button on an embedded terminal card, terminal_wait may report reason=human_interrupt or non-empty details.humanInterruptsInWindow / details.humanInterrupts. At that point do only two things: briefly apologize and ask what they want to do next; stop the current plan. Do not rerun the interrupted command, and do not expose internal field names such as reason, human_interrupt, or terminal_wait to the user.",
     );
   }
   return lines.join("\n");

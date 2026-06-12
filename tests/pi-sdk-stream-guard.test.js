@@ -165,4 +165,50 @@ describe("Pi SDK stream guard", () => {
       }),
     ]);
   });
+
+  it("turns a silent assistant stream into a bounded idle error", async () => {
+    let nextCount = 0;
+    const returnMock = vi.fn(() => new Promise(() => {}));
+    const inner = {
+      [Symbol.asyncIterator]() {
+        return {
+          next: vi.fn(() => {
+            nextCount += 1;
+            if (nextCount === 1) {
+              return Promise.resolve({ value: { type: "start", partial: assistantMessage([]) }, done: false });
+            }
+            return new Promise(() => {});
+          }),
+          return: returnMock,
+        };
+      },
+      result: vi.fn(async () => null),
+    };
+
+    const { events } = await collect(guardAssistantMessageStream(
+      inner,
+      null,
+      {
+        idleTimeoutMs: 10,
+        returnTimeoutMs: 10,
+        requestMeta: { api: "openai", provider: "test-provider", model: "test-model" },
+      },
+    ));
+
+    expect(events).toEqual([
+      expect.objectContaining({ type: "start" }),
+      expect.objectContaining({
+        type: "error",
+        reason: "error",
+        error: expect.objectContaining({
+          api: "openai",
+          provider: "test-provider",
+          model: "test-model",
+          stopReason: "error",
+          errorMessage: expect.stringContaining("模型续跑静默过久"),
+        }),
+      }),
+    ]);
+    expect(returnMock).toHaveBeenCalledOnce();
+  });
 });

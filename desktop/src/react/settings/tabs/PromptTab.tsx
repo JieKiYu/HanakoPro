@@ -95,6 +95,7 @@ type SystemPromptPreview = {
   content: string;
   cwd?: string;
   model?: { id?: string; provider?: string; name?: string } | null;
+  variables?: Record<string, string>;
 };
 
 type PromptModuleKey = '核' | '形' | '时' | '忆' | '器' | '令' | '照' | '德';
@@ -105,7 +106,7 @@ type PromptModule = {
   content: string;
 };
 
-const MODULE_ORDER: PromptModuleKey[] = ['核', '形', '时', '忆', '器', '令', '照', '德'];
+const MODULE_ORDER: PromptModuleKey[] = ['核', '德', '形', '时', '忆', '器', '令', '照'];
 const MODULE_HINTS: Record<PromptModuleKey, string> = {
   核: '根本原则与核心文本',
   形: 'Hana 的身份、人格与关系设定',
@@ -116,7 +117,7 @@ const MODULE_HINTS: Record<PromptModuleKey, string> = {
   照: '内照与 mood',
   德: '行动约束、确认边界、验证与交付方式',
 };
-
+const PROMPT_VARIABLE_PATTERN = /(\{\{[a-zA-Z0-9_]+\}\})/g;
 function normalizeDraft(value: unknown): PromptComposerConfig {
   const normalized = normalizePromptComposerConfig(value) as PromptComposerConfig;
   const raw = value && typeof value === 'object' ? value as Partial<PromptComposerConfig> : {};
@@ -195,6 +196,9 @@ export function PromptTab() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewMode, setPreviewMode] = useState<PromptPreviewMode>('markdown');
   const [moduleDialogKey, setModuleDialogKey] = useState<PromptModuleKey | null>(null);
+  const [activeVariableName, setActiveVariableName] = useState<string | null>(null);
+  const [variablePreviewLoading, setVariablePreviewLoading] = useState(false);
+  const [variablePreviewError, setVariablePreviewError] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const autosaveTimerRef = useRef<number | null>(null);
@@ -218,7 +222,6 @@ export function PromptTab() {
   const activeModule = moduleDialogKey
     ? visibleModules.find(module => module.key === moduleDialogKey) || fallbackModules.find(module => module.key === moduleDialogKey) || null
     : null;
-
   const saveDraft = useCallback(async (nextDraft: PromptComposerConfig, options: { silent?: boolean } = {}) => {
     setSaving(true);
     try {
@@ -251,8 +254,8 @@ export function PromptTab() {
   const refreshSystemPromptPreview = useCallback(async (
     nextDraft: PromptComposerConfig,
     options: { open?: boolean; silent?: boolean } = {},
-  ) => {
-    if (!agentId) return;
+  ): Promise<SystemPromptPreview | null> => {
+    if (!agentId) return null;
     setPreviewLoading(true);
     if (!options.silent) setPreviewError(null);
     try {
@@ -275,15 +278,31 @@ export function PromptTab() {
         content: typeof data.content === 'string' ? data.content : '',
         cwd: typeof data.cwd === 'string' ? data.cwd : undefined,
         model: data.model || null,
+        variables: data.variables && typeof data.variables === 'object' && !Array.isArray(data.variables)
+          ? Object.fromEntries(Object.entries(data.variables).map(([key, value]) => [key, typeof value === 'string' ? value : String(value ?? '')]))
+          : {},
       };
       setPreview(nextPreview);
       if (options.open) setPreviewOpen(true);
+      return nextPreview;
     } catch (err: unknown) {
       if (!options.silent) setPreviewError(formatErrorMessage(err, '加载完整提示词失败'));
+      return null;
     } finally {
       setPreviewLoading(false);
     }
   }, [agentId, settingsConfig?.last_cwd, settingsConfig?.memory?.enabled]);
+
+  const openVariablePreview = useCallback(async (variableName: string) => {
+    setActiveVariableName(variableName);
+    setVariablePreviewError(null);
+    setVariablePreviewLoading(true);
+    const nextPreview = await refreshSystemPromptPreview(draft, { silent: true });
+    if (!nextPreview?.variables || !hasOwn(nextPreview.variables, variableName)) {
+      setVariablePreviewError('当前预览未返回此变量内容');
+    }
+    setVariablePreviewLoading(false);
+  }, [draft, refreshSystemPromptPreview]);
 
   const getToolOverride = (name: string) => draft.toolOverrides.find(tool => tool.name === name);
 
@@ -367,11 +386,45 @@ export function PromptTab() {
     setModuleDialogKey(module.key);
   };
 
+  const renderVariableTemplateParts = (content: string) => (
+    <>
+      {content.split(PROMPT_VARIABLE_PATTERN).map((part, index) => {
+        const match = part.match(/^\{\{([a-zA-Z0-9_]+)\}\}$/);
+        if (!match) return <React.Fragment key={`${index}:${part}`}>{part}</React.Fragment>;
+        const variableName = match[1];
+        return (
+          <button
+            type="button"
+            key={`${index}:${variableName}`}
+            className={styles['prompt-variable-token']}
+            aria-label={`查看 ${part} 展开内容`}
+            onClick={(event) => {
+              event.stopPropagation();
+              void openVariablePreview(variableName);
+            }}
+          >
+            {part}
+          </button>
+        );
+      })}
+    </>
+  );
+
+  const renderReadonlyTemplateContent = (content: string) => (
+    <pre className={`${styles['prompt-preview-raw']} ${styles['prompt-template-raw']}`}>
+      {renderVariableTemplateParts(content)}
+    </pre>
+  );
+
+  const renderModuleSummaryContent = (content: string) => (
+    <em>{renderVariableTemplateParts(summarizeContent(content))}</em>
+  );
+
   const renderModuleDialogBody = (module: PromptModule) => {
     if (!isEditableModuleKey(module.key)) {
       return (
         <div className={styles['prompt-preview-body']}>
-          <pre className={styles['prompt-preview-raw']}>{module.content}</pre>
+          {renderReadonlyTemplateContent(module.content)}
         </div>
       );
     }
@@ -417,6 +470,11 @@ export function PromptTab() {
       />
     );
   };
+
+  const variableValues = preview?.variables || {};
+  const activeVariableValue = activeVariableName && hasOwn(variableValues, activeVariableName)
+    ? variableValues[activeVariableName] || ''
+    : '';
 
   useEffect(() => {
     setDraft(normalizeDraft(settingsConfig?.promptComposer));
@@ -500,21 +558,29 @@ export function PromptTab() {
             key={module.key}
             className={`${styles['prompt-dao-module']} ${module.key === '核' || module.key === '德' ? styles['prompt-dao-module-primary'] : ''}`}
           >
-            <button
-              type="button"
+            <div
+              role="button"
+              tabIndex={0}
               className={styles['prompt-dao-module-summary']}
               onClick={() => openModuleDialog(module)}
+              onKeyDown={(event) => {
+                if (event.target !== event.currentTarget) return;
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  openModuleDialog(module);
+                }
+              }}
               aria-label={`${isEditableModuleKey(module.key) ? '编辑' : '查看'} ${module.key}`}
             >
               <span className={styles['prompt-dao-glyph']}>{module.key}</span>
               <span className={styles['prompt-dao-module-copy']}>
                 <span className={styles['prompt-dao-module-title']}>{MODULE_HINTS[module.key]}</span>
-                <em>{summarizeContent(module.content)}</em>
+                {renderModuleSummaryContent(module.content)}
               </span>
               <span className={styles['prompt-dao-module-state']}>
                 {isEditableModuleKey(module.key) ? (saving ? '保存中' : '编辑') : '查看'}
               </span>
-            </button>
+            </div>
           </article>
         ))}
       </div>
@@ -636,6 +702,37 @@ export function PromptTab() {
               </div>
             </div>
             {renderModuleDialogBody(activeModule)}
+          </div>
+        </div>,
+        document.body,
+      )}
+
+      {activeVariableName && createPortal(
+        <div
+          className={styles['prompt-variable-popover-backdrop']}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setActiveVariableName(null);
+          }}
+        >
+          <div className={styles['prompt-variable-popover']} role="dialog" aria-modal="true" aria-label={`{{${activeVariableName}}} 变量展开内容`}>
+            <div className={styles['prompt-variable-popover-header']}>
+              <div>
+                <h3>{`{{${activeVariableName}}}`}</h3>
+                <span>变量展开内容</span>
+              </div>
+              <button type="button" className={styles['prompt-preview-close']} onClick={() => setActiveVariableName(null)}>×</button>
+            </div>
+            <div className={styles['prompt-variable-popover-body']}>
+              {variablePreviewLoading ? (
+                <div className={styles['prompt-variable-empty']}>生成中…</div>
+              ) : variablePreviewError ? (
+                <div className={styles['prompt-variable-error']}>{variablePreviewError}</div>
+              ) : activeVariableValue.trim() ? (
+                <pre>{activeVariableValue}</pre>
+              ) : (
+                <div className={styles['prompt-variable-empty']}>当前为空</div>
+              )}
+            </div>
           </div>
         </div>,
         document.body,

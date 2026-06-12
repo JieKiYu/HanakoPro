@@ -47,6 +47,11 @@ import {
   resolveModelVideoInputTransport,
 } from "../../shared/model-capabilities.js";
 import { replayLatestUserTurn, revertLatestAssistantTurn } from "../../core/session-turn-actions.js";
+import {
+  isReadOnlyPermissionMode,
+  legacyAccessModeFromPermissionMode,
+  normalizeSessionPermissionMode,
+} from "../../core/session-permission-mode.js";
 
 function rcPlatformFromSessionKey(sessionKey) {
   const match = /^([a-z]+)_/i.exec(sessionKey || "");
@@ -1283,6 +1288,11 @@ export function createSessionsRoute(engine) {
       const switchedAgentId = engine.agentIdFromSessionPath(result.sessionPath) || engine.currentAgentId;
       const switchedAgent = engine.getAgent(switchedAgentId);
       const contextUsage = computeContextUsageSnapshot(newSession);
+      const permissionMode = normalizeSessionPermissionMode(
+        engine.getSessionPermissionMode?.(result.sessionPath) || engine.permissionMode,
+      );
+      const accessMode = legacyAccessModeFromPermissionMode(permissionMode);
+      const planMode = isReadOnlyPermissionMode(permissionMode);
       let compressionAvailable = false;
       try {
         const ctxConfig = resolveContextConfig(switchedAgent?._config);
@@ -1296,9 +1306,9 @@ export function createSessionsRoute(engine) {
         workspaceFolders: engine.getSessionWorkspaceFolders?.(result.sessionPath) || [],
         agentId: switchedAgentId,
         agentName: switchedAgent?.agentName || engine.agentName,
-        planMode: engine.planMode,
-        permissionMode: engine.permissionMode,
-        accessMode: engine.accessMode,
+        planMode,
+        permissionMode,
+        accessMode,
         thinkingLevel: engine.getSessionThinkingLevel?.(result.sessionPath) || engine.getThinkingLevel?.() || "auto",
         goal: engine.getSessionGoal?.(result.sessionPath) || null,
         memoryModelUnavailableReason: engine.memoryModelUnavailableReason || null,

@@ -64,6 +64,12 @@ vi.mock('../../components/BridgePanel', () => ({
   BridgePanel: () => <section data-testid="bridge-panel" />,
 }));
 
+vi.mock('../../terminal/InlineTerminalPanel', () => ({
+  InlineTerminalPanel: ({ active }: { active?: boolean }) => (
+    <section data-testid="inline-terminal-panel" data-active={active ? 'true' : 'false'} />
+  ),
+}));
+
 describe('AppPages page ownership', () => {
   beforeEach(() => {
     window.t = ((key: string) => key) as typeof window.t;
@@ -77,6 +83,7 @@ describe('AppPages page ownership', () => {
       channelInfoName: '',
       jianOpen: true,
       previewOpen: true,
+      inlineTerminalOpen: false,
     } as never);
   });
 
@@ -125,5 +132,51 @@ describe('AppPages page ownership', () => {
     ).toBeTruthy();
     expect(screen.queryByTestId('preview-panel')).not.toBeInTheDocument();
     expect(screen.getByTestId('right-workspace-panel')).toBeInTheDocument();
+  });
+
+  it('renders the inline terminal on the welcome page when the top toggle is open', () => {
+    useStore.setState({
+      welcomeVisible: true,
+      currentSessionPath: null,
+      inlineTerminalOpen: true,
+    } as never);
+    const ref = createRef<HTMLDivElement>();
+
+    render(<AppPages inputCardRef={ref} />);
+
+    expect(screen.getByTestId('welcome-screen')).toBeInTheDocument();
+    expect(screen.getByTestId('inline-terminal-panel')).toBeInTheDocument();
+  });
+
+  it('places the inline terminal as the chat page bottom dock', () => {
+    useStore.setState({
+      welcomeVisible: false,
+      currentSessionPath: '/sessions/main.jsonl',
+      inlineTerminalOpen: true,
+    } as never);
+    const ref = createRef<HTMLDivElement>();
+
+    render(<AppPages inputCardRef={ref} />);
+
+    const main = screen.getByTestId('main-content');
+    const input = screen.getByTestId('input-area');
+    const terminal = screen.getByTestId('inline-terminal-panel');
+    expect(main).toContainElement(terminal);
+    expect(
+      input.compareDocumentPosition(terminal) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(terminal).toHaveAttribute('data-active', 'true');
+  });
+
+  it('keeps a collapsed dock slot without connecting the inline terminal when closed', () => {
+    const ref = createRef<HTMLDivElement>();
+
+    render(<AppPages inputCardRef={ref} />);
+
+    const slot = document.querySelector('.inline-terminal-slot');
+    expect(slot).toBeInTheDocument();
+    expect(slot).not.toHaveClass('open');
+    expect(slot).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getByTestId('inline-terminal-panel')).toHaveAttribute('data-active', 'false');
   });
 });

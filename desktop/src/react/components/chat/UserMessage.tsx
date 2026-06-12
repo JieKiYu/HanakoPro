@@ -180,7 +180,7 @@ export const UserMessage = memo(function UserMessage({
             disabled={busy}
           />
         ) : (
-          message.textHtml && <MarkdownContent html={message.textHtml} />
+          message.textHtml && <MarkdownContent html={message.textHtml} sessionPath={sessionPath} />
         )}
       </div>
       {canShowLatestActions && (

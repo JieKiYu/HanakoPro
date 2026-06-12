@@ -29,7 +29,7 @@ export const DEFAULT_SIMPLE_PROMPT_TEMPLATE_ID = "hanako-agentic-coding-assistan
 
 export const PROMPT_COMPOSER_MODES = ["blocks", "simple", "origin"];
 
-export const ORIGIN_PROMPT_MODULE_ORDER = ["核", "形", "时", "忆", "器", "令", "照", "德"];
+export const ORIGIN_PROMPT_MODULE_ORDER = ["核", "德", "形", "时", "忆", "器", "令", "照"];
 
 export const DEFAULT_ORIGIN_KEEP_BLOCK_ORDER = [
   "experience",
@@ -497,7 +497,7 @@ export function getOriginPromptReadonlyModuleTemplate(key) {
   if (key === "形") return compactSection(key, "{{originPersonality}}");
   if (key === "时") return compactSection(key, ["{{workspace}}", "当前时日：{{currentDateTime}}"].join("\n"));
   if (key === "忆") return compactSection(key, ["用户档案：", "{{userProfile}}", "", "置顶记忆：", "{{pinnedMemory}}"].join("\n"));
-  if (key === "器") return compactSection(key, ["{{runtimeFoundation}}", "{{skills}}"].join("\n\n"));
+  if (key === "器") return compactSection(key, ["{{runtimeFoundation}}", "{{skills}}", "{{keepBlockIds}}"].join("\n\n"));
   if (key === "令") return compactSection(key, "{{appendSystemPrompt}}");
   return "";
 }
@@ -507,6 +507,7 @@ export function getOriginPromptModuleTemplates(config) {
   const origin = normalized.origin || {};
   const modules = [
     { key: "核", content: normalizeText(origin.root) },
+    { key: "德", content: normalizeText(origin.conduct) },
     { key: "形", content: getOriginPromptReadonlyModuleTemplate("形") },
     { key: "时", content: getOriginPromptReadonlyModuleTemplate("时") },
     { key: "忆", content: getOriginPromptReadonlyModuleTemplate("忆") },
@@ -514,7 +515,6 @@ export function getOriginPromptModuleTemplates(config) {
     { key: "令", content: getOriginPromptReadonlyModuleTemplate("令") },
   ];
   if (origin.includeMood === true) modules.push({ key: "照", content: normalizeText(origin.mood) });
-  modules.push({ key: "德", content: normalizeText(origin.conduct) });
   return modules;
 }
 
@@ -542,11 +542,18 @@ function composeKeptOriginBlocks(normalized, builtInBlocks, variables) {
   return parts;
 }
 
+export function composeKeptOriginBlockContents({ config, builtInBlocks, variables } = {}) {
+  return composeKeptOriginBlocks(normalizePromptComposerConfig(config), builtInBlocks, variables);
+}
+
 function composeOriginPrompt(normalized, builtInBlocks, variables, options = {}) {
   const origin = normalized.origin || {};
   const root = renderPromptValue(origin.root, variables);
   const parts = [];
   if (root) parts.push(root);
+
+  const conduct = renderPromptValue(origin.conduct, variables);
+  if (conduct) parts.push(conduct);
 
   if (origin.includePersonality !== false) {
     const personalitySource = Object.prototype.hasOwnProperty.call(variables || {}, "originPersonality")
@@ -579,6 +586,7 @@ function composeOriginPrompt(normalized, builtInBlocks, variables, options = {})
       ? stripCompactSectionHeading(renderPromptValue(variables?.runtimeFoundation, variables), ["器", "Vessel"])
       : "",
     renderPromptValue(variables?.skills, variables),
+    ...composeKeptOriginBlocks(normalized, builtInBlocks, variables),
   ].filter(Boolean);
   if (vesselLines.length) parts.push(compactSection("器", vesselLines.join("\n\n")));
 
@@ -589,11 +597,6 @@ function composeOriginPrompt(normalized, builtInBlocks, variables, options = {})
     const mood = renderPromptValue(origin.mood, variables);
     if (mood) parts.push(mood);
   }
-
-  const conduct = renderPromptValue(origin.conduct, variables);
-  if (conduct) parts.push(conduct);
-
-  parts.push(...composeKeptOriginBlocks(normalized, builtInBlocks, variables));
 
   return parts.filter(Boolean).join("\n\n---\n\n").trim() || null;
 }

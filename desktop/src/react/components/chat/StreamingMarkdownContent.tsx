@@ -9,6 +9,7 @@ interface Props {
   source?: string;
   active?: boolean;
   className?: string;
+  sessionPath?: string;
 }
 
 const COMPLEX_MARKDOWN_PATTERNS = [
@@ -41,6 +42,7 @@ export const StreamingMarkdownContent = memo(function StreamingMarkdownContent({
   source,
   active = false,
   className,
+  sessionPath,
 }: Props) {
   const shouldType = !!source && active && isTypewriterEligibleMarkdownSource(source);
   const previousVisibleSourceRef = useRef<string | null>(null);
@@ -71,6 +73,7 @@ export const StreamingMarkdownContent = memo(function StreamingMarkdownContent({
       html={visibleHtml}
       className={className}
       tailFadeCount={tailFadeCount}
+      sessionPath={sessionPath}
     />
   );
 });

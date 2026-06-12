@@ -250,6 +250,27 @@ describe("session-coordinator tool snapshot (createSession)", () => {
     expect(defaultModeSaveSpy).not.toHaveBeenCalled();
   });
 
+  it("can create a fresh fork with an explicit initial permission mode", async () => {
+    storedDefaultMode = "ask";
+    currentAgentConfig = { tools: { disabled: [] } };
+
+    const { sessionPath } = await coord.createSession(null, tmpDir, true, null, {
+      initialPermissionMode: "operate",
+    });
+
+    expect(coord.getPermissionMode(sessionPath)).toBe("operate");
+    expect(coord.getAccessMode(sessionPath)).toBe("operate");
+    expect(coord.getPermissionModeDefault()).toBe("ask");
+    expect(defaultModeSaveSpy).not.toHaveBeenCalled();
+
+    const meta = JSON.parse(await fsp.readFile(path.join(sessionDir, "session-meta.json"), "utf-8"));
+    expect(meta[path.basename(sessionPath)]).toMatchObject({
+      permissionMode: "operate",
+      accessMode: "operate",
+      planMode: false,
+    });
+  });
+
   it("persists the resolved thinking level as session-owned state when creating a session", async () => {
     storedThinkingLevel = "high";
     currentAgentConfig = { tools: { disabled: [] } };

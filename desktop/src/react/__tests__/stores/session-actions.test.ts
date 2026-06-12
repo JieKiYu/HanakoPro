@@ -1004,6 +1004,9 @@ describe('session-actions', () => {
         .mockResolvedValueOnce(jsonResponse({
           path: '/new.jsonl',
           workspaceFolders: [],
+          permissionMode: 'operate',
+          accessMode: 'operate',
+          planMode: false,
           contextUsage: {
             tokens: 320,
             contextWindow: 8000,
@@ -1038,6 +1041,8 @@ describe('session-actions', () => {
         { dedupeKey: 'compress-fork' },
       );
       expect(mockState.currentSessionPath).toBe('/new.jsonl');
+      const permissionEvent = dispatchedEvents.filter(e => e.type === 'hana-plan-mode').at(-1);
+      expect(permissionEvent?.detail).toEqual({ enabled: false, mode: 'operate' });
       expect(mockState.compressForkingSessions).toEqual([]);
       expect(mockUpdateKeyed).toHaveBeenCalledWith(
         'contextBySession',

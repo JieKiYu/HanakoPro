@@ -208,6 +208,8 @@ export function cloneMessageForForkRetention(message) {
   return cloned;
 }
 
+export const CONTINUATION_PACK_MODE = "continuation-pack";
+
 // ════════════════════════════
 //  压缩策略
 // ════════════════════════════
@@ -277,6 +279,53 @@ async function compressRollingSummary(compressible, model, generateFn) {
 - **Current state**: Where the conversation stands
 
 Preserve exact variable names, file paths, error messages, and code references.
+
+${text}`,
+    model,
+  );
+  return summary || "";
+}
+
+/**
+ * 主动压缩接续包。
+ *
+ * 用于“压缩上下文并开启新对话”：新会话不再额外搬运最近 N 轮原文，
+ * 而是让摘要本身承担完整接续职责，避免刚开场就占用大量上下文。
+ */
+async function compressContinuationPack(compressible, model, generateFn) {
+  if (compressible.length === 0) return "";
+
+  const text = serializeConversation(compressible);
+  const summary = await generateFn(
+    `你正在为 Hanako 的“主动压缩并开启新对话”生成一份接续包。
+
+目标：让新会话不携带旧消息原文，也能准确继续刚才的工作。
+
+请用中文输出，结构清晰、信息密度高，不要写解释性开场，不要逐字搬运闲聊或重复内容。
+
+必须保留：
+- 用户当前目标、明确偏好、禁忌和已经确认的方向
+- 已完成事项、未完成事项、下一步最小行动
+- 关键文件路径、函数名、变量名、命令、测试结果、错误信息
+- 重要决策、约束、验收标准和需要避免的误解
+- 最近几轮对继续工作有用的上下文，但只提炼，不复制原文
+
+建议格式：
+# 接续包
+
+## 当前目标
+
+## 已确认事实
+
+## 已完成
+
+## 待继续
+
+## 关键凭据
+
+## 下一步
+
+对话历史：
 
 ${text}`,
     model,
@@ -395,6 +444,7 @@ async function compressCustom(compressible, model, generateFn, customPrompt) {
 const STRATEGY_MAP = {
   "ebbinghaus": compressEbbinghaus,
   "rolling-summary": compressRollingSummary,
+  [CONTINUATION_PACK_MODE]: compressContinuationPack,
   "hierarchical": compressHierarchical,
   "importance": compressImportance,
   "map-reduce": compressMapReduce,

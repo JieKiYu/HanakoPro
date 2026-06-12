@@ -98,9 +98,9 @@ vi.mock('../../components/input/InputContextRow', () => ({
 }));
 
 vi.mock('../../components/input/InputControlBar', () => ({
-  InputControlBar: ({ planModeLocked }: { planModeLocked: boolean }) => React.createElement(
+  InputControlBar: ({ planModeLocked, permissionMode }: { planModeLocked: boolean; permissionMode?: string }) => React.createElement(
     'button',
-    { type: 'button', 'data-testid': 'mode-button', disabled: planModeLocked },
+    { type: 'button', 'data-testid': 'mode-button', 'data-mode': permissionMode, disabled: planModeLocked },
     'mode',
   ),
 }));
@@ -397,6 +397,28 @@ describe('computer app approval prompt', () => {
     render(React.createElement(InputArea));
 
     expect(screen.getByTestId('mode-button').hasAttribute('disabled')).toBe(false);
+  });
+
+  it('defaults the permission switch to ask before backend permission sync', () => {
+    render(React.createElement(InputArea));
+
+    expect(screen.getByTestId('mode-button').getAttribute('data-mode')).toBe('ask');
+  });
+
+  it('hydrates the permission switch from the backend permission mode', async () => {
+    useStore.setState({ activeServerConnection: {} } as never);
+    hanaFetchMock.mockImplementation(async (requestPath: string) => {
+      if (requestPath === '/api/session-permission-mode') {
+        return new Response(JSON.stringify({ mode: 'operate', accessMode: 'operate' }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    });
+
+    render(React.createElement(InputArea));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mode-button').getAttribute('data-mode')).toBe('operate');
+    });
   });
 
   it('updates session_confirmation status when confirmation_resolved arrives outside the last message', () => {

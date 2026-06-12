@@ -34,6 +34,15 @@ function identityExists() {
   return output.includes(`"${IDENTITY}"`);
 }
 
+function certificateExists() {
+  try {
+    const output = run("security", ["find-certificate", "-a", "-c", IDENTITY, "-Z", KEYCHAIN]);
+    return output.includes("SHA-1 hash:");
+  } catch (_) {
+    return false;
+  }
+}
+
 function writeOpenSslConfig(file) {
   fs.writeFileSync(file, `[ req ]
 default_bits = 4096
@@ -64,6 +73,11 @@ function main() {
 
   if (identityExists()) {
     console.log(`[local-codesign] Reusing identity: ${IDENTITY}`);
+    return;
+  }
+
+  if (certificateExists()) {
+    console.log(`[local-codesign] Reusing existing certificate: ${IDENTITY}`);
     return;
   }
 

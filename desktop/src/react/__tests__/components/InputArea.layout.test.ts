@@ -21,7 +21,14 @@ describe('InputArea layout', () => {
       path.join(process.cwd(), 'desktop/src/react/components/FloatingPanels.module.css'),
       'utf8',
     );
+    const inlineTerminalCss = fs.readFileSync(
+      path.join(process.cwd(), 'desktop/src/react/terminal/InlineTerminalPanel.module.css'),
+      'utf8',
+    );
 
+    const inputAreaRootBlock = cssBlock(globalCss, String.raw`\.input-area`);
+    const mainContentBlock = cssBlock(globalCss, String.raw`\.main-content`);
+    const welcomeTerminalChatAreaBlock = cssBlock(globalCss, String.raw`\.main-content\.welcome-mode\.inline-terminal-mode \.chat-area`);
     const inputAreaBlock = cssBlock(globalCss, String.raw`\.input-area > \*`);
     const welcomeInputAreaBlock = cssBlock(globalCss, String.raw`\.main-content\.welcome-mode \.input-area > \*`);
     const sessionMessagesBlock = cssBlock(chatCss, String.raw`\.sessionMessages`);
@@ -87,22 +94,73 @@ describe('InputArea layout', () => {
     const markdownPreCodeBlock = cssBlock(globalCss, String.raw`\.md-content pre code`);
     const pluginCardContainerBlock = cssBlock(pluginCardCss, String.raw`\.container`);
     const pluginCardIframeBlock = cssBlock(pluginCardCss, String.raw`\.iframe`);
+    const inlineTerminalPanelBlock = cssBlock(inlineTerminalCss, String.raw`\.panel`);
+    const inlineTerminalResizeHandleBlock = cssBlock(inlineTerminalCss, String.raw`\.resizeHandle`);
+    const inlineTerminalSlotBlock = cssBlock(globalCss, String.raw`\.inline-terminal-slot`);
+    const inlineTerminalSlotOpenBlock = cssBlock(globalCss, String.raw`\.inline-terminal-slot\.open`);
 
     expect(globalCss).toMatch(/--chat-column-width:\s*min\(64rem,\s*100%\)/);
     expect(globalCss).toMatch(/--chat-input-column-extra:\s*1\.25rem/);
     expect(globalCss).toMatch(/--chat-input-column-width:\s*min\(100%,\s*calc\(var\(--chat-column-width\) \+ var\(--chat-input-column-extra\)\)\)/);
     expect(globalCss).toMatch(/--welcome-chat-input-column-width:\s*40rem/);
+    expect(globalCss).toMatch(/--inline-terminal-h:\s*clamp\(220px,\s*34vh,\s*340px\)/);
+    expect(globalCss).toMatch(/--scroll-bottom-fab-offset:\s*calc\(var\(--input-stack-h,\s*88px\) \+ var\(--space-lg\)\)/);
+    expect(globalCss).toMatch(/\.main-content\.inline-terminal-mode\s*\{[\s\S]*--scroll-bottom-fab-offset:\s*calc\(var\(--input-stack-h,\s*88px\) \+ var\(--inline-terminal-h\) \+ var\(--space-md\)\)/);
+    expect(mainContentBlock).toMatch(/display:\s*flex/);
+    expect(mainContentBlock).toMatch(/flex-direction:\s*column/);
+    expect(mainContentBlock).toMatch(/min-height:\s*0/);
+    expect(mainContentBlock).toMatch(/overflow:\s*hidden/);
+    expect(cssBlock(globalCss, String.raw`\.chat-area`)).toMatch(/min-height:\s*0/);
+    expect(cssBlock(globalCss, String.raw`\.chat-area`)).toMatch(/padding:\s*48px var\(--space-lg\) 0/);
+    expect(welcomeTerminalChatAreaBlock).toMatch(/flex:\s*1 1 auto/);
+    expect(welcomeTerminalChatAreaBlock).toMatch(/min-height:\s*0/);
+    expect(welcomeTerminalChatAreaBlock).toMatch(/overflow-y:\s*auto/);
+    expect(inputAreaRootBlock).toMatch(/position:\s*relative/);
+    expect(inputAreaRootBlock).toMatch(/flex:\s*0 0 auto/);
+    expect(inputAreaRootBlock).not.toMatch(/position:\s*absolute/);
+    expect(globalCss).not.toMatch(/inline-terminal-offset/);
     expect(inputAreaBlock).toMatch(/max-width:\s*var\(--chat-input-column-width\)/);
     expect(welcomeInputAreaBlock).toMatch(/max-width:\s*var\(--welcome-chat-input-column-width\)/);
     expect(sessionMessagesBlock).toMatch(/max-width:\s*var\(--chat-column-width\)/);
     expect(sessionShellBlock).toMatch(/--chat-input-stop-gap:\s*0\.55rem/);
     expect(sessionShellBlock).toMatch(/--chat-scrollbar-bottom-inset:\s*var\(--chat-input-stop-gap\)/);
     expect(sessionShellBlock).toMatch(/--chat-input-occlusion-height:\s*3rem/);
-    expect(sessionShellBlock).toMatch(/bottom:\s*calc\(var\(--input-stack-h,\s*var\(--input-card-h,\s*0px\)\) \+ var\(--space-lg\) \+ var\(--chat-input-stop-gap\)\)/);
+    expect(sessionShellBlock).toMatch(/bottom:\s*0/);
+    expect(sessionShellBlock).not.toMatch(/inline-terminal-offset/);
+    expect(sessionShellBlock).not.toMatch(/input-stack-h/);
+    expect(inlineTerminalSlotBlock).toMatch(/flex:\s*0 0 0/);
+    expect(inlineTerminalSlotBlock).toMatch(/height:\s*0/);
+    expect(inlineTerminalSlotBlock).toMatch(/max-height:\s*0/);
+    expect(inlineTerminalSlotBlock).toMatch(/overflow:\s*hidden/);
+    expect(inlineTerminalSlotBlock).toMatch(/pointer-events:\s*none/);
+    expect(inlineTerminalSlotBlock).toMatch(/transition:[\s\S]*flex-basis var\(--duration-slow\) var\(--ease-standard\)/);
+    expect(inlineTerminalSlotBlock).toMatch(/transition:[\s\S]*height var\(--duration-slow\) var\(--ease-standard\)/);
+    expect(inlineTerminalSlotBlock).toMatch(/transition:[\s\S]*max-height var\(--duration-slow\) var\(--ease-standard\)/);
+    expect(inlineTerminalSlotOpenBlock).toMatch(/flex-basis:\s*var\(--inline-terminal-h\)/);
+    expect(inlineTerminalSlotOpenBlock).toMatch(/height:\s*var\(--inline-terminal-h\)/);
+    expect(inlineTerminalSlotOpenBlock).toMatch(/max-height:\s*var\(--inline-terminal-h\)/);
+    expect(inlineTerminalSlotOpenBlock).toMatch(/pointer-events:\s*auto/);
+    expect(inlineTerminalPanelBlock).toMatch(/height:\s*100%/);
+    expect(inlineTerminalPanelBlock).toMatch(/min-height:\s*0/);
+    expect(inlineTerminalPanelBlock).toMatch(/margin:\s*0/);
+    expect(inlineTerminalPanelBlock).toMatch(/border-radius:\s*0/);
+    expect(inlineTerminalPanelBlock).toMatch(/position:\s*relative/);
+    expect(inlineTerminalResizeHandleBlock).toMatch(/cursor:\s*ns-resize/);
+    expect(inlineTerminalResizeHandleBlock).toMatch(/touch-action:\s*none/);
+    expect(inlineTerminalResizeHandleBlock).toMatch(/position:\s*absolute/);
+    expect(inlineTerminalResizeHandleBlock).toMatch(/top:\s*0/);
+    expect(inlineTerminalResizeHandleBlock).toMatch(/left:\s*0/);
+    expect(inlineTerminalResizeHandleBlock).toMatch(/right:\s*0/);
+    expect(inlineTerminalResizeHandleBlock).toMatch(/height:\s*10px/);
+    expect(inlineTerminalResizeHandleBlock).toMatch(/background:\s*transparent/);
+    expect(inlineTerminalResizeHandleBlock).not.toMatch(/flex:\s*0 0/);
+    expect(inlineTerminalCss).toMatch(/\.resizeHandle::after\s*\{[\s\S]*height:\s*2px/);
+    expect(inlineTerminalCss).toMatch(/\.resizeHandle:hover::after,[\s\S]*\.resizing \.resizeHandle::after\s*\{[\s\S]*opacity:\s*0\.95/);
     expect(sessionShellAfterBlock).toMatch(/pointer-events:\s*none/);
     expect(sessionShellAfterBlock).toMatch(/height:\s*var\(--chat-input-occlusion-height\)/);
     expect(sessionShellAfterBlock).toMatch(/linear-gradient/);
-    expect(sessionFooterBlock).toMatch(/height:\s*max\(4rem,\s*calc\(var\(--input-stack-h,\s*var\(--input-card-h,\s*0px\)\) \+ var\(--space-lg\)\)\)/);
+    expect(sessionFooterBlock).toMatch(/height:\s*max\(4rem,\s*var\(--space-lg\)\)/);
+    expect(sessionFooterBlock).not.toMatch(/input-stack-h/);
     expect(assistantMessageBlock).toMatch(/width:\s*100%/);
     expect(assistantMessageBlock).toMatch(/max-width:\s*100%/);
     expect(messageAssistantBlock).toMatch(/--chat-message-action-safe-area:\s*7rem/);

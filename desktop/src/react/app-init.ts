@@ -76,6 +76,12 @@ async function loadStartupSidebarBadges(): Promise<void> {
 
 export async function initApp(): Promise<void> {
   const platform = window.platform;
+  let readySent = false;
+  const markAppReady = () => {
+    if (readySent) return;
+    readySent = true;
+    platform.appReady();
+  };
 
   const requestContextUsage = (sessionPath: string) => {
     const ws = getWebSocket();
@@ -94,9 +100,12 @@ export async function initApp(): Promise<void> {
 
   if (!activeServerConnection) {
     setStatus('status.serverNotReady', false);
-    platform.appReady();
+    markAppReady();
     return;
   }
+
+  // Server 连接已建立，主窗口可以先出现；身份、模型、会话和书桌数据继续加载。
+  markAppReady();
 
   try {
     const identityRes = await hanaFetch('/api/server/identity');
@@ -107,7 +116,7 @@ export async function initApp(): Promise<void> {
   } catch (err) {
     console.error('[init] server identity failed:', err);
     setStatus('status.serverNotReady', false);
-    platform.appReady();
+    markAppReady();
     return;
   }
 
@@ -169,10 +178,7 @@ export async function initApp(): Promise<void> {
   // 13. 初始 layout 计算
   updateLayout();
 
-  // 16. 加载插件 UI（pages / widgets）
-  refreshPluginUI();
-
-  // 18. 设置快捷键
+  // 16. 设置快捷键
   document.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === ',') {
       e.preventDefault();
@@ -180,22 +186,23 @@ export async function initApp(): Promise<void> {
     }
   });
 
-  // 19. 设置变更监听
+  // 17. 设置变更监听
   platform.onSettingsChanged((type: string, data: any) => {
     handleAppEvent(type, data);
   });
 
-  // 20. 主进程请求打开设置：托盘 / 外部 IPC 统一落到主窗口 modal
+  // 18. 主进程请求打开设置：托盘 / 外部 IPC 统一落到主窗口 modal
   platform.onOpenSettingsModal?.((tab?: string) => {
     openSettingsModal(tab);
   });
 
-  // 21. Skill Viewer overlay（主进程 / 设置窗口 → 渲染进程）
+  // 19. Skill Viewer overlay（主进程 / 设置窗口 → 渲染进程）
   window.hana?.onShowSkillViewer?.((data: any) => {
     useStore.setState({ skillViewerData: data });
   });
 
-  // 22. 通知 app ready
-  platform.appReady();
+  // 21. 加载插件 UI（pages / widgets）
+  refreshPluginUI();
+
   void loadStartupSidebarBadges();
 }

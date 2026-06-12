@@ -2191,7 +2191,7 @@
     },
     "sessionGoal": {
       "label": "會話目標",
-      "description": "更新目前 session 目標狀態。目標模式的驗證不是普通程式碼審查：必須像使用者一樣打開、查看、點擊、執行或操作結果。涉及介面、網頁、預覽、Hanako 內部瀏覽器或桌面應用時，驗收必須走使用電腦（computer 工具）；網頁可先用 Hanako 內建 browser 打開 URL，但小滑鼠要綁定在 HanakoPro 的 Browser/內部瀏覽器視窗裡完成確認。呼叫 complete/blocked 後會自動收束本輪使用電腦游標。只有在目標已完成並驗收通過，或確認無法繼續推進時使用；不要用它替使用者清除目標。",
+      "description": "更新目前 session 目標狀態。目標模式的驗證不是普通程式碼審查：必須像使用者一樣打開、查看、點擊、執行或操作結果。涉及介面、網頁、預覽、Hanako 內部瀏覽器或桌面應用時，驗收必須走使用電腦（computer 工具）；網頁可先用 Hanako 內建 browser 打開 URL，但 Computer Use 可視控制游標必須綁定在 HanakoPro 的 Browser/內部瀏覽器視窗裡完成確認。呼叫 complete/blocked 後會自動收束本輪 Computer Use 可視控制游標。只有在目標已完成並驗收通過，或確認無法繼續推進時使用；不要用它替使用者清除目標。",
       "actionDesc": "目標狀態：complete 表示已完成，blocked 表示無法繼續推進",
       "noteDesc": "簡短說明完成證據或阻塞原因",
       "missingSession": "沒有目前 session，無法更新目標狀態。",

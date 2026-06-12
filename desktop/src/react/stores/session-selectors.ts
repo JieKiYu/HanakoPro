@@ -1,9 +1,8 @@
 import type { StoreState } from './index';
-import type { ToolCall } from './chat-types';
-
 type SelectionState = Pick<StoreState, 'selectedIdsBySession'>;
 type StreamingState = Pick<StoreState, 'streamingSessions'>;
 type TerminalSessionState = Pick<StoreState, 'chatSessions'>;
+type ActiveTerminalSessionState = TerminalSessionState & StreamingState;
 
 export const EMPTY_SELECTED_IDS = Object.freeze([]) as readonly string[];
 
@@ -38,10 +37,18 @@ function booleanField(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
 }
 
-function terminalCandidateFromTool(tool: ToolCall): LatestTerminalSession | null {
-  if (!tool.name.startsWith('terminal_')) return null;
-  const details = tool.details as Record<string, unknown> | undefined;
-  const args = tool.args as Record<string, unknown> | undefined;
+function recordField(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function terminalCandidateFromTool(tool: unknown): LatestTerminalSession | null {
+  const record = recordField(tool);
+  const name = stringField(record?.name);
+  if (!name?.startsWith('terminal_')) return null;
+  const details = recordField(record?.details);
+  const args = recordField(record?.args);
   const id = stringField(details?.id) ?? stringField(args?.id);
   if (!id) return null;
   return {
@@ -49,7 +56,7 @@ function terminalCandidateFromTool(tool: ToolCall): LatestTerminalSession | null
     title: stringField(details?.title),
     cwd: stringField(details?.cwd),
     alive: booleanField(details?.alive),
-    running: !tool.done,
+    running: record?.done !== true,
   };
 }
 
@@ -59,18 +66,20 @@ export function selectLatestTerminalSession(
 ): LatestTerminalSession | null {
   if (!sessionPath) return null;
   const session = state.chatSessions[sessionPath];
-  if (!session?.items?.length) return null;
+  if (!Array.isArray(session?.items) || session.items.length === 0) return null;
 
   const byNewestId = new Map<string, LatestTerminalSession>();
   for (let i = session.items.length - 1; i >= 0; i -= 1) {
     const item = session.items[i];
-    if (item.type !== 'message' || item.data.role !== 'assistant') continue;
-    const blocks = item.data.blocks || [];
+    if (item?.type !== 'message' || item.data?.role !== 'assistant') continue;
+    const blocks = Array.isArray(item.data.blocks) ? item.data.blocks : [];
     for (let b = blocks.length - 1; b >= 0; b -= 1) {
       const block = blocks[b];
-      if (block.type !== 'tool_group') continue;
-      for (let t = block.tools.length - 1; t >= 0; t -= 1) {
-        const candidate = terminalCandidateFromTool(block.tools[t]);
+      const blockRecord = recordField(block);
+      if (blockRecord?.type !== 'tool_group') continue;
+      const tools = Array.isArray(blockRecord.tools) ? blockRecord.tools : [];
+      for (let t = tools.length - 1; t >= 0; t -= 1) {
+        const candidate = terminalCandidateFromTool(tools[t]);
         if (!candidate) continue;
         const existing = byNewestId.get(candidate.id);
         if (!existing) {
@@ -89,5 +98,13 @@ export function selectLatestTerminalSession(
   }
 
   const candidates = [...byNewestId.values()];
-  return candidates.find((candidate) => candidate.running || candidate.alive !== false) ?? candidates[0] ?? null;
+  return candidates.find((candidate) => candidate.running || candidate.alive === true) ?? null;
+}
+
+export function selectLatestActiveTerminalSession(
+  state: ActiveTerminalSessionState,
+  sessionPath: string | null | undefined,
+): LatestTerminalSession | null {
+  if (!selectIsStreamingSession(state, sessionPath)) return null;
+  return selectLatestTerminalSession(state, sessionPath);
 }

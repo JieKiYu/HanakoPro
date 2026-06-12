@@ -58,6 +58,16 @@ function readPreviewBody(options?: unknown) {
   return typeof body === 'string' ? JSON.parse(body) : {};
 }
 
+function mockedRuntimeFoundation(includeRuntimeFoundation?: boolean) {
+  return includeRuntimeFoundation === true
+    ? [
+      '器是 HanakoPro 的工具行法',
+      '## 行 · 终端',
+      '终端链路开始前只有在进入新阶段且确有助于理解时才给一句说明',
+    ].join('\n\n')
+    : '';
+}
+
 function previewFromRequest(options?: unknown) {
   const body = readPreviewBody(options) as {
     templatePreview?: boolean;
@@ -76,13 +86,7 @@ function previewFromRequest(options?: unknown) {
   if (body.templatePreview === true) {
     return composeOriginPromptTemplate(promptComposer) || '';
   }
-  const runtimeFoundation = body.includeRuntimeFoundation === true
-    ? [
-      '器是 HanakoPro 的工具行法',
-      '## 行 · 终端',
-      '终端链路开始前只有在进入新阶段且确有助于理解时才给一句说明',
-    ].join('\n\n')
-    : '';
+  const runtimeFoundation = mockedRuntimeFoundation(body.includeRuntimeFoundation);
   const typedComposer = promptComposer as {
     origin?: {
       root?: string;
@@ -103,6 +107,24 @@ function previewFromRequest(options?: unknown) {
     ...(origin.includeMood === false ? [] : [origin.mood || '']),
     origin.conduct || '',
   ].filter(Boolean).join('\n\n---\n\n');
+}
+
+function previewVariablesFromRequest(options?: unknown) {
+  const body = readPreviewBody(options) as { includeRuntimeFoundation?: boolean };
+  return {
+    runtimeFoundation: mockedRuntimeFoundation(body.includeRuntimeFoundation),
+    skills: '可用技能',
+    keepBlockIds: [
+      '# 器 · 习',
+      '',
+      '经验库完整展开内容',
+      '',
+      '# 器 · 物',
+      '',
+      'SessionFile 表示和当前 session 相关的本地文件',
+    ].join('\n'),
+    appendSystemPrompt: '追加规则',
+  };
 }
 
 function compactSection(title: string, content: string) {
@@ -185,6 +207,7 @@ describe('PromptTab dao prompt editor', () => {
         return jsonResponse({
           markdown: '',
           content: previewFromRequest(options),
+          variables: previewVariablesFromRequest(options),
         });
       }
       return jsonResponse({});
@@ -216,7 +239,9 @@ describe('PromptTab dao prompt editor', () => {
     expect(screen.getByRole('button', { name: '查看 形' })).toHaveTextContent('{{originPersonality}}');
     expect(screen.getByRole('button', { name: '查看 时' })).toHaveTextContent('{{workspace}}');
     expect(screen.getByRole('button', { name: '查看 忆' })).toHaveTextContent('{{userProfile}}');
+    expect(screen.getByRole('button', { name: '查看 器' })).toHaveTextContent('{{runtimeFoundation}}');
     expect(screen.getByRole('button', { name: '查看 器' })).toHaveTextContent('{{skills}}');
+    expect(screen.getByRole('button', { name: '查看 器' })).toHaveTextContent('{{keepBlockIds}}');
     expect(screen.getByRole('button', { name: '查看 令' })).toHaveTextContent('{{appendSystemPrompt}}');
 
     const previewCalls = mocks.hanaFetch.mock.calls.filter(([url]) => String(url).endsWith('/system-prompt-preview'));
@@ -243,7 +268,9 @@ describe('PromptTab dao prompt editor', () => {
     expect(screen.getByRole('button', { name: '查看 形' })).toHaveTextContent('{{originPersonality}}');
     expect(screen.getByRole('button', { name: '查看 时' })).toHaveTextContent('{{workspace}}');
     expect(screen.getByRole('button', { name: '查看 忆' })).toHaveTextContent('{{userProfile}}');
+    expect(screen.getByRole('button', { name: '查看 器' })).toHaveTextContent('{{runtimeFoundation}}');
     expect(screen.getByRole('button', { name: '查看 器' })).toHaveTextContent('{{skills}}');
+    expect(screen.getByRole('button', { name: '查看 器' })).toHaveTextContent('{{keepBlockIds}}');
     expect(screen.getByRole('button', { name: '查看 令' })).toHaveTextContent('{{appendSystemPrompt}}');
     expect(bodyText).toContain('工具描述覆盖');
     expect(bodyText).toContain('1 个工具');
@@ -280,12 +307,13 @@ describe('PromptTab dao prompt editor', () => {
     expect(preview.querySelector('pre')?.textContent || '').toContain('# 形\n\n身份设定');
   });
 
-  it('keeps the readonly 器 module as template variables without preview backfilling', async () => {
+  it('opens readonly template variables as real expanded content on click', async () => {
     render(<PromptTab />);
 
     const vesselButton = screen.getByRole('button', { name: '查看 器' });
     expect(vesselButton).toHaveTextContent('{{runtimeFoundation}}');
     expect(vesselButton).toHaveTextContent('{{skills}}');
+    expect(vesselButton).toHaveTextContent('{{keepBlockIds}}');
     expect(vesselButton).not.toHaveTextContent('器是 HanakoPro 的工具行法');
 
     fireEvent.click(vesselButton);
@@ -293,10 +321,46 @@ describe('PromptTab dao prompt editor', () => {
     expect(dialog.textContent || '').toContain('# 器');
     expect(dialog.textContent || '').toContain('{{runtimeFoundation}}');
     expect(dialog.textContent || '').toContain('{{skills}}');
+    expect(dialog.textContent || '').toContain('{{keepBlockIds}}');
     expect(dialog.textContent || '').not.toContain('器是 HanakoPro 的工具行法');
 
-    const previewCalls = mocks.hanaFetch.mock.calls.filter(([url]) => String(url).endsWith('/system-prompt-preview'));
+    let previewCalls = mocks.hanaFetch.mock.calls.filter(([url]) => String(url).endsWith('/system-prompt-preview'));
     expect(previewCalls).toHaveLength(0);
+
+    const keepVariable = within(dialog).getByRole('button', { name: '查看 {{keepBlockIds}} 展开内容' });
+    expect(keepVariable).not.toHaveAttribute('title');
+    fireEvent.click(keepVariable);
+
+    const variableDialog = await screen.findByRole('dialog', { name: '{{keepBlockIds}} 变量展开内容' });
+    expect(within(variableDialog).getByText('变量展开内容')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(variableDialog.textContent || '').toContain('经验库完整展开内容');
+      expect(variableDialog.textContent || '').toContain('SessionFile 表示和当前 session 相关的本地文件');
+    });
+
+    previewCalls = mocks.hanaFetch.mock.calls.filter(([url]) => String(url).endsWith('/system-prompt-preview'));
+    expect(previewCalls).toHaveLength(1);
+    expect(latestPreviewRequestBody().includeRuntimeFoundation).toBe(true);
+  });
+
+  it('opens module-card variables directly without opening the module dialog', async () => {
+    render(<PromptTab />);
+
+    const summaryVariable = screen.getByRole('button', { name: '查看 {{keepBlockIds}} 展开内容' });
+    expect(summaryVariable).not.toHaveAttribute('title');
+
+    fireEvent.click(summaryVariable);
+
+    expect(screen.queryByRole('dialog', { name: '器 工具行法与可用技能' })).not.toBeInTheDocument();
+    const variableDialog = await screen.findByRole('dialog', { name: '{{keepBlockIds}} 变量展开内容' });
+    await waitFor(() => {
+      expect(variableDialog.textContent || '').toContain('经验库完整展开内容');
+      expect(variableDialog.textContent || '').toContain('SessionFile 表示和当前 session 相关的本地文件');
+    });
+
+    const previewCalls = mocks.hanaFetch.mock.calls.filter(([url]) => String(url).endsWith('/system-prompt-preview'));
+    expect(previewCalls).toHaveLength(1);
+    expect(latestPreviewRequestBody().includeRuntimeFoundation).toBe(true);
   });
 
   it('uses conduct as 德 and clears the old standalone anchor without merging it', async () => {

@@ -85,6 +85,60 @@ describe("HanaEngine.buildTools", () => {
     expect(result.details.executed).toBe(true);
   });
 
+  it("lets terminal_write use the runtime session permission instead of the stale fallback session", async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hana-build-tools-terminal-permission-"));
+    const agentDir = path.join(tmpDir, "agents", "focus");
+    const fallbackSessionPath = path.join(agentDir, "sessions", "stale.jsonl");
+    const compressedSessionPath = path.join(agentDir, "sessions", "compressed.jsonl");
+    const confirmStore = {
+      create: vi.fn(() => ({
+        confirmId: "confirm-tool-1",
+        promise: Promise.resolve({ action: "confirmed" }),
+      })),
+    };
+
+    const engine = Object.create(HanaEngine.prototype);
+    engine.hanakoHome = tmpDir;
+    engine.getAgent = vi.fn(() => ({ id: "focus", agentDir, tools: [] }));
+    engine._pluginManager = null;
+    engine._prefs = { getFileBackup: () => ({ enabled: false }) };
+    engine._readPreferences = () => ({ sandbox: false });
+    engine._confirmStore = confirmStore;
+    engine._emitEvent = vi.fn();
+    engine.getSessionPermissionMode = vi.fn((sessionPath) => (
+      sessionPath === compressedSessionPath ? "operate" : "ask"
+    ));
+    engine._agentMgr = {
+      agent: {
+        id: "focus",
+        agentDir,
+        tools: [],
+      },
+    };
+
+    const { tools } = engine.buildTools(tmpDir, [], {
+      agentDir,
+      workspace: tmpDir,
+      getSessionPath: () => fallbackSessionPath,
+    });
+    const terminalWrite = tools.find(tool => tool.name === "terminal_write");
+
+    const result = await terminalWrite.execute(
+      "call-1",
+      { id: "missing-terminal", text: "npm test" },
+      null,
+      null,
+      { sessionManager: { getSessionFile: () => compressedSessionPath } },
+    );
+
+    expect(engine.getSessionPermissionMode).toHaveBeenCalledWith(compressedSessionPath);
+    expect(confirmStore.create).not.toHaveBeenCalled();
+    expect(result.details).toMatchObject({
+      error: "找不到终端会话: missing-terminal",
+      id: "missing-terminal",
+    });
+  });
+
   it("hides stable availability-disabled tools before building the model schema", () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hana-build-tools-availability-"));
     const agentDir = path.join(tmpDir, "agents", "focus");

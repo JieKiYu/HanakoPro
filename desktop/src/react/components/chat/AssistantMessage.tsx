@@ -456,7 +456,7 @@ const ContentBlockView = memo(function ContentBlockView({ block, agentName, agen
     case 'tool_group':
       return <ToolGroupBlock tools={block.tools} collapsed={block.collapsed} agentName={agentName} excludeTerminalIds={excludeTerminalIds} terminalAggregates={terminalAggregates} />;
     case 'text':
-      return <StreamingMarkdownContent html={block.html} source={block.source} active={isStreaming} />;
+      return <StreamingMarkdownContent html={block.html} source={block.source} active={isStreaming} sessionPath={sessionPath} />;
     case 'file':
       return (
         <FileBlock

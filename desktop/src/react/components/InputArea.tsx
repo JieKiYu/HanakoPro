@@ -442,7 +442,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
   }, [currentSessionItems]);
 
   // Local state
-  const [permissionMode, setPermissionMode] = useState<PermissionMode>('operate');
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>('ask');
   const [sending, setSending] = useState(false);
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const [slashSelected, setSlashSelected] = useState(0);
@@ -1156,6 +1156,13 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
       fetchConfig()
         .then(d => { if (d.thinking_level) setThinkingLevel(d.thinking_level as ThinkingLevel); })
         .catch((err: unknown) => console.warn('[InputArea] load config failed', err));
+      hanaFetch('/api/session-permission-mode')
+        .then(res => res.json())
+        .then(data => {
+          const mode = (data?.mode || data?.defaultMode || 'ask') as PermissionMode;
+          setPermissionMode(mode);
+        })
+        .catch((err: unknown) => console.warn('[InputArea] load permission mode failed', err));
     }
 
     const handler = (e: Event) => {

@@ -37,7 +37,6 @@ import { initApp } from './app-init';
 import { useAnyBrowserRunning } from './stores/browser-slice';
 import { openSettingsModal } from './stores/settings-modal-actions';
 import { AppPages } from './components/app/AppPages';
-import { selectLatestTerminalSession } from './stores/session-selectors';
 
 declare function t(key: string, vars?: Record<string, string | number>): string;
 
@@ -87,6 +86,7 @@ function App() {
   const currentTab = useStore(s => s.currentTab);
   const browserRunning = useAnyBrowserRunning();
   const currentAgentId = useStore(s => s.currentAgentId);
+  const inlineTerminalOpen = useStore(s => s.inlineTerminalOpen);
   const isPluginTab = typeof currentTab === 'string' && currentTab.startsWith('plugin:');
   const { floatCard, show: showFloat, scheduleHide: scheduleFloatHide, cancelHide: cancelFloatHide, hide: hideFloat } = useFloatCard();
 
@@ -97,7 +97,7 @@ function App() {
     });
   }, []);
 
-  // 测量完整输入栈：目标条属于会话主流程，必须参与 chat panel 底部切点，避免正文钻到目标条下方。
+  // 保留输入栈高度变量给输入相关布局使用；主聊天/内嵌终端 dock 必须走 flex 文档流，不再靠该高度做底部避让。
   const inputStackObserverRef = useRef<ResizeObserver | null>(null);
   const inputStackParentRef = useRef<HTMLElement | null>(null);
   const inputCardRef = useCallback((el: HTMLDivElement | null) => {
@@ -125,6 +125,14 @@ function App() {
     inputStackParentRef.current?.style.removeProperty('--input-stack-h');
   }, []);
 
+  const handleInlineTerminalToggle = useCallback(() => {
+    const state = useStore.getState();
+    if (!state.inlineTerminalOpen && state.currentTab !== 'chat') {
+      state.setCurrentTab('chat');
+    }
+    state.toggleInlineTerminal();
+  }, []);
+
   return (
     <ErrorBoundary>
       {/* Headless behavior components */}
@@ -150,20 +158,11 @@ function App() {
         <ChannelTabBar />
         <div className="tb-right-group">
           <button
-            className="tb-toggle"
+            className={`tb-toggle${inlineTerminalOpen ? ' active' : ''}`}
             id="tbOpenTerminal"
-            title="打开终端"
+            title={inlineTerminalOpen ? '收起终端' : '打开终端'}
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => {
-              const s = useStore.getState();
-              const activeTerminal = selectLatestTerminalSession(s, s.currentSessionPath);
-              if (activeTerminal) {
-                window.platform?.openTerminal?.({ focusId: activeTerminal.id, cwd: activeTerminal.cwd });
-                return;
-              }
-              const cwd = (s.deskBasePath || '').trim();
-              window.platform?.openTerminal?.(cwd || undefined);
-            }}
+            onClick={handleInlineTerminalToggle}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="4" width="18" height="16" rx="2" ry="2"></rect>

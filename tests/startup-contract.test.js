@@ -51,6 +51,16 @@ describe("local startup contract", () => {
     );
   });
 
+  it("desktop main reveals a hidden login-started window when the user activates the app", () => {
+    const mainCjs = fs.readFileSync(path.join(ROOT, "desktop", "main.cjs"), "utf-8");
+
+    expect(mainCjs).toMatch(/function showPrimaryWindow\(\) \{[\s\S]*_startHiddenAtLogin = false/);
+    expect(mainCjs).toMatch(/function showPrimaryWindow\(\) \{[\s\S]*if \(serverPort\) \{[\s\S]*createMainWindow\(\)/);
+    expect(mainCjs).toMatch(/wrapIpcBestEffortHandler\("app-ready"[\s\S]*showPrimaryWindow\(\)/);
+    expect(mainCjs).toMatch(/app\.on\("activate", \(\) => \{[\s\S]*showPrimaryWindow\(\);[\s\S]*\}\)/);
+    expect(mainCjs).not.toContain("// 不在这里 show()，前端 init 完成后会通过 app-ready IPC 触发显示");
+  });
+
   it("desktop main reopens model setup when imported completed setup has no usable models", () => {
     const mainCjs = fs.readFileSync(path.join(ROOT, "desktop", "main.cjs"), "utf-8");
     const onboardingMain = fs.readFileSync(path.join(ROOT, "desktop", "src", "onboarding-main.tsx"), "utf-8");

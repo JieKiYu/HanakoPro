@@ -7,6 +7,7 @@ import {
   buildMemoryRecallText,
   injectMemoryRecallMessages,
   resolveMemoryBehavior,
+  shouldInjectMemoryRecallForMessages,
 } from "../lib/memory/recall.js";
 
 function makeAgent(agentDir, config = {}) {
@@ -116,6 +117,59 @@ describe("memory recall", () => {
     expect(result.text).toContain("自然召回");
   });
 
+  it("uses only the latest user turn for ordinary recall queries", () => {
+    const agent = makeAgent(agentDir);
+    agent.summaryManager.getAllSummaries = () => [
+      {
+        session_id: "shouyi-preview",
+        summary: "守一禅机画布预览需要先启动本地端口，再打开浏览器验收",
+        updated_at: "2026-06-09T01:00:00.000Z",
+      },
+      {
+        session_id: "semiconductor-chart",
+        summary: "半导体 1d 图里 6 号点被判为 1 买高点，要结合中枢背驰和线段终结判断",
+        updated_at: "2026-06-10T01:00:00.000Z",
+      },
+    ];
+
+    const result = buildMemoryRecallContext({
+      agent,
+      messages: [
+        { role: "user", content: "守一禅机画布预览怎么启动？" },
+        { role: "assistant", content: "我来查启动方式。" },
+        { role: "user", content: "半导体 1d 图这个 6 号点为什么是 1 买高点？" },
+      ],
+    });
+
+    expect(result.items.some((item) => item.id === "shouyi-preview")).toBe(false);
+    expect(result.items.some((item) => item.id === "semiconductor-chart")).toBe(true);
+    expect(result.text).toContain("半导体");
+    expect(result.text).not.toContain("守一禅机");
+  });
+
+  it("may use recent user turns when the latest turn explicitly asks to continue", () => {
+    const agent = makeAgent(agentDir);
+    agent.summaryManager.getAllSummaries = () => [
+      {
+        session_id: "shouyi-preview",
+        summary: "守一禅机画布预览需要先启动本地端口，再打开浏览器验收",
+        updated_at: "2026-06-09T01:00:00.000Z",
+      },
+    ];
+
+    const result = buildMemoryRecallContext({
+      agent,
+      messages: [
+        { role: "user", content: "守一禅机画布预览怎么启动？" },
+        { role: "assistant", content: "我来查启动方式。" },
+        { role: "user", content: "继续刚才这个问题" },
+      ],
+    });
+
+    expect(result.items.some((item) => item.id === "shouyi-preview")).toBe(true);
+    expect(result.text).toContain("守一禅机");
+  });
+
   it("recalls compiled memory and diary entries through the same path", () => {
     fs.writeFileSync(
       path.join(agentDir, "memory", "facts.md"),
@@ -171,6 +225,24 @@ describe("memory recall", () => {
     expect(result.injected).toBe(1);
     expect(result.messages.map((msg) => msg.role)).toEqual(["system", "user", "assistant", "system", "user"]);
     expect(result.messages[3].content[0].text).toBe("memory ctx");
+  });
+
+  it("injects recall only when the latest conversation message is user-authored", () => {
+    expect(shouldInjectMemoryRecallForMessages([
+      { role: "system", content: "root" },
+      { role: "user", content: "查一下当前问题" },
+    ])).toBe(true);
+
+    expect(shouldInjectMemoryRecallForMessages([
+      { role: "user", content: "查一下当前问题" },
+      { role: "assistant", content: "我先读文件。" },
+    ])).toBe(false);
+
+    expect(shouldInjectMemoryRecallForMessages([
+      { role: "user", content: "查一下当前问题" },
+      { role: "assistant", content: [{ type: "toolCall", name: "grep" }] },
+      { role: "toolResult", toolName: "grep", content: [{ type: "text", text: "result" }] },
+    ])).toBe(false);
   });
 
   it("resolves use and generate from the memory master switch", () => {

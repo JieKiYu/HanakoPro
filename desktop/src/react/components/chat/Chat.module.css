@@ -232,14 +232,14 @@
 .assistantBrowserRow {
     display: flex;
     align-items: center;
-    margin-top: 0.35rem;
+    margin: var(--space-xs) 0;
     padding-left: 0.2rem;
 }
 
 .assistantRevertRow {
     display: flex;
     align-items: center;
-    margin-top: 0.3rem;
+    margin: var(--space-xs) 0;
     padding-left: 0.2rem;
 }
 
@@ -1262,7 +1262,7 @@
     max-width: 100%;
     min-width: 0;
     box-sizing: border-box;
-    margin: 0.72rem 0 0.76rem;
+    margin: var(--space-xs) 0;
     overflow: hidden;
     border: 1px solid rgba(23, 78, 166, 0.28);
     border-radius: 8px;
@@ -2001,7 +2001,7 @@
     top: 0;
     left: 0;
     right: 0;
-    bottom: calc(var(--input-stack-h, var(--input-card-h, 0px)) + var(--space-lg) + var(--chat-input-stop-gap));
+    bottom: 0;
     width: 100%;
     overflow: hidden;
 }
@@ -2223,8 +2223,7 @@
 }
 
 .sessionFooter {
-    /* 尾部必须覆盖完整输入栈高度，否则最后一轮会停在输入框下方，目标条出现时更明显。 */
-    height: max(4rem, calc(var(--input-stack-h, var(--input-card-h, 0px)) + var(--space-lg)));
+    height: max(4rem, var(--space-lg));
     flex-shrink: 0;
 }
 
@@ -2252,7 +2251,7 @@
 
 .scrollToBottomFab {
     position: absolute;
-    bottom: 140px;
+    bottom: var(--scroll-bottom-fab-offset, 140px);
     left: 50%;
     transform: translateX(-50%);
     z-index: 6;

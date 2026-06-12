@@ -853,6 +853,12 @@ export async function compressForkSession(sessionPath: string): Promise<boolean>
       if (data.agentName) patch.agentName = data.agentName;
     }
     useStore.setState(patch);
+    window.dispatchEvent(new CustomEvent('hana-plan-mode', {
+      detail: {
+        enabled: data.permissionMode === 'read_only' || data.accessMode === 'read_only' || data.planMode === true,
+        mode: data.permissionMode || data.accessMode,
+      },
+    }));
     if (data.contextUsage && typeof data.contextUsage === 'object') {
       updateKeyed('contextBySession', data.path, {
         tokens: data.contextUsage.tokens ?? null,

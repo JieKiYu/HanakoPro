@@ -40,7 +40,7 @@ import { createSessionGoalTool } from "../lib/tools/session-goal-tool.js";
 import { runCompatChecks } from "../lib/compat/index.js";
 import { formatSkillsForPrompt } from "../lib/pi-sdk/index.js";
 import { getPlatformPromptNote } from "./platform-prompt.js";
-import { composePromptFromBlocks, createDefaultPromptComposerConfig } from "../shared/prompt-composer.js";
+import { composeKeptOriginBlockContents, composePromptFromBlocks, createDefaultPromptComposerConfig } from "../shared/prompt-composer.js";
 import { getLocale } from "../server/i18n.js";
 
 function promptVariableText(value) {
@@ -129,8 +129,8 @@ function buildRuntimeFoundationPrompt({
       ? "- 续行上下文把目标包在 `<objective>` 中，并声明它是用户给出的目标数据，不是更高优先级指令；目标跨回合存在，不能被缩小、改写成更容易的小目标，或因一轮结束就视为完成。"
       : "- The continuation context wraps the goal in `<objective>` and states that it is user-provided task data, not higher-priority instructions. The goal persists across turns and must not be narrowed, rewritten into an easier target, or treated as complete just because one turn ended.");
     interfaceAndFiles.push(isZh
-      ? "- 当前会话有目标时，普通推进轮只负责实现、基础自检和候选交付；不要在普通轮里自行展开正式验收。候选完成后收束本轮，让运行底座发出“验真”卡片并启动自动验收。正式验收涉及界面、网页、预览、Hanako 内部浏览器或桌面应用时必须走使用电脑（computer 工具）；网页/localhost 可先用 Hanako 内置 browser 快速打开 URL，但随后要用使用电脑绑定 HanakoPro 的 Browser/内置浏览器窗口，让小鼠标归属在该窗口内完成可见或点击确认。通过后用 session_goal 标记完成，失败则继续修复，无法推进才标记阻塞。"
-      : "- When the current session has a goal, a normal progress turn should handle implementation, baseline checks, and candidate delivery; do not start formal acceptance yourself in that normal turn. After candidate completion, close the turn so the runtime can emit the `Review` card and start automatic acceptance. Formal acceptance must use Computer Use when UI, web, previews, Hanako's internal browser, or desktop apps matter; web/localhost checks may first use Hanako's built-in browser tool to open the URL quickly, but must then bind Computer Use to HanakoPro's Browser/internal-browser window so the small cursor belongs to that window for visible or click confirmation. Mark complete only after it passes, keep fixing if it fails, and mark blocked only when progress is impossible.");
+      ? "- 当前会话有目标时，普通推进轮只负责实现、基础自检和候选交付；不要在普通轮里自行展开正式验收。候选完成后收束本轮，让运行底座发出“验真”卡片并启动自动验收。正式验收涉及界面、网页、预览、Hanako 内部浏览器或桌面应用时必须走使用电脑（computer 工具）；网页/localhost 可先用 Hanako 内置 browser 快速打开 URL，但随后要用使用电脑绑定 HanakoPro 的 Browser/内置浏览器窗口，让 Computer Use 可视控制光标在该窗口内完成可见性或必要点击确认。通过后用 session_goal 标记完成，失败则继续修复，无法推进才标记阻塞。"
+      : "- When the current session has a goal, a normal progress turn should handle implementation, baseline checks, and candidate delivery; do not start formal acceptance yourself in that normal turn. After candidate completion, close the turn so the runtime can emit the `Review` card and start automatic acceptance. Formal acceptance must use Computer Use when UI, web, previews, Hanako's internal browser, or desktop apps matter; web/localhost checks may first use Hanako's built-in browser tool to open the URL quickly, but must then bind Computer Use to HanakoPro's Browser/internal-browser window so the Computer Use visible control cursor remains inside that window for visibility or necessary click confirmation. Mark complete only after it passes, keep fixing if it fails, and mark blocked only when progress is impossible.");
   }
   if (interfaceAndFiles.length) {
     sections.push([
@@ -164,8 +164,8 @@ function buildRuntimeFoundationPrompt({
       ? "- 需要控制本机 GUI 应用时，走 HanakoPro 的应用控制通道。"
       : "- When local GUI apps need control, use HanakoPro's app-control channel.");
     appAndSettings.push(isZh
-      ? "- 使用电脑开始正式验收或桌面控制时，可以先把目标应用带到前台，让用户看见验收已经开始；若用户随后最小化目标应用，不把这当作失败或停止，继续保持目标应用和小鼠标的绑定并在后台推进。小鼠标的归属必须一直存在：窗口不可见时不能漂到桌面或其他应用上，用户恢复目标窗口时，应能立刻看到小鼠标仍在该应用内继续操作。"
-      : "- When Computer Use starts formal acceptance or desktop control, it may first bring the target app forward so the user can see acceptance has begun. If the user later minimizes the target app, do not treat that as failure or a stop signal; keep the target app and small cursor bound while continuing in the background. The cursor's ownership must persist: while the window is not visible it must not drift onto the desktop or another app, and when the user restores the target window they should immediately see the cursor still operating inside that app.");
+      ? "- 使用电脑开始正式验收或桌面控制时，可以先把目标应用带到前台，让用户看见验收已经开始；若用户随后最小化目标应用，不把这当作失败或停止，继续保持 Computer Use 会话与目标应用窗口的绑定并在后台推进。可视控制光标的目标窗口绑定必须持续存在：窗口不可见时不能漂移到桌面或其他应用上，用户恢复目标窗口时，应能立刻看到控制光标仍在该应用内继续操作。"
+      : "- When Computer Use starts formal acceptance or desktop control, it may first bring the target app forward so the user can see acceptance has begun. If the user later minimizes the target app, do not treat that as failure or a stop signal; keep the Computer Use session bound to the target app window while continuing in the background. The visible control cursor's target-window binding must persist: while the window is not visible it must not drift onto the desktop or another app, and when the user restores the target window they should immediately see the control cursor still operating inside that app.");
   }
   if (hasTool("update_settings") && hasBlock("settings-changes")) {
     appAndSettings.push(isZh
@@ -245,8 +245,9 @@ function buildRuntimeFoundationPrompt({
         "同一执行链路里，把已经说过的入口、URL、文件路径、端口、服务地址或产物名放入“已播报集合”；集合内对象本轮只向用户说一次。",
         "换词不等于新信息：“已找到 / 已定位 / 已确认 / 将启动 / 将打开 / 下一步我会”加同一个对象，都算重复同一事实。",
         "说完入口后只能二选一：立刻调用工具，或在最后用一次证据收束。中间不要再发一条只是在铺垫同一对象的正文。",
-        "发正文前先过一道门：这句话有没有新事实、失败、选择请求或最终证据？如果没有，而且只是换个说法指向刚才同一路径/入口，就删掉这句话，直接行动。",
-        "工具卡片已经在显示运行进度时，正文保持安静；只有新发现、失败、需要用户选择或最终证据才再开口。",
+        "发正文前先检查：这句话是否包含新事实、失败、选择请求或最终证据？如果没有，而且只是换个说法指向刚才同一路径/入口，就删掉这句话，直接行动。",
+        "工具卡片已经在显示运行进度时，正文保持安静；只有新发现、失败、需要用户选择或最终证据才补充可见说明。",
+        "普通解释/问答先守近证据：先看用户给的图、当前界面、会话文件、事件数据或精准相关文件。近证据不足、互相冲突，或用户要求追源码/排故/修改时，可以继续翻文件、扩大到源码和全仓搜索；每次扩展都要服务当前问题，证据满足回答需要后即收束。",
       ].join("\n")
       : [
         "Within one execution chain, put every entrypoint, URL, file path, port, service address, or artifact name you have already mentioned into a reported-object set; each object in that set may be mentioned to the user only once in this turn.",
@@ -254,6 +255,7 @@ function buildRuntimeFoundationPrompt({
         "After mentioning an entrypoint, do only one of two things: call the tool immediately, or close once at the end with evidence. Do not insert another prose note that merely prepares the same object again.",
         "Before sending prose, pass one gate: does this sentence contain a new fact, failure, user choice, or final evidence? If not, and it merely points to the same path or entrypoint in new words, delete the sentence and act directly.",
         "When tool cards already show progress, keep the prose quiet; speak again only for a new finding, a failure, a user choice, or final evidence.",
+        "For ordinary explanation/QA, start from nearby evidence: the user's image, current UI, session files, event data, or precise relevant files. When nearby evidence is insufficient, conflicting, or the user asks for debugging, source tracing, or edits, you may keep inspecting files and expand to source code or repo-wide search. Each expansion must serve the current question; once evidence is enough, answer.",
       ].join("\n"),
     "",
     sections.join("\n\n"),
@@ -1182,34 +1184,36 @@ export class Agent {
     // 任务管理引导（todo_write 工具主动使用）
     addPromptBlock("task-management", isZh ? "器 · 记" : "Vessel · Task Management", isZh
       ? "\n## 器 · 记\n\n" +
-        "用 todo_write 工具拆分和追踪真正复杂的工作。收到复杂或多步骤任务时，先拆分为少量阶段级子任务再逐步执行；不要把连续工具链里的每个工具动作都拆成 todo。\n\n" +
+        "用 todo_write 工具拆分和追踪真正复杂的工作。收到复杂或多步骤任务时，先拆分为少量阶段级子任务再逐步执行；不要把连续工具链里的每个工具动作都拆成 todo。\n" +
+        "单步请求直接行动：启动、打开、运行、预览、查询、修复、验证等边界明确的任务，不要先写 todo_write；先调用真正能推进结果的工具，必要时在完成后用一句话交代终态。\n\n" +
         "**每次调用都传入完整的 todos 列表**（替换式），每条 todo 必须包含：\n" +
         "- content：静态描述，如『读取 spec』\n" +
         "- activeForm：执行中态描述，如『正在读取 spec』\n" +
         "- status：pending | in_progress | completed\n\n" +
         "**约定同时最多一条 in_progress**。todo_write 是阶段结构，不是工具心跳；只有任务阶段真实切换、结构明显变化或最终收束时才更新。不要为了相邻工具步骤连续调用 todo_write。\n" +
-        "todo_write 只承载阶段结构，不承载工具进度。简单的单步任务（回答问题、单次查询、简单修改）不需要 todo_write；已有工具卡片能显示进度时，也不要再用 todo_write 重复显示同一进度。"
+        "todo_write 只承载阶段结构，不承载工具进度。简单的单步任务（回答问题、单次查询、简单修改、启动或打开一个预览）不需要 todo_write；已有工具卡片能显示进度时，也不要再用 todo_write 重复显示同一进度。"
       : "\n## Task Management\n\n" +
-        "Use the todo_write tool to break down and track genuinely complex work. When you receive a complex or multi-step task, decompose it into a small number of phase-level subtasks; do not turn every tool call in a continuous tool chain into a todo.\n\n" +
+        "Use the todo_write tool to break down and track genuinely complex work. When you receive a complex or multi-step task, decompose it into a small number of phase-level subtasks; do not turn every tool call in a continuous tool chain into a todo.\n" +
+        "Short commands act directly: for one-sentence tasks like start, open, run, preview, check, fix, or verify, do not call todo_write first; call the tool that moves the result forward, then summarize the final state if needed.\n\n" +
         "**Each call replaces the entire todos list** (replacement-style). Each todo must include:\n" +
         "- content: static description, e.g. 'Read spec'\n" +
         "- activeForm: in-progress description, e.g. 'Reading spec'\n" +
         "- status: pending | in_progress | completed\n\n" +
         "**Convention: at most one in_progress at a time**. todo_write is for phase structure, not a tool heartbeat; update it only when the task phase truly changes, the structure materially changes, or the work is being closed. Do not call todo_write repeatedly for adjacent tool steps.\n" +
-        "todo_write carries phase structure, not tool progress. Simple single-step tasks (answering questions, single lookups, simple edits) do not need todo_write; when visible tool cards already show progress, do not duplicate that same progress with todo_write."
+        "todo_write carries phase structure, not tool progress. Simple single-step tasks (answering questions, single lookups, simple edits, starting or opening one preview) do not need todo_write; when visible tool cards already show progress, do not duplicate that same progress with todo_write."
     );
 
     // 经验库引导。经验是独立能力：缺省关闭，开启后才把规则写入新 session 的 prompt。
     if (experienceEnabled) {
       addPromptBlock("experience", isZh ? "器 · 习" : "Vessel · Experience Library", isZh
         ? "\n## 器 · 习\n\n" +
-          "你有一个经验库，记录着过往工作中踩过的坑和学到的教训。\n\n" +
+          "你有一个经验库，记录过往工作中遇到的问题模式和形成的教训。\n\n" +
           "**查**：接到工作任务时，先调用 recall_experience 扫一眼索引，看有没有相关经验。\n\n" +
           "**记**：工作中遇到以下情况时，用 record_experience 记录一条简洁的教训：\n" +
           "- 用户纠正了你的错误\n" +
           "- 用户表现出不满或反复强调某件事\n" +
           "- 你自己试错后找到了正确做法\n" +
-          "- 巡检或自主工作时踩了坑"
+          "- 巡检或自主工作时发现可复用的问题模式"
         : "\n## Experience Library\n\n" +
           "You have an experience library that stores lessons from past work — mistakes, corrections, and discoveries.\n\n" +
           "**Recall**: When you receive a work task, call recall_experience to scan the index for relevant experience first.\n\n" +
@@ -1226,15 +1230,17 @@ export class Agent {
       ? "\n## 器 · 行\n\n" +
         "当多个工具能完成同一件事时，优先使用成本最低、干扰最小的那个。" +
         "不要在简单工具能解决问题的场景下启动重型工具。\n\n" +
-        "可见说明只在必要的新阶段给，不按工具给：同一执行链路默认静默接工具；只有新发现、失败、需要用户选择或最终结论，才再开口。\n\n" +
+        "可见说明只在必要的新阶段给，不按工具给：同一执行链路默认静默接工具；只有新发现、失败、需要用户选择或最终结论，才补充可见说明。\n\n" +
         "反复述禁令：同一个入口、URL、文件路径、端口、服务地址或产物名已经对用户说过一次后，立刻记入“已播报集合”，本轮不要再说第二次；“已找到 / 已定位 / 已确认 / 我现在会 / 下一步我会”加同一路径也算重复。说完入口后直接调用工具，或最后用一次证据收束。\n\n" +
-        "发正文前先过一道门：这句话有没有新事实、失败、选择请求或最终证据？如果没有，而且只是换个说法指向刚才同一路径/入口，就删掉这句话，直接行动。"
+        "发正文前先检查：这句话是否包含新事实、失败、选择请求或最终证据？如果没有，而且只是换个说法指向刚才同一路径/入口，就删掉这句话，直接行动。\n\n" +
+        "证据半径：普通解释/问答先守近证据，优先用用户给的图、当前界面、会话文件、事件数据或精准相关文件作答。近证据不足、互相冲突，或用户要求追源码/排故/修改时，可以继续翻文件、扩大到源码和全仓搜索；每次扩展都要服务当前问题，证据满足回答需要后即收束。"
       : "\n## Tool Usage Discipline\n\n" +
         "When multiple tools can accomplish the same task, prefer the one with the lowest cost and least disruption. " +
         "Do not reach for heavy tools when simpler ones can do the job.\n\n" +
         "Make visible notes only for necessary new phases, not tool steps: one execution chain should default to silent tool continuation; speak again only for a new finding, a failure, a user choice, or a final conclusion.\n\n" +
         "No paraphrase loops: after the same entrypoint, URL, file path, port, service address, or artifact name has been mentioned once to the user, immediately put it in the reported-object set and do not mention it a second time in this turn; 'found / located / confirmed / I will / next I will' plus the same path still counts as repetition. After the entrypoint note, call the tool directly, or close once with evidence at the end.\n\n" +
-        "Before sending prose, pass one gate: does this sentence contain a new fact, failure, user choice, or final evidence? If not, and it merely points to the same path or entrypoint in new words, delete the sentence and act directly."
+        "Before sending prose, pass one gate: does this sentence contain a new fact, failure, user choice, or final evidence? If not, and it merely points to the same path or entrypoint in new words, delete the sentence and act directly.\n\n" +
+        "Evidence radius: for ordinary explanation/QA, start from nearby evidence such as the user's image, current UI, session files, event data, or precise relevant files. When nearby evidence is insufficient, conflicting, or the user asks for debugging, source tracing, or edits, you may keep inspecting files and expand to source code or repo-wide search. Each expansion must serve the current question; once evidence is enough, answer."
     );
 
     addPromptBlock("current-view", isZh ? "器 · 观" : "Vessel · Current View", isZh
@@ -1271,14 +1277,14 @@ export class Agent {
       addPromptBlock("desktop-app-control", isZh ? "器 · 应用" : "Vessel · Desktop App Control", isZh
         ? "\n## 器 · 应用\n\n" +
           "用户要求打开、查看、点击、输入或控制本机 GUI 应用时，优先走使用电脑（computer 工具）。" +
-          "不要用 bash、AppleScript、osascript、open -a 或平台脚本控制 GUI 应用；这些路径会绕过使用电脑路由，也更容易撞到系统隐私权限。" +
+          "不要用 bash、AppleScript、osascript、open -a 或平台脚本控制 GUI 应用；这些路径会绕过使用电脑路由，也更容易触发系统隐私权限问题。" +
           "如果设置启用了逐应用批准，控制新应用时使用 computer 的 start/list_apps 流程，让用户在输入框上方同意。\n\n" +
-          "使用电脑开始正式验收或桌面控制时，可以先把目标应用带到前台，让用户看见验收已经开始；若用户随后最小化目标应用，不把这当作失败或停止，继续保持目标应用和小鼠标的绑定并在后台推进。小鼠标的归属必须一直存在：窗口不可见时不能漂到桌面或其他应用上，用户恢复目标窗口时，应能立刻看到小鼠标仍在该应用内继续操作。"
+          "使用电脑开始正式验收或桌面控制时，可以先把目标应用带到前台，让用户看见验收已经开始；若用户随后最小化目标应用，不把这当作失败或停止，继续保持 Computer Use 会话与目标应用窗口的绑定并在后台推进。可视控制光标的目标窗口绑定必须持续存在：窗口不可见时不能漂移到桌面或其他应用上，用户恢复目标窗口时，应能立刻看到控制光标仍在该应用内继续操作。"
         : "\n## Desktop App Control\n\n" +
           "When the user asks to open, inspect, click, type in, or control a local GUI application, prefer the computer tool. " +
           "Do not use bash, AppleScript, osascript, open -a, or platform scripts to control GUI applications; those paths bypass Hana's Computer Use routing and are more likely to hit OS privacy permissions. " +
           "If per-app approval is enabled, use the computer start/list_apps flow for a new app so the input-area prompt can ask the user to approve it.\n\n" +
-          "When Computer Use starts formal acceptance or desktop control, it may first bring the target app forward so the user can see acceptance has begun. If the user later minimizes the target app, do not treat that as failure or a stop signal; keep the target app and small cursor bound while continuing in the background. The cursor's ownership must persist: while the window is not visible it must not drift onto the desktop or another app, and when the user restores the target window they should immediately see the cursor still operating inside that app."
+          "When Computer Use starts formal acceptance or desktop control, it may first bring the target app forward so the user can see acceptance has begun. If the user later minimizes the target app, do not treat that as failure or a stop signal; keep the Computer Use session bound to the target app window while continuing in the background. The visible control cursor's target-window binding must persist: while the window is not visible it must not drift onto the desktop or another app, and when the user restores the target window they should immediately see the control cursor still operating inside that app."
       );
     }
 
@@ -1308,7 +1314,7 @@ export class Agent {
     addPromptBlock("web-tool-priority", isZh ? "器 · 网页" : "Vessel · Web Tool Priority", isZh
       ? "\n## 器 · 网页\n\n" +
         "获取网页信息时，按以下顺序选择工具：\n" +
-        "1. **web_search** — 查找信息、获取 URL。大多数「帮我查一下 XX」的请求用这个就够了\n" +
+        "1. **web_search** — 查找信息、获取 URL。大多数信息查询请求优先使用此工具即可\n" +
         "2. **web_fetch** — 已知 URL，需要提取页面文字内容。简单抓取必须用这个\n" +
         "3. **browser** — 只在以下情况使用：页面需要登录/身份验证、需要填表或点击交互、web_fetch 返回的内容为空或不完整（JS 动态渲染页面）、需要查看页面视觉布局\n\n" +
         "**禁止**在 web_search 或 web_fetch 能完成的场景下启动浏览器。浏览器启动成本高、会打开窗口干扰用户。"
@@ -1462,32 +1468,50 @@ export class Agent {
       currentAgentId: this.id,
       forSubagent,
     });
+    const promptVariablesBase = {
+      userName: this.userName,
+      agentName: this.agentName,
+      agentId: this.id,
+      cwd: cwdPath,
+      workspace,
+      currentDate,
+      currentDateTime: dateTime,
+      userProfile: userMd,
+      personality: ishiki,
+      originPersonality,
+      pinnedMemory,
+      memory: pinnedMemory,
+      skills: skillsPrompt,
+      appendSystemPrompt,
+      mood: MOOD_PROMPT,
+      runtimeFoundation,
+      hanakoHome: path.dirname(path.dirname(this.agentDir)),
+      mcpPluginDataDir: path.join(path.dirname(path.dirname(this.agentDir)), "plugin-data", "mcp"),
+      mcpConfigPath: path.join(path.dirname(path.dirname(this.agentDir)), "plugin-data", "mcp", "config.json"),
+    };
+    const keepBlockIds = composeKeptOriginBlockContents({
+      config: effectivePromptComposerConfig,
+      builtInBlocks: promptBlocks,
+      variables: promptVariablesBase,
+    }).join("\n\n");
+    const promptVariables = {
+      ...promptVariablesBase,
+      keepBlockIds,
+    };
     const composedPrompt = composePromptFromBlocks({
       config: effectivePromptComposerConfig,
       builtInBlocks: promptBlocks,
-      variables: {
-        userName: this.userName,
-        agentName: this.agentName,
-        agentId: this.id,
-        cwd: cwdPath,
-        workspace,
-        currentDate,
-        currentDateTime: dateTime,
-        userProfile: userMd,
-        personality: ishiki,
-        originPersonality,
-        pinnedMemory,
-        memory: pinnedMemory,
-        skills: skillsPrompt,
-        appendSystemPrompt,
-        mood: MOOD_PROMPT,
-        runtimeFoundation,
-        hanakoHome: path.dirname(path.dirname(this.agentDir)),
-        mcpPluginDataDir: path.join(path.dirname(path.dirname(this.agentDir)), "plugin-data", "mcp"),
-        mcpConfigPath: path.join(path.dirname(path.dirname(this.agentDir)), "plugin-data", "mcp", "config.json"),
-      },
+      variables: promptVariables,
       includeRuntimeFoundation,
     });
-    return composedPrompt || defaultPrompt;
+    const prompt = composedPrompt || defaultPrompt;
+    if (options.returnDetails === true) {
+      return {
+        prompt,
+        variables: promptVariables,
+        promptBlocks: promptBlocks.map((block) => ({ ...block })),
+      };
+    }
+    return prompt;
   }
 }

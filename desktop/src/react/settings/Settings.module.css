@@ -781,6 +781,122 @@
     user-select: text;
 }
 
+.prompt-template-raw {
+    white-space: pre-wrap;
+}
+
+.prompt-variable-token {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    margin: 0 1px;
+    padding: 1px 5px;
+    border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+    border-radius: 6px;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+    font-size: 0.78rem;
+    line-height: 1.45;
+    vertical-align: baseline;
+    cursor: pointer;
+    white-space: normal;
+}
+
+.prompt-variable-token:hover {
+    color: color-mix(in srgb, var(--accent) 84%, var(--text));
+    border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.prompt-variable-token:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 54%, transparent);
+    outline-offset: 2px;
+}
+
+.prompt-variable-popover-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 2300;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 48px 32px;
+    box-sizing: border-box;
+    background: rgba(0, 0, 0, 0.16);
+}
+
+.prompt-variable-popover {
+    width: min(760px, calc(100vw - 56px));
+    max-height: min(620px, calc(100vh - 96px));
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card, 12px);
+    background: var(--bg);
+    box-shadow: 0 18px 56px var(--shadow);
+}
+
+.prompt-variable-popover-header {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+    min-height: 48px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--bg-card) 92%, transparent);
+}
+
+.prompt-variable-popover-header h3 {
+    margin: 0;
+    color: var(--text);
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+    font-size: 0.86rem;
+}
+
+.prompt-variable-popover-header span {
+    display: block;
+    margin-top: 4px;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+}
+
+.prompt-variable-popover-body {
+    min-height: 140px;
+    overflow: auto;
+    overscroll-behavior: contain;
+}
+
+.prompt-variable-popover-body pre {
+    min-height: 100%;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 14px 16px 28px;
+    color: var(--text);
+    background: transparent;
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+    font-size: 0.78rem;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.prompt-variable-empty,
+.prompt-variable-error {
+    padding: 18px 16px;
+    color: var(--text-muted);
+    font-size: 0.76rem;
+    line-height: 1.5;
+}
+
+.prompt-variable-error {
+    color: #c85148;
+}
+
 .prompt-hint-card {
     display: block;
     padding: 10px 12px;
@@ -874,12 +990,9 @@
     background: color-mix(in srgb, var(--bg-card) 72%, var(--border));
 }
 
-.prompt-dao-module-summary:disabled {
-    cursor: default;
-}
-
-.prompt-dao-module-summary:disabled:hover {
-    background: transparent;
+.prompt-dao-module-summary:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 48%, transparent);
+    outline-offset: -2px;
 }
 
 .prompt-dao-glyph {

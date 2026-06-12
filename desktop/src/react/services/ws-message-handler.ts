@@ -7,6 +7,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- WS 消息分发，msg 结构由服务端动态决定 */
 
 import { streamBufferManager } from '../hooks/use-stream-buffer';
+import { isAbortLikeMessage } from '../../../../shared/abort-errors.js';
 import { dispatchStreamKey } from './stream-key-dispatcher';
 import { useStore } from '../stores';
 import { updateKeyed } from '../stores/create-keyed-slice';
@@ -598,6 +599,12 @@ export function handleServerMessage(msg: any): void {
     case 'error': {
       const sp = msg.sessionPath;
       if (!sp) { console.warn('[ws] event missing sessionPath:', msg.type); break; }
+      if (isAbortLikeMessage(msg.message)) {
+        streamBufferManager.finishTurn(sp);
+        applyStreamingStatus(false, sp);
+        useStore.getState().clearInlineError(sp);
+        break;
+      }
       useStore.getState().setInlineError(sp, msg.message);
       break;
     }

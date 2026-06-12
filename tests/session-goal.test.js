@@ -117,7 +117,7 @@ describe("session goal", () => {
     });
     expect(block.text).toContain("这次要验的是：让验收像 mood 一样可见");
     expect(block.text).toContain("真实画布");
-    expect(block.text).toContain("鼠标");
+    expect(block.text).toContain("指针交互");
     expect(block.aspects).toEqual(expect.arrayContaining([
       expect.objectContaining({ key: "visibility" }),
       expect.objectContaining({ key: "web" }),

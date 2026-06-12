@@ -11,7 +11,7 @@ import path from "path";
 import { createAgentSession, SessionManager, estimateTokens, findCutPoint, formatSkillsForPrompt, generateSummary, refreshSessionModelFromRegistry } from "../lib/pi-sdk/index.js";
 import { createDefaultSettings } from "./session-defaults.js";
 import { computeHardTruncation } from "./compaction-utils.js";
-import { buildExtractiveCompressionSummary, cloneMessageForForkRetention, resolveContextConfig, shouldTriggerCompression, splitMessages, executeCompression } from "./context-compressor.js";
+import { CONTINUATION_PACK_MODE, buildExtractiveCompressionSummary, resolveContextConfig, shouldTriggerCompression, splitMessages, executeCompression } from "./context-compressor.js";
 import { callText } from "./llm-client.js";
 import { teardownSessionResources } from "./session-teardown.js";
 import { evaluateSessionHealth } from "./session-health.js";
@@ -38,7 +38,7 @@ import { getProviderPromptPatches } from "./provider-prompt-patches.js";
 import { prepareVisionInputForTextOnlyModel } from "./vision-prepare.js";
 import { computeContextUsageSnapshot } from "./context-usage-estimator.js";
 import { adaptVisualContextMessages } from "./visual-context-pipeline.js";
-import { buildMemoryRecallContext, injectMemoryRecallMessages } from "../lib/memory/recall.js";
+import { buildMemoryRecallContext, injectMemoryRecallMessages, shouldInjectMemoryRecallForMessages } from "../lib/memory/recall.js";
 import { normalizeProviderContextMessages } from "./provider-compat.js";
 import { modelSupportsDirectVideoInput, modelSupportsVideoInput } from "../shared/model-capabilities.js";
 import { MANUAL_CONTEXT_COMPRESSION_THRESHOLD } from "../shared/context-compression.js";
@@ -125,6 +125,21 @@ function normalizeSessionGoalMetrics(value) {
     }
   }
   return Object.keys(metrics).length ? metrics : null;
+}
+
+function normalizePromptPreviewVariables(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const variables = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (typeof raw === "string") {
+      variables[key] = raw;
+    } else if (raw == null) {
+      variables[key] = "";
+    } else {
+      variables[key] = String(raw);
+    }
+  }
+  return variables;
 }
 
 function elapsedMsForGoal(raw, createdAt, updatedAt, status) {
@@ -286,7 +301,7 @@ export function buildSessionGoalText(goal, { locale = getLocale() } = {}) {
       "本轮是普通推进轮，不是正式自动验收轮。你应完成必要实现、基础自检和候选交付；不要在普通轮里自行输出验收开场或展开一长串用户视角验收命令。",
       "普通代码检查只是基础层。若结果已到候选完成点，收束本轮，让运行底座随后启动正式验收。正式验收开始时，运行底座会发出一个可折叠的“验真”卡片，并注入专门的自动验收续跑。",
       "如果本轮已经成功启动端口、服务、预览或应用，并且下一步只是看界面是否可用，不要继续用 terminal_list / terminal_wait / terminal_read 循环巡检；收束本轮，把屏幕侧检查交给正式验收轮的使用电脑（computer 工具）。",
-      "正式验收轮会像用户一样打开、查看、点击、运行或操作结果；需要界面、网页、预览、Hanako 内部浏览器或桌面应用确认时，验收必须走使用电脑（computer 工具）。网页和 localhost 目标可以先用 Hanako 内置 browser 快速打开 URL，但随后要用使用电脑绑定 HanakoPro 的 Browser/内置浏览器窗口，让小鼠标归属在该窗口内完成可见或点击确认。",
+      "正式验收轮会像用户一样打开、查看、点击、运行或操作结果；需要界面、网页、预览、Hanako 内部浏览器或桌面应用确认时，验收必须走使用电脑（computer 工具）。网页和 localhost 目标可以先用 Hanako 内置 browser 快速打开 URL，但随后要用使用电脑绑定 HanakoPro 的 Browser/内置浏览器窗口，让 Computer Use 可视控制光标在该窗口内完成可见性或必要点击确认。",
       "验收开始只显形一次。模型不要再输出裸露的 `<验真>`、`<验收>`、`<mood>`、`<reflect>` 或同义标签来重复开场；若需要表达起念，只写在验收卡片或最终结论里。",
       "同一个入口、URL、文件路径、端口、服务地址或产物名只说一次；说过之后记入已播报集合，直接接工具动作或最终证据，不要换近义句复述。",
       "若下一句只是“已找到/已定位/已确认/现在打开/下一步检查 + 同一路径”，删掉这句并直接行动。",
@@ -318,7 +333,7 @@ export function buildSessionGoalText(goal, { locale = getLocale() } = {}) {
     "This is a normal progress turn, not the formal automatic acceptance turn. Finish the needed implementation, baseline checks, and candidate delivery; do not start a long user-perspective acceptance chain or output an acceptance opening in this normal turn.",
     "Ordinary code review is only the baseline. Once the result reaches a candidate completion point, close this turn so the runtime can start formal acceptance. The runtime will then emit one collapsible `Review` card and inject a dedicated automatic acceptance continuation.",
     "If this turn has successfully started a port, service, preview, or app, and the next step is only to see whether the UI works, do not keep cycling through terminal_list / terminal_wait / terminal_read in the normal turn; close the turn and leave screen-side checking to Computer Use, the computer tool, in the formal acceptance turn.",
-    "The formal acceptance turn will open, inspect, click, run, or operate the result as a user would. When UI, web, previews, Hanako's internal browser, or desktop behavior matters, acceptance must use Computer Use, the computer tool. Web and localhost targets may use Hanako's built-in browser tool to open the URL quickly, but then Computer Use must bind to HanakoPro's Browser/internal-browser window so the small cursor belongs inside that window for visible or click confirmation.",
+    "The formal acceptance turn will open, inspect, click, run, or operate the result as a user would. When UI, web, previews, Hanako's internal browser, or desktop behavior matters, acceptance must use Computer Use, the computer tool. Web and localhost targets may use Hanako's built-in browser tool to open the URL quickly, but then Computer Use must bind to HanakoPro's Browser/internal-browser window so the Computer Use visible control cursor remains inside that window for visibility or necessary click confirmation.",
     "Make acceptance visibly begin once. Do not output raw `<验真>`, `<验收>`, `<mood>`, `<reflect>`, or equivalent tags as another acceptance opening; if you need a felt start, put it in the acceptance card or in the final conclusion.",
     "Mention the same entrypoint, URL, file path, port, service address, or artifact name only once; then put it in the reported-object set and move directly to tool action or final evidence instead of paraphrasing it.",
     "If the next sentence is only found/located/confirmed/opening now/checking next plus the same path, delete it and act directly.",
@@ -370,7 +385,7 @@ const SESSION_GOAL_ACCEPTANCE_ASPECTS = [
     key: "runtime",
     terms: [/\bcli\b/i, "运行", "服务", "server", "端口", "命令", "npm", "pnpm", "yarn", "下载", "代理", "权限", "登录", "认证", "启动"],
     zhLabel: "运行",
-    zhText: "从真实命令、服务状态或权限入口走一遍，确认不是只停在文件存在。",
+    zhText: "复核真实命令、服务状态或权限入口，确认不止停在文件存在。",
     enLabel: "Runtime",
     enText: "Run the real command, service, or permission path instead of stopping at file existence.",
   },
@@ -467,7 +482,7 @@ function buildAcceptanceOpeningText({ isZh, objective, aspects }) {
     if (keys.has("web")) {
       return [
         subject,
-        "我会把它当成用户眼前的一块真实画布来看：先让页面或预览真的出现在屏幕上，再用鼠标走一遍关键处。",
+        "我会把它当成用户眼前的一块真实画布来看：先让页面或预览真的出现在屏幕上，再用指针交互确认关键路径。",
         "如果它只是静静亮着还不够，我会点一下、看一下回声，再决定能不能收束。",
       ].join("\n");
     }
@@ -481,8 +496,8 @@ function buildAcceptanceOpeningText({ isZh, objective, aspects }) {
     if (keys.has("runtime")) {
       return [
         subject,
-        "我会从真实运行的那条路进去，不只看文件或日志说了什么。",
-        "服务要醒着，入口要能到，跑完还要有能让人复现的证据。",
+        "我会沿真实运行链路复核，不只看文件或日志说了什么。",
+        "服务状态、入口可达性和可复现证据都要成立，才收束结论。",
       ].join("\n");
     }
     if (keys.has("artifact")) {
@@ -494,7 +509,7 @@ function buildAcceptanceOpeningText({ isZh, objective, aspects }) {
     }
     return [
       subject,
-      "我会站到用户手边，把主路重新走一遍。",
+      "我会从用户视角复核主路径。",
       "能看见、能操作、能复现，再把它收成一句有证据的话；不合，就回去修。",
     ].join("\n");
   }
@@ -561,12 +576,12 @@ function buildSessionGoalAutoReviewText(goal, { locale = getLocale(), computerAv
       "本轮验收侧重点（由目标推断）：",
       ...acceptanceFocusLines,
       "- 像用户一样打开、查看、点击、运行或操作结果。",
-      "- 如果涉及网页、localhost、预览 URL 或 dev server，打开页面只允许用 Hanako 内置浏览器（browser 工具）直接 navigate 到真实 URL；不要通过使用电脑去 Chrome/Safari/Safari Technology Preview/Firefox/Arc/Edge 地址栏里打字，也不要打开外部浏览器，除非目标明确要求外部浏览器。",
+      "- 如果涉及网页、localhost、预览 URL 或 dev server，打开页面只允许用 Hanako 内置浏览器（browser 工具）直接 navigate 到真实 URL；不要通过使用电脑在 Chrome/Safari/Safari Technology Preview/Firefox/Arc/Edge 地址栏输入 URL，也不要打开外部浏览器，除非目标明确要求外部浏览器。",
       "- 使用 Hanako 内置浏览器验收时，顺序固定为：browser.navigate 打开真实 URL → browser.show 显示内置浏览器 → computer.start 绑定 appId=\"com.hanakopro.app\" 且 windowTitle=\"Browser\" → computer.get_app_state 或一次必要点击确认 → session_goal complete/blocked。",
-      "- 对网页目标，browser 工具负责打开、读 DOM、点击页面元素；使用电脑只负责把小鼠标绑定到 HanakoPro 的 Browser/内置浏览器窗口并做可见性或必要点击确认，不要让使用电脑承担输入网址这件事。",
-      "- 如果涉及界面、网页、预览、Hanako 内部浏览器或桌面应用，验收的用户视角必须落到使用电脑（computer 工具）：把 Hanako 或内部浏览器当作本机应用窗口，用可见视野和必要的鼠标点击确认可见、可点、可用。",
-      "- 使用电脑验收期间，目标应用和小鼠标的绑定必须持续存在；如果用户最小化目标应用，继续后台验收，不要把小鼠标漂到桌面或其他应用上。用户恢复目标窗口时，应能立刻看到小鼠标仍在该应用内继续操作。",
-      "- 验收通过、阻塞或结束前，必须让使用电脑收束；调用 session_goal complete/blocked 后，运行底座会自动尝试关闭本轮使用电脑光标，不要继续留下小鼠标。",
+      "- 对网页目标，browser 工具负责打开、读 DOM、点击页面元素；使用电脑只负责把 Computer Use 可视控制光标绑定到 HanakoPro 的 Browser/内置浏览器窗口并做可见性或必要点击确认，不要让使用电脑承担输入网址这件事。",
+      "- 如果涉及界面、网页、预览、Hanako 内部浏览器或桌面应用，验收的用户视角必须落到使用电脑（computer 工具）：把 Hanako 或内部浏览器当作本机应用窗口，用可见视野和必要的指针交互确认可见、可点、可用。",
+      "- 使用电脑验收期间，Computer Use 会话与目标应用窗口的绑定必须持续存在；如果用户最小化目标应用，继续后台验收，不要让可视控制光标漂移到桌面或其他应用上。用户恢复目标窗口时，应能立刻看到控制光标仍在该应用内继续操作。",
+      "- 验收通过、阻塞或结束前，必须让使用电脑收束；调用 session_goal complete/blocked 后，运行底座会自动尝试关闭本轮 Computer Use 可视控制光标，不要继续留下控制光标。",
       ...(computerAvailable ? [] : [
         "- 当前会话没有可用的使用电脑（computer 工具）；不要用终端、browser 或静态检查替代屏幕侧验收。若目标需要界面/网页/桌面验收，调用 session_goal blocked 并说明需要启用使用电脑后再继续。",
       ]),
@@ -576,7 +591,7 @@ function buildSessionGoalAutoReviewText(goal, { locale = getLocale(), computerAv
       "- 发验收正文前先判断：这句话是否带来新事实、失败、选择请求或最终证据？若只是换个说法铺垫同一入口，删掉正文并调用工具。",
       "- 自动验收续跑里不要为了推进验收而调用 todo_write；todo_write 只在任务结构确实变化时使用，不作为验收进度心跳。",
       "- 验收工具必须串行：一次只发一个工具调用，看完结果再决定下一步；不要在同一轮并发发出 3 个、4 个工具调用来做验收。",
-      "- 优先使用最短可验证链路：必要时最多一次服务/产物状态确认 → 一次使用电脑实际检查 → 立刻 session_goal complete/blocked；避免 terminal_list、重复状态查询、循环 wait/read 等可省略或易卡住的前置动作。",
+      "- 优先使用最短可验证链路：必要时最多一次服务/产物状态确认 → 一次使用电脑实际检查 → 立刻 session_goal complete/blocked；避免 terminal_list、重复状态查询、循环 wait/read 等可省略或容易造成长等待的前置动作。",
       "- 简单目标只要一条证据链足以判断，就马上收束；不要为了“更完整”继续巡检无关路径。",
       "- 不要连续输出多段空泛的“继续验收”说明；每次说明后必须紧跟一个实际工具动作、session_goal 调用或明确结论。",
       "- 代码测试、类型检查和静态审查只是基础层，不能替代用户视角验收。",
@@ -599,10 +614,10 @@ function buildSessionGoalAutoReviewText(goal, { locale = getLocale(), computerAv
     "- Open, inspect, click, run, or operate the result as a user would.",
     "- If the goal involves a web page, localhost, preview URL, or dev server, opening the page must use Hanako's built-in browser, the browser tool, to navigate directly to the real URL. Do not use Computer Use to type the URL into Chrome/Safari/Safari Technology Preview/Firefox/Arc/Edge, and do not open an external browser unless the goal explicitly asks for one.",
     "- For Hanako built-in-browser acceptance, the fixed order is: browser.navigate to the real URL → browser.show → computer.start with appId=\"com.hanakopro.app\" and windowTitle=\"Browser\" → computer.get_app_state or one needed click → session_goal complete/blocked.",
-    "- For web targets, the browser tool opens, reads DOM, and clicks page elements; Computer Use only binds the small cursor to HanakoPro's Browser/internal-browser window for visible or necessary click confirmation. Do not make Computer Use type URLs.",
+    "- For web targets, the browser tool opens, reads DOM, and clicks page elements; Computer Use only binds the Computer Use visible control cursor to HanakoPro's Browser/internal-browser window for visibility or necessary click confirmation. Do not make Computer Use type URLs.",
     "- If UI, web, previews, Hanako's internal browser, or desktop behavior matters, user-perspective acceptance must land in Computer Use, the computer tool: treat Hanako or the internal browser as a local app window and use visible inspection plus any needed pointer interaction to confirm it is visible, clickable, and usable.",
-    "- During Computer Use acceptance, the target app and the small cursor must remain bound. If the user minimizes the target app, keep accepting in the background and do not let the cursor drift onto the desktop or another app. When the user restores the target window, they should immediately see the cursor still operating inside that app.",
-    "- Before acceptance passes, blocks, or ends, let Computer Use settle; after session_goal complete/blocked, the runtime will automatically try to close the Computer Use cursor for this review run. Do not leave the small cursor visible.",
+    "- During Computer Use acceptance, the Computer Use session and the target app window must remain bound. If the user minimizes the target app, keep accepting in the background and do not let the visible control cursor drift onto the desktop or another app. When the user restores the target window, they should immediately see the control cursor still operating inside that app.",
+    "- Before acceptance passes, blocks, or ends, let Computer Use settle; after session_goal complete/blocked, the runtime will automatically try to close the Computer Use visible control cursor for this review run. Do not leave the control cursor visible.",
     ...(computerAvailable ? [] : [
       "- Computer Use, the computer tool, is not available in this session. Do not substitute terminal commands, browser tools, or static checks for screen-side acceptance. If the goal needs UI/web/desktop acceptance, call session_goal blocked and explain that Computer Use must be enabled before continuing.",
     ]),
@@ -807,32 +822,15 @@ const MODEL_SWITCH_SUMMARY_MAX_BLOCK_CHARS = 1200;
 const MODEL_SWITCH_SUMMARY_MAX_TOTAL_CHARS = 24000;
 const HANA_COMPRESS_FORK_MARKER = "hana-compress-fork-marker";
 
-function countUserTurns(messages) {
-  return (Array.isArray(messages) ? messages : []).reduce(
-    (sum, message) => sum + (message?.role === "user" ? 1 : 0),
-    0,
-  );
-}
-
-export function splitMessagesForCompressFork(messages, contextConfig) {
-  const requestedProtectedTurns = Math.max(0, Number(contextConfig.recentTurnsProtected) || 0);
-  let split = splitMessages(messages, requestedProtectedTurns, contextConfig.protect);
-  if (split.compressible.length > 0) {
-    return { ...split, recentTurnsProtected: requestedProtectedTurns, adapted: false };
-  }
-
-  const totalUserTurns = countUserTurns(messages);
-  if (totalUserTurns <= 1 || requestedProtectedTurns < totalUserTurns) {
-    return { ...split, recentTurnsProtected: requestedProtectedTurns, adapted: false };
-  }
-
-  for (let protectedTurns = Math.max(1, totalUserTurns - 2); protectedTurns >= 1; protectedTurns -= 1) {
-    split = splitMessages(messages, protectedTurns, contextConfig.protect);
-    if (split.compressible.length > 0) {
-      return { ...split, recentTurnsProtected: protectedTurns, adapted: true };
-    }
-  }
-  return { ...split, recentTurnsProtected: 1, adapted: true };
+export function splitMessagesForCompressFork(messages, _contextConfig) {
+  const list = Array.isArray(messages) ? messages : [];
+  const retained = list.filter((message) => message?.role === "system");
+  return {
+    compressible: list.filter((message) => message?.role !== "system"),
+    retained,
+    recentTurnsProtected: 0,
+    adapted: true,
+  };
 }
 
 function setSessionAgentMessages(session, messages) {
@@ -1212,6 +1210,7 @@ export class SessionCoordinator {
     agentId: explicitAgentId = null,
     preserveAgentMemoryState = false,
     workspaceFolders = [],
+    initialPermissionMode: explicitInitialPermissionMode = null,
   } = {}) {
     const t0 = Date.now();
     const agent = explicitAgent
@@ -1341,7 +1340,7 @@ export class SessionCoordinator {
     }
     let initialPermissionMode = restore
       ? normalizeSessionPermissionMode(restoredPermissionMode)
-      : normalizeSessionPermissionMode(this._pendingPermissionMode || this._getDefaultPermissionMode());
+      : normalizeSessionPermissionMode(explicitInitialPermissionMode || this._pendingPermissionMode || this._getDefaultPermissionMode());
     this._pendingPermissionMode = null;
     let initialAccessMode = legacyAccessModeFromPermissionMode(initialPermissionMode);
     let initialPlanMode = isReadOnlyPermissionMode(initialPermissionMode);
@@ -1394,7 +1393,8 @@ export class SessionCoordinator {
       agentsFilesResult: agentsFilesResultSnapshot,
     };
 
-    // Memory 召回扩展：每次模型调用前按当前请求检索少量相关记忆。
+    // Memory 召回扩展：只在新用户回合按当前请求检索少量相关记忆。
+    // 工具结果续行不重复注入，避免旧任务记忆把普通问答带偏成无边界排查。
     const memoryRecallExtension = {
       path: "hana-memory-recall-context",
       tools: new Map(),
@@ -1405,6 +1405,7 @@ export class SessionCoordinator {
             async (event, ctx) => {
               try {
                 if (!frozenMemoryEnabled) return undefined;
+                if (!shouldInjectMemoryRecallForMessages(event.messages)) return undefined;
                 const sp = ctx.sessionManager?.getSessionFile?.() || sessionPathForMeta || null;
                 const recall = buildMemoryRecallContext({
                   agent,
@@ -1884,6 +1885,7 @@ export class SessionCoordinator {
           appendSystemPrompt: "",
           skillsPrompt: "{{skills}}",
         },
+        variables: {},
       };
     }
     const frozenMemoryEnabled = agent.memoryMasterEnabled !== false && memoryEnabled !== false;
@@ -1909,16 +1911,24 @@ export class SessionCoordinator {
       ? formatSkillsForPrompt(skillsResult.skills)
       : "";
     let systemPrompt = "";
+    let promptVariables = {};
     try {
-      systemPrompt = agent.buildSystemPrompt({
+      const promptDetails = agent.buildSystemPrompt({
         cwdOverride: effectiveCwd,
         forceMemoryEnabled: frozenMemoryEnabled,
         forceExperienceEnabled: frozenExperienceEnabled,
         appendSystemPrompt,
         skillsPrompt,
         includeRuntimeFoundation,
+        returnDetails: true,
         ...(promptComposer !== undefined ? { promptComposer } : {}),
       });
+      if (typeof promptDetails === "string") {
+        systemPrompt = promptDetails;
+      } else {
+        systemPrompt = promptDetails?.prompt || "";
+        promptVariables = normalizePromptPreviewVariables(promptDetails?.variables);
+      }
     } finally {
       agent.setMemoryEnabled(prevSessionMemoryEnabled);
     }
@@ -1936,6 +1946,7 @@ export class SessionCoordinator {
         appendSystemPrompt,
         skillsPrompt,
       },
+      variables: promptVariables,
     };
   }
 
@@ -3738,12 +3749,11 @@ export class SessionCoordinator {
     const msgs = sourceSession.agent?.state?.messages || [];
     if (msgs.length === 0) return { ok: false, error: "no messages" };
 
-    log.log(`[compressFork] source=${sourceSessionPath}, mode=${contextConfig.mode}, messages=${msgs.length}`);
+    const forkCompressionMode = CONTINUATION_PACK_MODE;
+    log.log(`[compressFork] source=${sourceSessionPath}, mode=${forkCompressionMode}, autoMode=${contextConfig.mode}, messages=${msgs.length}`);
 
-    const { compressible, retained, recentTurnsProtected, adapted } = splitMessagesForCompressFork(msgs, contextConfig);
-    if (adapted) {
-      log.log(`[compressFork] adapted recentTurnsProtected ${contextConfig.recentTurnsProtected} -> ${recentTurnsProtected}`);
-    }
+    const { compressible, retained } = splitMessagesForCompressFork(msgs, contextConfig);
+    log.log(`[compressFork] continuation pack input=${compressible.length}, retainedRaw=${retained.length}`);
     if (compressible.length === 0) return { ok: false, error: "no compressible messages" };
 
     // 选择压缩用模型
@@ -3780,10 +3790,9 @@ export class SessionCoordinator {
     try {
       summary = await executeCompression({
         messages: compressible,
-        mode: contextConfig.mode,
+        mode: forkCompressionMode,
         model: compressModel,
         generateFn,
-        customPrompt: contextConfig.customPrompt,
       });
     } catch (err) {
       log.error(`[compressFork] compression failed: ${err.message}`);
@@ -3804,19 +3813,21 @@ export class SessionCoordinator {
     // 创建新会话
     const cwd = sourceSession.sessionManager?.getCwd?.() || process.cwd();
     const memEnabled = agent.sessionMemoryEnabled !== false;
+    const sourcePermissionMode = this.getPermissionMode(sourceSessionPath);
     let newSessionPath;
     try {
       ({ sessionPath: newSessionPath } = await this.createSession(null, cwd, memEnabled, sourceSession.model, {
         agent,
         agentId,
         workspaceFolders: sourceEntry?.workspaceFolders || [],
+        initialPermissionMode: sourcePermissionMode,
       }));
     } catch (err) {
       log.error(`[compressFork] session creation failed: ${err.message}`);
       return { ok: false, error: `session creation failed: ${err.message}` };
     }
 
-    // 向新会话注入消息：摘要(user) + 固定回复(assistant) + retained
+    // 向新会话注入消息：接续包(user) + 固定回复(assistant)。
     const newSession = this.getSessionByPath(newSessionPath);
     if (!newSession?.sessionManager) {
       return { ok: false, error: "new session has no sessionManager" };
@@ -3824,7 +3835,7 @@ export class SessionCoordinator {
     const sm = newSession.sessionManager;
     const ts = Date.now();
 
-    // 1. 压缩摘要作为上下文 seed，前端通过 marker 显示分割线，不直接展示 seed 文本。
+    // 1. 接续包作为上下文 seed，前端通过 marker 显示分割线，不直接展示 seed 文本。
     const summaryEntryId = sm.appendMessage({
       role: "user",
       content: [{ type: "text", text: summary }],
@@ -3844,18 +3855,10 @@ export class SessionCoordinator {
         label: "上下文已压缩",
         sourceSessionPath,
         compressedMessageCount: compressible.length,
-        retainedMessageCount: retained.length,
-        mode: contextConfig.mode,
-      });
-    }
-
-    // 3. 保留的最近 N 轮消息
-    for (const m of retained) {
-      if (m.role === "system") continue; // system prompt 由新 session 自己生成
-      const retainedMessage = cloneMessageForForkRetention(m);
-      sm.appendMessage({
-        ...retainedMessage,
-        timestamp: retainedMessage.timestamp || (ts + 2),
+        retainedMessageCount: 0,
+        skippedSystemMessageCount: retained.length,
+        mode: forkCompressionMode,
+        autoMode: contextConfig.mode,
       });
     }
 

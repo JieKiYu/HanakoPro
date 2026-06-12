@@ -5,16 +5,131 @@
  * useEffect 注入代码块复制按钮。
  */
 
-import { memo, useRef, useEffect, useLayoutEffect } from 'react';
+import { memo, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
+import type { MouseEvent } from 'react';
 import { injectCopyButtons } from '../../utils/format';
 import { useMermaidDiagrams } from '../../hooks/use-mermaid-diagrams';
 import { splitGraphemes } from '../../utils/grapheme';
+import { extOfName } from '../../utils/file-kind';
+import { openFilePreview } from '../../utils/file-preview';
+import { useStore } from '../../stores';
 import styles from './Chat.module.css';
 
 interface Props {
   html: string;
   className?: string;
   tailFadeCount?: number;
+  sessionPath?: string;
+}
+
+const EXPLICIT_PROTOCOL_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
+const ABSOLUTE_WINDOWS_PATH_RE = /^[A-Za-z]:[\\/]/;
+const LINE_COLUMN_SUFFIX_RE = /^(.*?)(?::(\d+))(?::(\d+))?$/;
+
+function normalizePathSeparators(value: string): string {
+  return value.replace(/\\/g, '/');
+}
+
+function isAbsoluteLocalPath(value: string): boolean {
+  return value.startsWith('/') || ABSOLUTE_WINDOWS_PATH_RE.test(value);
+}
+
+function isFileLikeRelativePath(value: string): boolean {
+  if (!value || value.startsWith('#') || value.startsWith('?')) return false;
+  if (EXPLICIT_PROTOCOL_RE.test(value) || value.startsWith('//')) return false;
+  if (/\s/.test(value)) return false;
+  return value.includes('/') && !!extOfName(stripLineColumnSuffix(value).filePath);
+}
+
+function normalizeJoinedPath(value: string): string {
+  const normalized = normalizePathSeparators(value);
+  const prefixMatch = normalized.match(/^(?:[A-Za-z]:|\/)?/);
+  const prefix = prefixMatch?.[0] ?? '';
+  const rest = normalized.slice(prefix.length);
+  const parts: string[] = [];
+
+  for (const part of rest.split('/')) {
+    if (!part || part === '.') continue;
+    if (part === '..') {
+      if (parts.length > 0 && parts[parts.length - 1] !== '..') parts.pop();
+      else if (!prefix) parts.push(part);
+      continue;
+    }
+    parts.push(part);
+  }
+
+  if (!prefix) return parts.join('/');
+  if (prefix.endsWith('/')) return `${prefix}${parts.join('/')}`;
+  return parts.length ? `${prefix}/${parts.join('/')}` : prefix;
+}
+
+function stripLineColumnSuffix(raw: string): { filePath: string; line?: number; column?: number } {
+  const match = LINE_COLUMN_SUFFIX_RE.exec(raw);
+  if (!match) return { filePath: raw };
+  const filePath = match[1];
+  if (!extOfName(filePath)) return { filePath: raw };
+  return {
+    filePath,
+    line: Number(match[2]),
+    column: match[3] ? Number(match[3]) : undefined,
+  };
+}
+
+function decodeHrefPath(raw: string): string {
+  try {
+    return decodeURI(raw);
+  } catch {
+    return raw;
+  }
+}
+
+function filePathFromFileUrl(rawHref: string): string | null {
+  try {
+    const parsed = new URL(rawHref);
+    if (parsed.protocol !== 'file:') return null;
+    return decodeHrefPath(parsed.pathname);
+  } catch {
+    return null;
+  }
+}
+
+function sessionBasePath(sessionPath?: string): string | null {
+  if (!sessionPath) return null;
+  const state = useStore.getState();
+  return state.sessions.find(session => session.path === sessionPath)?.cwd || null;
+}
+
+function resolveMarkdownLocalHref(rawHref: string, sessionPath?: string): string | null {
+  const trimmed = rawHref.trim();
+  if (!trimmed || trimmed.startsWith('#')) return null;
+
+  const fileUrlPath = filePathFromFileUrl(trimmed);
+  if (fileUrlPath) return stripLineColumnSuffix(fileUrlPath).filePath;
+
+  const decoded = decodeHrefPath(trimmed);
+  const stripped = stripLineColumnSuffix(decoded);
+  if (isAbsoluteLocalPath(stripped.filePath)) return normalizeJoinedPath(stripped.filePath);
+
+  if (!isFileLikeRelativePath(decoded)) return null;
+
+  const basePath = sessionBasePath(sessionPath);
+  if (!basePath) return null;
+  return normalizeJoinedPath(`${basePath}/${stripped.filePath}`);
+}
+
+function handleExternalUrl(rawHref: string): boolean {
+  try {
+    const parsed = new URL(rawHref);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    window.platform?.openExternal?.(rawHref);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function shouldIgnoreClick(event: MouseEvent<HTMLDivElement>): boolean {
+  return event.defaultPrevented || event.button !== 0;
 }
 
 function shouldSkipTailFadeNode(node: Text): boolean {
@@ -303,9 +418,41 @@ function enhanceTableCellTooltips(root: HTMLElement): () => void {
   };
 }
 
-export const MarkdownContent = memo(function MarkdownContent({ html, className, tailFadeCount = 0 }: Props) {
+export const MarkdownContent = memo(function MarkdownContent({ html, className, tailFadeCount = 0, sessionPath }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const classes = className ? `md-content ${className}` : 'md-content';
+
+  const handleClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    if (shouldIgnoreClick(event)) return;
+
+    const target = event.target instanceof Element
+      ? event.target.closest('a[href]')
+      : null;
+    if (!(target instanceof HTMLAnchorElement) || !event.currentTarget.contains(target)) return;
+
+    const rawHref = target.getAttribute('href') || '';
+    if (!rawHref || rawHref.startsWith('#')) return;
+
+    if (handleExternalUrl(rawHref)) {
+      event.preventDefault();
+      return;
+    }
+
+    const filePath = resolveMarkdownLocalHref(rawHref, sessionPath);
+    if (filePath) {
+      event.preventDefault();
+      const label = target.textContent?.trim() || filePath.split('/').pop() || filePath;
+      void openFilePreview(filePath, label, extOfName(filePath) || '', {
+        origin: sessionPath ? 'session' : 'desk',
+        ...(sessionPath ? { sessionPath } : {}),
+      });
+      return;
+    }
+
+    if (!EXPLICIT_PROTOCOL_RE.test(rawHref)) {
+      event.preventDefault();
+    }
+  }, [sessionPath]);
 
   useLayoutEffect(() => {
     if (!ref.current) return;
@@ -328,6 +475,7 @@ export const MarkdownContent = memo(function MarkdownContent({ html, className, 
     <div
       ref={ref}
       className={classes}
+      onClick={handleClick}
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );

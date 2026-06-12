@@ -842,6 +842,12 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
         ss.hasToolCallThisProviderTurn = true;
         emitFileWritePrepare(event.assistantMessageEvent);
       } else if (sub === "error") {
+        if (isAbortLikeError(event.assistantMessageEvent.error)) {
+          ss.isAborted = true;
+          finishStreamingState(ss);
+          broadcastStreamingStopped(sessionPath, ss, { aborted: true, reason: "abort" });
+          return;
+        }
         ss.hasError = true;
         broadcast({ type: "error", message: event.assistantMessageEvent.error || "Unknown error", sessionPath });
         finishErroredStream(sessionPath, ss);

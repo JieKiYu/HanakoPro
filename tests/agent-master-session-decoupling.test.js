@@ -274,7 +274,9 @@ describe("agent.systemPrompt: master / per-session 解耦", () => {
     expect(prompt).not.toContain("# 器\n\n## 当前视野");
     expect(prompt).toContain("# 德\n\nORIGIN_CONDUCT");
     expect(prompt).toContain("# 器");
+    expect(prompt.indexOf("# 德\n\nORIGIN_CONDUCT")).toBeLessThan(prompt.indexOf("# 器"));
     expect(prompt).toContain("器是 HanakoPro 的工具行法");
+    expect(prompt.indexOf("# 德\n\n只看德")).toBeLessThan(prompt.indexOf("# 器"));
     expect(prompt).toContain("目标模式由运行底座注入隐藏的 `hana-session-goal-context` 续行上下文");
     expect(prompt).toContain("目标正文保持原样可见");
     expect(prompt).toContain("目标包在 `<objective>` 中");
@@ -324,6 +326,38 @@ describe("agent.systemPrompt: master / per-session 解耦", () => {
     expect(prompt).not.toContain("器是 HanakoPro 的工具行法");
     expect(prompt).not.toContain("先查询当前视野");
     expect(prompt).not.toContain("使用交付标记");
+
+    await agent.dispose();
+  });
+
+  it("origin prompt details expose expanded runtime variables for settings preview", async () => {
+    const agent = makeAgent(agentsDir, tmpDir);
+    await agent.init(() => {});
+    agent._config.locale = "zh-CN";
+
+    const details = agent.buildSystemPrompt({
+      forceMemoryEnabled: true,
+      cwdOverride: "/workspace/details",
+      returnDetails: true,
+      promptComposer: {
+        enabled: true,
+        mode: "origin",
+        origin: {
+          root: "# 核\n\n只看道核",
+          conduct: "# 德\n\n只看德",
+          includePersonality: false,
+          includeMood: false,
+          keepBlockIds: ["current-view", "session-files"],
+        },
+      },
+    });
+
+    expect(details.prompt).toContain("# 器");
+    expect(details.variables.runtimeFoundation).toContain("器是 HanakoPro 的工具行法");
+    expect(details.variables.workspace).toContain("当前工作目录：/workspace/details");
+    expect(details.variables.keepBlockIds).toContain("用户界面有一份可查询的当前视野");
+    expect(details.variables.keepBlockIds).toContain("SessionFile 表示和当前 session 相关的本地文件");
+    expect(details.variables.keepBlockIds).not.toContain("current-view");
 
     await agent.dispose();
   });
@@ -435,10 +469,10 @@ describe("agent.systemPrompt: master / per-session 解耦", () => {
     expect(prompt).toContain("AppleScript");
     expect(prompt).toContain("osascript");
     expect(prompt).toContain("If the user later minimizes the target app, do not treat that as failure or a stop signal");
-    expect(prompt).toContain("keep the target app and small cursor bound while continuing in the background");
-    expect(prompt).toContain("The cursor's ownership must persist");
+    expect(prompt).toContain("keep the Computer Use session bound to the target app window while continuing in the background");
+    expect(prompt).toContain("The visible control cursor's target-window binding must persist");
     expect(prompt).toContain("it must not drift onto the desktop or another app");
-    expect(prompt).toContain("when the user restores the target window they should immediately see the cursor still operating inside that app");
+    expect(prompt).toContain("when the user restores the target window they should immediately see the control cursor still operating inside that app");
 
     await agent.dispose();
   });

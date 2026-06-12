@@ -65,6 +65,35 @@ describe("session permission wrapper", () => {
     expect(result.details.executed).toBe(true);
   });
 
+  it("uses the runtime session path when deciding whether terminal_write needs approval", async () => {
+    const tool = makeTool("terminal_write");
+    const confirmStore = {
+      create: vi.fn(() => ({
+        confirmId: "confirm-tool-1",
+        promise: Promise.resolve({ action: "confirmed" }),
+      })),
+    };
+    const [wrapped] = wrapWithSessionPermission([tool], {
+      getPermissionMode: (sessionPath) => (
+        sessionPath === "/tmp/compressed-fork.jsonl" ? "operate" : "ask"
+      ),
+      getConfirmStore: () => confirmStore,
+      emitEvent: vi.fn(),
+    });
+
+    const result = await wrapped.execute(
+      "call-1",
+      { id: "term-1", text: "npm test" },
+      null,
+      null,
+      { sessionManager: { getSessionFile: () => "/tmp/compressed-fork.jsonl" } },
+    );
+
+    expect(confirmStore.create).not.toHaveBeenCalled();
+    expect(tool.execute).toHaveBeenCalledOnce();
+    expect(result.details.executed).toBe(true);
+  });
+
   it("does not run side-effect tools when ask mode is rejected", async () => {
     const tool = makeTool("write");
     const confirmStore = {

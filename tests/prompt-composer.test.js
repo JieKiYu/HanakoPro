@@ -47,9 +47,10 @@ describe("prompt composer", () => {
     const modules = getOriginPromptModuleTemplates(cfg);
     const content = composeOriginPromptTemplate(cfg);
 
-    expect(modules.map((module) => module.key)).toEqual(["核", "形", "时", "忆", "器", "令", "照", "德"]);
-    expect(modules.find((module) => module.key === "器")?.content).toBe("# 器\n\n{{runtimeFoundation}}\n\n{{skills}}");
-    expect(content).toContain("# 器\n\n{{runtimeFoundation}}\n\n{{skills}}");
+    expect(modules.map((module) => module.key)).toEqual(["核", "德", "形", "时", "忆", "器", "令", "照"]);
+    expect(modules.find((module) => module.key === "器")?.content).toBe("# 器\n\n{{runtimeFoundation}}\n\n{{skills}}\n\n{{keepBlockIds}}");
+    expect(content).toContain("# 器\n\n{{runtimeFoundation}}\n\n{{skills}}\n\n{{keepBlockIds}}");
+    expect(content.indexOf("# 德")).toBeLessThan(content.indexOf("# 器"));
     expect(content).not.toContain("<available_skills");
     expect(content).toBe(modules.map((module) => module.content.trim()).filter(Boolean).join("\n\n---\n\n"));
   });
@@ -419,6 +420,8 @@ describe("prompt composer", () => {
     expect(content).toContain("# 令\n\n本轮特别指令");
     expect(content).toContain(DEFAULT_ORIGIN_MOOD_PROMPT);
     expect(content).toContain("# 德\n\n道为根，德为行，器为用。");
+    expect(content.indexOf("# 德")).toBeLessThan(content.indexOf("# 器"));
+    expect(content.indexOf("Call current_status for UI references.")).toBeLessThan(content.indexOf("# 令"));
     expect(content).toContain("此刻用户所语为本。");
     expect(content).not.toMatch(/\n---\n\n此刻用户所语为本。/);
   });
@@ -451,7 +454,7 @@ describe("prompt composer", () => {
     expect(runtimeContent).toContain("# 器\n\n- 查询当前视野");
     expect(runtimeContent).toContain("目标模式由运行底座注入隐藏的 `hana-session-goal-context` 续行上下文");
     expect(runtimeContent).not.toContain("# 器\n\n# 器");
-    expect(runtimeContent).toMatch(/# 器[\s\S]*---[\s\S]*# 德/);
+    expect(runtimeContent).toMatch(/# 德[\s\S]*---[\s\S]*# 器/);
   });
 
   it("expands variables inside runtime blocks in the complete origin prompt", () => {
@@ -479,6 +482,8 @@ describe("prompt composer", () => {
 
     expect(content).toContain("配置文件位于 `/Users/test/.hanakopro/plugin-data/mcp/config.json`。");
     expect(content).not.toContain("{{mcpConfigPath}}");
+    expect(content.indexOf("# 德")).toBeLessThan(content.indexOf("# 器"));
+    expect(content.indexOf("# 器 · MCP")).toBeGreaterThan(content.indexOf("# 器"));
   });
 
   it("does not use legacy simpleContent as a hidden origin root source", () => {

@@ -7,7 +7,7 @@
  * 关键：server/node_modules 里的 .node 文件（native addon）也要签，
  * codesign --deep 不会递归进 node_modules 目录。
  */
-const { execSync } = require("child_process");
+const { execFileSync, execSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
@@ -15,6 +15,7 @@ const APP = path.resolve(process.argv[2] || process.env.HANAKOPRO_APP_PATH || "/
 const ENT = path.join(__dirname, "..", "desktop", "entitlements.mac.plist");
 const LOCAL_IDENTITY = process.env.HANAKOPRO_LOCAL_CODESIGN_IDENTITY || "HanakoPro Local Code Signing";
 const SKIP_LOCAL_IDENTITY = process.env.HANAKOPRO_DISABLE_LOCAL_CODESIGN_IDENTITY === "true";
+const LOCAL_KEYCHAIN = process.env.HANAKOPRO_LOCAL_CODESIGN_KEYCHAIN || getLoginKeychain();
 
 if (!fs.existsSync(APP)) {
   console.error(`App bundle not found: ${APP}`);
@@ -25,14 +26,49 @@ function shellQuote(value) {
   return `"${String(value).replace(/(["\\$`])/g, "\\$1")}"`;
 }
 
+function getLoginKeychain() {
+  try {
+    return execFileSync("security", ["login-keychain"], { encoding: "utf8" }).trim().replace(/^"|"$/g, "");
+  } catch (_) {
+    return "";
+  }
+}
+
 function removeLaunchPolicyXattrs() {
   execSync(`xattr -cr ${shellQuote(APP)}`, { stdio: "inherit" });
+}
+
+function findCertificateHashes() {
+  if (!LOCAL_KEYCHAIN) return [];
+  try {
+    const output = execFileSync("security", [
+      "find-certificate",
+      "-a",
+      "-c",
+      LOCAL_IDENTITY,
+      "-Z",
+      LOCAL_KEYCHAIN,
+    ], { encoding: "utf8" });
+    return [...output.matchAll(/^SHA-1 hash: ([A-Fa-f0-9]{40})$/gm)].map((match) => match[1]);
+  } catch (_) {
+    return [];
+  }
 }
 
 function resolveIdentity() {
   if (SKIP_LOCAL_IDENTITY) return "-";
   try {
-    const output = execSync("security find-identity -v -p codesigning", { encoding: "utf8" });
+    const output = execFileSync("security", [
+      "find-identity",
+      "-p",
+      "codesigning",
+      LOCAL_KEYCHAIN,
+    ], { encoding: "utf8" });
+    for (const hash of findCertificateHashes()) {
+      if (output.includes(hash) && output.includes(`"${LOCAL_IDENTITY}"`)) {
+        return hash;
+      }
+    }
     if (output.includes(`"${LOCAL_IDENTITY}"`)) {
       return LOCAL_IDENTITY;
     }
@@ -73,6 +109,9 @@ function removeCodeSignTempFiles() {
 // 1. 签 server 里的所有 Mach-O 文件（node binary + .node addons）
 console.log(`Signing ${APP}`);
 console.log(`Using signing identity: ${SIGN_IDENTITY === "-" ? "ad-hoc (-)" : SIGN_IDENTITY}`);
+if (SIGN_IDENTITY === "-") {
+  console.log(`Local identity unavailable; run npm run mac:ensure-local-cert only if you want to initialize ${LOCAL_IDENTITY}.`);
+}
 removeLaunchPolicyXattrs();
 removeCodeSignTempFiles();
 

@@ -161,7 +161,12 @@
     height: 100%;
     padding: 4px 0 0 6px;
     box-sizing: border-box;
-    background: #1e1e1e;
+    background: var(--terminal-pane-bg, #1e1e1e);
+    color: var(--terminal-pane-fg, #d4d4d4);
+}
+
+.xtermContainerInline {
+    padding: 6px 0 0 8px;
 }
 
 .empty,
