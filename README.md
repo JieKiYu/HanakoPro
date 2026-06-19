@@ -109,7 +109,7 @@
 
 # 当前状态
 
-默认维护分支是 `mac`。GitHub 仓库已经脱离 fork 状态，后续功能、问题和发布节奏以 `JieKiYu/HanakoPro` 为准。
+默认维护分支是 `main`。GitHub 仓库已经脱离 fork 状态，后续功能、问题和发布节奏以 `JieKiYu/HanakoPro` 为准。
 
 这个仓库仍保留 Hanako / OpenHanako 的代码历史和许可证；上面的清单只描述本仓库继续做过的改造。
 
