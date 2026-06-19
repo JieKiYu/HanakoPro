@@ -1,30 +1,46 @@
 <h1 align="center">HanakoPro</h1>
 
-<p align="center">基于官方 Hanako v0.194.2 的增强版 AI Agent 桌面应用</p>
+<p align="center">独立维护的 HanakoPro 桌面 AI Agent，面向本机工程、研究和长任务协作场景继续增强。</p>
 
 <p align="center">
-  <a href="https://github.com/ZS520L/HanakoPro/releases">下载 Release</a>
+  <a href="https://github.com/JieKiYu/HanakoPro/releases">下载 Release</a>
   ·
-  <a href="https://github.com/ZS520L/HanakoPro/issues">反馈问题</a>
+  <a href="https://github.com/JieKiYu/HanakoPro/issues">反馈问题</a>
   ·
   <a href="https://github.com/liliMozi/openhanako">上游项目 OpenHanako</a>
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License"></a>
-  <a href="https://github.com/liliMozi/openhanako"><img src="https://img.shields.io/badge/base-Hanako%20v0.194.2-purple.svg" alt="Base"></a>
-  <a href="https://github.com/ZS520L/HanakoPro/releases"><img src="https://img.shields.io/badge/platform-Windows-lightgrey.svg" alt="Platform"></a>
+  <a href="https://github.com/liliMozi/openhanako"><img src="https://img.shields.io/badge/base-OpenHanako%20%2F%20HanakoPro-purple.svg" alt="Base"></a>
+  <a href="https://github.com/JieKiYu/HanakoPro/releases"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey.svg" alt="Platform"></a>
 </p>
 
 ---
 
 # 项目说明
 
-HanakoPro 是我基于官方 Hanako v0.194.2 分支源码开发的增强版本。
+HanakoPro 是一个独立维护的桌面 AI Agent 项目。本仓库已经从 GitHub fork 关系中脱离，后续功能、问题和发布节奏以 `JieKiYu/HanakoPro` 为准。
 
-这个仓库不是官方原版 Hanako，而是在保留原版 AI Agent、多工具调用、桌面端界面等基础能力的前提下，重点增强了日常使用和开发调试体验。
+项目历史上源自 OpenHanako / Hanako v0.194.2 以及早期 HanakoPro 的二次开发成果。当前版本在保留原有 AI Agent、多工具调用、桌面端界面、文件 Diff、终端日志、消息撤回、记忆系统和 Prompt 自定义等能力的基础上，继续围绕本机工程工作流做增强。
 
-当前重点面向 Windows 使用场景，主要改进集中在：文件修改可视化、终端运行日志查看、消息撤回、插话 / 打断体验、记忆系统、系统提示词与工具描述自定义、桌宠以及前端消息展示细节。
+当前维护重点集中在：macOS 本地构建与签名、目标模式验真、Codex CLI 插件、可见终端、Computer Use、插件管理、会话隔离、模型 / Provider 兼容、Prompt 编排和前端消息展示稳定性。
+
+## 我们在 HanakoPro 基础上的继续修改
+
+这一阶段的修改目标不是简单换壳，而是把 HanakoPro 调整成更适合长期本机任务执行和验证的桌面 Agent：
+
+- **macOS 本地构建与签名**：补齐 macOS 打包链路、Computer Use helper 构建、本地固定证书签名、notarization 跳过策略和本机可重复验证流程。
+- **目标模式与验真流程**：新增目标任务状态流转、目标输入入口、目标栏 UI、完成判定、验真提示词约束，以及遇到用户选择 / 确认时自动暂停的保护逻辑，避免任务未完成就进入验真。
+- **Codex CLI 插件**：内置 `codex-cli` 插件，可在插件页管理配置；目标验真中的命令级检查可以交给 Codex CLI 执行，并在 Hanako 的可见终端里实时展示过程。
+- **可见终端体验**：新增底部内联终端、终端会话绑定、终端高度和选择状态管理，让命令运行、Codex 验证和工具输出不再藏在后台。
+- **Computer Use 与屏幕验收**：增强 macOS Computer Use helper 的构建、启动、权限检测和打包验证；屏幕、窗口、点击等验收仍由 Hanako 的 Computer Use 能力负责。
+- **插件管理**：让内置插件和社区插件在设置页中更清晰地展示和配置，同时保护内置插件不被误删或误关。
+- **会话、浏览器与终端隔离**：修复跨会话浏览器状态串扰、后台浏览器窗口误弹、终端卡片和会话焦点不一致等问题。
+- **模型 / Provider 兼容**：增强 OpenAI 兼容接口、Responses 风格返回、模型同步、Provider 图标、图片生成和流式输出兼容处理。
+- **Prompt 与记忆系统**：继续强化 Hanako 的道经式 Prompt 编排、系统提示词分层、记忆召回和用户可控的记忆管理。
+- **消息渲染与交互细节**：修复 Markdown 溢出、表格滚动、工具块、思考块、文件修改卡片、输入区布局、撤回按钮显示时机等前端细节。
+- **稳定性与测试**：为目标模式、Computer Use、终端、Provider、消息解析、记忆、浏览器和打包脚本补充回归测试，降低后续迭代成本。
 
 # Vibe Coding 实践与 Agent 本质思考
 
@@ -256,7 +272,7 @@ AI 写入或编辑文件时，会以打字机效果逐步展示修改过程，�
 
 Windows 安装包支持选择安装路径，不再只能使用默认安装位置。
 
-## 相比官方 Hanako v0.194.2 的主要改动
+## 继承自早期 HanakoPro 的主要改动
 
 - 增加文件 Diff 展示。
 - 增加文件编辑打字机效果。
@@ -277,19 +293,13 @@ Windows 安装包支持选择安装路径，不再只能使用默认安装位置
 
 ## 下载
 
-请前往 Releases 下载 Windows 安装包：
+请前往 Releases 查看可用安装包：
 
 ```text
-https://github.com/ZS520L/HanakoPro/releases
+https://github.com/JieKiYu/HanakoPro/releases
 ```
 
-当前发布版本：
-
-```text
-HanakoPro v0.194.6
-```
-
-Windows 用户下载 `.exe` 安装包即可。
+如果当前还没有适合你系统的固定发布包，可以从源码运行，或按下方命令自行打包。
 
 > Windows SmartScreen 可能会提示未知发布者。如果你信任该版本，可以点击"更多信息" → "仍要运行"。这是未购买代码签名证书时的常见现象。
 
@@ -325,6 +335,14 @@ npm rebuild node-pty
 
 ## 自行打包
 
+macOS 本地打包命令：
+
+```bash
+npm run mac:pack:local
+```
+
+本地开发版会使用 `HanakoPro Local Code Signing` 进行自签名，适合个人测试和自用。公开分发仍需要 Apple Developer ID 签名和 notarization。
+
 Windows 打包命令：
 
 ```bash
@@ -342,15 +360,16 @@ npm run dist:win
 
 ## 与上游项目的关系
 
-HanakoPro 基于官方 Hanako v0.194.2 分支源码开发。
+本仓库是独立维护的 HanakoPro 项目，不是官方原版 Hanako，也不再是 GitHub fork 状态。代码历史和设计理念继承自 OpenHanako / Hanako v0.194.2 以及早期 HanakoPro 的二次开发。
 
-上游项目：
+相关项目：
 
 ```text
-https://github.com/liliMozi/openhanako
+OpenHanako: https://github.com/liliMozi/openhanako
+当前仓库: https://github.com/JieKiYu/HanakoPro
 ```
 
-本项目不是官方原版 Hanako 发布，功能、问题和维护节奏以本仓库为准。
+功能、问题和维护节奏以本仓库为准。
 
 ## 许可证
 
