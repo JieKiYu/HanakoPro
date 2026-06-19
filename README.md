@@ -1,327 +1,134 @@
 <h1 align="center">HanakoPro</h1>
 
-<p align="center">独立维护的 HanakoPro 桌面 AI Agent，面向本机工程、研究和长任务协作场景继续增强。</p>
+<p align="center">在 HanakoPro 基础上继续改造的桌面 AI Agent：道经提示词、可控记忆、目标模式、可见终端、macOS 本地运行。</p>
 
 <p align="center">
   <a href="https://github.com/JieKiYu/HanakoPro/releases">下载 Release</a>
   ·
   <a href="https://github.com/JieKiYu/HanakoPro/issues">反馈问题</a>
   ·
-  <a href="https://github.com/liliMozi/openhanako">上游项目 OpenHanako</a>
+  <a href="https://github.com/liliMozi/openhanako">OpenHanako</a>
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License"></a>
-  <a href="https://github.com/liliMozi/openhanako"><img src="https://img.shields.io/badge/base-OpenHanako%20%2F%20HanakoPro-purple.svg" alt="Base"></a>
+  <a href="https://github.com/JieKiYu/HanakoPro"><img src="https://img.shields.io/badge/focus-Hanako%20customization-purple.svg" alt="Focus"></a>
   <a href="https://github.com/JieKiYu/HanakoPro/releases"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey.svg" alt="Platform"></a>
 </p>
 
 ---
 
-# 项目说明
-
-HanakoPro 是一个独立维护的桌面 AI Agent 项目。本仓库已经从 GitHub fork 关系中脱离，后续功能、问题和发布节奏以 `JieKiYu/HanakoPro` 为准。
+# 项目定位
 
-项目历史上源自 OpenHanako / Hanako v0.194.2 以及早期 HanakoPro 的二次开发成果。当前版本在保留原有 AI Agent、多工具调用、桌面端界面、文件 Diff、终端日志、消息撤回、记忆系统和 Prompt 自定义等能力的基础上，继续围绕本机工程工作流做增强。
+这个 README 只介绍本仓库在 HanakoPro 基础上继续做的改造，不复述原 HanakoPro 自带功能。
 
-当前维护重点集中在：macOS 本地构建与签名、目标模式验真、Codex CLI 插件、可见终端、Computer Use、插件管理、会话隔离、模型 / Provider 兼容、Prompt 编排和前端消息展示稳定性。
+改造目标很明确：让 HanakoPro 更适合长期个人使用和本机工程协作。重点不是把 AI Agent 包装得更神秘，而是让它的提示词、记忆、目标、工具调用和运行过程都更可控、更可观察、更容易验证。
 
-## 我们在 HanakoPro 基础上的继续修改
+# 改造清单
 
-这一阶段的修改目标不是简单换壳，而是把 HanakoPro 调整成更适合长期本机任务执行和验证的桌面 Agent：
+## 道经提示词与模型行为
 
-- **macOS 本地构建与签名**：补齐 macOS 打包链路、Computer Use helper 构建、本地固定证书签名、notarization 跳过策略和本机可重复验证流程。
-- **目标模式与验真流程**：新增目标任务状态流转、目标输入入口、目标栏 UI、完成判定、验真提示词约束，以及遇到用户选择 / 确认时自动暂停的保护逻辑，避免任务未完成就进入验真。
-- **Codex CLI 插件**：内置 `codex-cli` 插件，可在插件页管理配置；目标验真中的命令级检查可以交给 Codex CLI 执行，并在 Hanako 的可见终端里实时展示过程。
-- **可见终端体验**：新增底部内联终端、终端会话绑定、终端高度和选择状态管理，让命令运行、Codex 验证和工具输出不再藏在后台。
-- **Computer Use 与屏幕验收**：增强 macOS Computer Use helper 的构建、启动、权限检测和打包验证；屏幕、窗口、点击等验收仍由 Hanako 的 Computer Use 能力负责。
-- **插件管理**：让内置插件和社区插件在设置页中更清晰地展示和配置，同时保护内置插件不被误删或误关。
-- **会话、浏览器与终端隔离**：修复跨会话浏览器状态串扰、后台浏览器窗口误弹、终端卡片和会话焦点不一致等问题。
-- **模型 / Provider 兼容**：增强 OpenAI 兼容接口、Responses 风格返回、模型同步、Provider 图标、图片生成和流式输出兼容处理。
-- **Prompt 与记忆系统**：继续强化 Hanako 的道经式 Prompt 编排、系统提示词分层、记忆召回和用户可控的记忆管理。
-- **消息渲染与交互细节**：修复 Markdown 溢出、表格滚动、工具块、思考块、文件修改卡片、输入区布局、撤回按钮显示时机等前端细节。
-- **稳定性与测试**：为目标模式、Computer Use、终端、Provider、消息解析、记忆、浏览器和打包脚本补充回归测试，降低后续迭代成本。
+- 将 Hanako 的系统提示词改造成更贴近“道经 / 道 Agent”风格的分层结构。
+- 保留 `agentName`、`userName`、工具、记忆、项目上下文等变量化拼装能力，同时减少模板之间互相覆盖造成的气口稀释。
+- 修复 prompt commentary、`message_end`、`mood`、`pulse` 等结构化标签泄漏到聊天正文的问题。
+- 修复提示词编辑页保存、展示和测试覆盖，让系统提示词修改更可控。
+- 补齐 GPT-5.5 / K+ 等模型能力识别，支持 `xhigh` 等更高推理档位，不再被错误降级。
 
-# Vibe Coding 实践与 Agent 本质思考
+## 可控记忆系统
 
-## 一、Vibe Coding 体验
+- 重新设计 Hanako 记忆架构，区分钉、络、镜、笺四层记忆。
+- 增加动态记忆召回：只在当前任务相关时注入少量记忆，避免把整段历史长期塞进系统提示词。
+- 区分“使用记忆”和“生成记忆”，让用户可以分别控制是否读取旧记忆、是否把当前会话写入未来记忆。
+- 改造记忆页说明，把原本偏教程式的说明换成“记忆像镜子，不像仓库”的产品表达。
+- 为记忆召回、记忆开关、会话级记忆状态补充测试。
 
-**Vibe Coding** 是一种沉浸式编程范式：开发者只需关注最终效果，无需关注实现细节，代码生成与调整全部交由 AI 完成。
+## 目标模式
 
-本次二次开发全程采用 Vibe Coding，未手动修改一行代码。令人意外的是，即便在这种"只动口不动手"的模式下，仍然学到了很多东西。以下分享一些观察：
+- 新增类似 Codex 的 Goal 模式，让每个会话可以有一个明确目标。
+- 目标作为会话级状态持久化，支持 `active`、`complete`、`blocked` 等状态。
+- 在输入区展示当前目标，不需要依赖 slash command 才能知道当前任务方向。
+- 将目标注入当前会话上下文，让模型围绕目标持续推进。
+- 增加目标完成后的自动验真流程，要求模型在宣布完成前进行检查。
+- 修复目标结束态、底部空间、目标栏布局和目标继续执行时的多处边界问题。
+- 遇到需要用户选择、确认或补充信息的场景时，目标会暂停，不再提前进入验真。
 
-### 人的定位：需求提出者 + 验收者
+## 可见终端与本机运行
 
-Vibe Coding 中，人的角色并没有消失，而是上移到了两个关键环节：
+- 修复 macOS 上右上角终端按钮打不开或行为不符合本机习惯的问题。
+- 支持在没有 AI 终端会话时打开本机 Ghostty。
+- 优化内置终端窗口的 macOS 样式，避免 Windows 风格关闭按钮和 macOS 红黄绿窗口按钮冲突。
+- 新增底部内联终端，让工具执行、命令输出和长任务运行过程能在对话界面里持续观察。
+- 增强终端会话选择、终端高度、终端卡片、实时输出和中断体验。
 
-1. **提需求**：既需要精准捕捉使用痛点，又需要能够清晰描述。我的提示词没有特殊设计，也未做二次优化，长度一般在 50 字左右，复杂场景可到 500 字。原则就一条：**把需求描述清楚**。
-2. **验收**：判断生成结果是否满足预期，发现偏差并指出修正方向。
+## macOS 本地化与打包
 
-### 案例：上下文压缩功能的需求描述
+- 新增 macOS 本地构建链路，支持在本机稳定打出 `HanakoPro.app`。
+- 增加 `mac:ci`、`mac:pack:local` 等脚本，固定 Node / npm 运行环境，减少原生模块 ABI 问题。
+- 增加 `HanakoPro Local Code Signing` 本地签名流程，避免每次打包都落到 ad-hoc 签名。
+- 修复主题运行时代码没有打进 app 包导致设置页主题切换失败的问题。
+- 增强 Computer Use helper 的构建、安装、签名和权限检测流程。
+- 明确本地包和公开分发包的边界：本地自签适合个人使用，公开分发仍需要 Developer ID 和 notarization。
 
-以"上下文压缩"功能为例，一次合格的需求描述需要覆盖以下维度：
+## 浏览器与 Computer Use 稳定性
 
-| 维度 | 需要说明的内容 |
-|---|---|
-| **前端·设置页** | 控件类型、布局样式、交互文案 |
-| **后端逻辑** | 报文如何处理、压缩策略 |
-| **交互流程** | 点击压缩后触发什么逻辑、状态如何流转 |
-| **前端表现** | 压缩过程中 UI 反馈、完成后结果展示 |
-| **测试验证** | 如何确认压缩效果符合预期 |
+- 移除对话消息底部多余的浏览器跳转块，同时保留侧边栏浏览器入口和浏览器工具能力。
+- 修复主窗口恢复时误弹出后台浏览器窗口的问题。
+- 修复不同项目 / 会话之间浏览器页面和状态串扰的问题。
+- 将浏览器截图、缩略图和视觉捕获改为隐藏窗口路径，避免验证过程污染用户正在看的浏览器页面。
+- 增强空截图、截图超时、缩略图轮询和浏览器状态广播的边界处理。
+- 改进 macOS Computer Use daemon 冷启动、权限探测和 helper 安装判断。
 
-可以看到，对需求提出者的要求并不低。**Vibe Coding 降低的是编码门槛，而非思考门槛**。
+## 模型、Provider 与多媒体
 
-### 核心收获
+- 改进模型同步和 Provider 兼容，减少模型列表、推理档位、多媒体模型识别不一致的问题。
+- 增加 OpenAI Responses 兼容处理和相关回放测试。
+- 优化图片模型识别，让 Seedream、DALL-E、Imagen、Flux、`gpt-image-*` 等模型更自然地进入多媒体配置。
+- 增加 Provider 图标、模型添加入口和多媒体页可发现性。
+- 修复带图片历史会话继续对话时的 502、图片引用替换和渲染提示体验问题。
 
-最关键的一点：**不再关注代码细节后，反而有更多精力去触碰更本质的东西。** 当实现层面的噪音被屏蔽，人的注意力自然转向架构、交互逻辑和设计意图。当然，这或许和个人的思考习惯有关，但方向值得关注。
+## 插件与 Codex CLI 验真
 
----
+- 正在推进内置 `codex-cli` 插件，让它可以在 Hanako 插件页里配置。
+- 设计并实现命令级验真任务交给 Codex CLI 执行的路径，目标是让用户能实时看到 Codex 在终端里做验证。
+- Codex CLI 负责命令、构建、测试、文件和运行时检查；屏幕、窗口、点击等验收仍由 Hanako 的 Computer Use 负责。
+- 这部分目前仍在本地工作区继续验证，正式合入前以代码状态为准。
 
-## 二、对 Agent 的祛魅
+## 前端体验与消息渲染
 
-### 本质不过是一段 HTTP 请求
+- 修复 Assistant Markdown 溢出、长表格撑破布局、表格滚动条不可见等问题。
+- 优化 Markdown 表格配色、代码单元格、自动尺寸、裁剪和 tooltip。
+- 改进思考块、工具块、终端卡片、文件修改卡片和输入区布局的稳定性。
+- 修复撤回按钮在任务进行中、目标暂停中等状态下的显示时机。
+- 优化模型选择器、输入区布局、会话列表、设置页视觉和暗色 / 主题相关细节。
 
-下面是一段 DeepSeek 兼容 OpenAI 格式的完整请求报文：
+## 稳定性与回归测试
 
-```json
-{
-  "model": "deepseek-v4-pro",
-  "messages": [
-    {
-      "role": "system",
-      "content": "You are running on the OpenHanako platform, ..."
-    },
-    {
-      "role": "user",
-      "content": [
-        {
-          "type": "text",
-          "text": "你好"
-        }
-      ]
-    }
-  ],
-  "stream": true,
-  "stream_options": {
-    "include_usage": true
-  },
-  "store": false,
-  "tools": [
-    {
-      "type": "function",
-      "function": {
-        "name": "read",
-        "description": "Read the contents of a file...",
-        "parameters": { ... }
-      }
-    }
-  ]
-}
-```
+- 为目标模式、会话状态、终端、浏览器、Computer Use、Provider、Prompt、记忆、消息解析和打包脚本补充测试。
+- 增加针对 macOS 本地打包、签名、Computer Use helper 和主题资源的构建边界检查。
+- 修复多轮迭代中发现的聊天流式输出、结构化标签、上下文压缩、图片生成、表格渲染和会话切换问题。
 
-这就是最本质的东西。无论前端是 Agent IDE 还是 CLI 终端，无论界面多么丰富美观，无论系统架构多么复杂，后端最终做的事情只有一件：**整理上下文，拼接成一次 API 请求，发送给模型**。
+# 当前状态
 
-那么，不同 Agent 产品之间的效果差异究竟来自哪里？答案落在两个关键变量上：
+默认维护分支是 `mac`。GitHub 仓库已经脱离 fork 状态，后续功能、问题和发布节奏以 `JieKiYu/HanakoPro` 为准。
 
-### 关键变量一：System Prompt（系统提示词）
+这个仓库仍保留 Hanako / OpenHanako 的代码历史和许可证；上面的清单只描述本仓库继续做过的改造。
 
-系统提示词在很大程度上决定了后续 Assistant 回复的风格、语气和行为倾向。可以说，**整个对话上下文的基调和边界，是由系统提示词划定的。**
+# 从源码运行
 
-原因在于：用户的问题是千人千面的，无法预测；Assistant 的回复是模型生成的，无法直接修改。唯一可控的注入点，就是 System Prompt。
-
-因此，Pro 版本专门支持用户自定义系统提示词。**这是最大的亮点，据我所知，目前还没有其他产品这样做。**
-
-### 关键变量二：Tools（工具列表）
-
-工具能力直接决定了 Agent 的上限。一个直观的体验：OpenHanako 内置的 `web_search` 搜索能力有限，导致 Agent 反复调用工具却最终告知"没有完成任务"。DeepSeek 在 strict 模式下工具调用本身很稳定，但如果工具返回的结果质量不行，再稳定的调用也无济于事。
-
-工具链的质量，就是 Agent 能力的天花板。
-
-### Skills 与 MCP 的底层机制
-
-- **Skills 的相关信息** 是拼接到系统提示词中发送给模型的。本质上，Skills 是对 System Prompt 的结构化扩展，用于注入领域知识和行为规范。
-- **MCP 的工具列表** 则是放入 Tools 数组中发送的。MCP 扩展的是 Agent 的行动边界，而非思维边界。
-
-理解这两条路径的差异，就理解了 Agent 框架的核心设计：**System Prompt 管"怎么想"，Tools 管"怎么做"。**
-
-### 关于记忆机制的再思考
-
-记忆同样是拼接到系统提示词中注入上下文的。
-
-这里和原版的理念有分歧。原版强调"让用户感知不到 AI 的记忆过程"，但每次对话都在产生记忆，这些内容全部注入系统提示词真的合理吗？持续膨胀的系统提示词会带来几个问题：
-
-- 上下文污染：无关记忆挤占有效 token 配额
-- 行为偏差：过时或矛盾的记忆干扰当前判断
-- 用户失控：用户不知道 AI 记住了什么，也无法干预
-
-我的理念是：**让用户主动决定记住什么，并且在前端可视化呈现，方便用户查看和管理。** 记忆不应该是黑盒，而应该是用户可控的工具。
-
----
-
-## 三、关于 Pro 版本
-
-以上就是 Pro 版本新功能背后的设计思路。每项改动都有我的思考投入其中。
-
-感谢原版的开源精神，Pro 版本将继承这份精神继续走下去。也希望大家多多支持。
-
-
-# 主要特性
-
-## 支持Deepseek strict模式
-
-支持选择开启deepseek beta模式，提高工具调用稳定性（返回格式刚好能被agent解析，工具调用成功率几乎100%）。
-
-<p align="center">
-  <img src="image/deepseek官方对strict模式的介绍.png" width="100%" alt="deepseek官方对strict模式的介绍">
-</p>
-
-<p align="center">
-  <img src="image/支持strict模式提升工具调用准确性.png" width="100%" alt="支持strict模式提升工具调用准确性">
-</p>
-
-## 文件 Diff 展示
-
-HanakoPro 支持在对话中直接展示 AI 对文件的修改结果。新增、删除和变更内容会以 Diff 形式呈现，方便快速确认 AI 改了什么。
-
-<p align="center">
-  <img src="image/修改文件展示差异.png" width="100%" alt="修改文件展示差异">
-</p>
-
-## 文件编辑打字机效果
-
-AI 写入或编辑文件时，会以打字机效果逐步展示修改过程，实时反馈当前编辑位置和写入进度，让文件变更状态一目了然。
-
-<p align="center">
-  <img src="image/文件编辑打字机效果.png" width="100%" alt="文件编辑打字机效果">
-</p>
-
-## 内置终端实时日志
-
-支持在对话中嵌入终端运行结果，可以直接查看程序运行日志、命令输出和执行状态。终端输出支持流式更新，实时反映命令执行进度。
-
-<p align="center">
-  <img src="image/内置终端流式更新日志.png" width="100%" alt="内置终端流式更新日志">
-</p>
-
-## 消息撤回
-
-支持撤回消息，方便在误发送、上下文不合适或想重新组织指令时回退对话。
-
-## 插话体验优化
-
-在 AI 流式回复过程中，用户可以更自然地追加新指令。新的插话机制确保追加的指令被及时捕获和响应，不再需要等待当前回复完全结束再操作。
-
-## 打断体验优化
-
-全面优化打断逻辑：降低打断后会话不可用、上下文丢失或后续继续失败的概率。打断后会话能够安全恢复，上下文保持完整，后续对话可以正常衔接。
-
-## 前端消息展示优化
-
-优化对话流中的思考块、工具调用块、终端卡片和文件修改卡片的展示逻辑，减少内容错位、覆盖、换行丢失等问题。辅助视觉元素经过精细调整，整体界面一致性更好。
-
-<p align="center">
-  <img src="image/辅助视觉前端优化.png" width="100%" alt="辅助视觉前端优化">
-</p>
-
-## 记忆系统优化
-
-记忆前端展示效果全面升级：
-- **分条展示**：每条记忆独立呈现，方便逐一查看和管理
-- **快速跳转定位**：支持点击记忆项直接跳转到对应对话位置
-- **简化维护**：更直观的增删改操作，降低记忆管理成本
-
-<p align="center">
-  <img src="image/记忆前端优化.png" width="100%" alt="记忆前端优化">
-</p>
-
-<p align="center">
-  <img src="image/简化记忆系统.png" width="100%" alt="简化记忆系统">
-</p>
-
-## 系统提示词与工具描述自定义
-
-系统提示词和工具描述全量开放，支持用户自定义：
-- **系统提示词**：可以完全自定义 AI 的行为准则、角色设定和工作方式，不再受限于内置模板
-- **工具描述**：支持自定义每个工具的功能说明、参数描述和使用指引，让 AI 更精准地使用工具
-- **完全透明**：所有 Prompt 内容对用户可见，不存在隐藏指令
-- **性能可控**：自定义内容的长短和复杂度由用户自主决定
-
-<p align="center">
-  <img src="image/支持自定义系统提示词.png" width="100%" alt="支持自定义系统提示词">
-</p>
-
-<p align="center">
-  <img src="image/支持自定义工具描述.png" width="100%" alt="支持自定义工具描述">
-</p>
-
-## 桌宠
-
-新增桌面桌宠，让 AI 陪伴更自然地融入桌面环境：
-- **后台提问**：通过桌宠即可发起对话，不必始终停留在主界面
-- **形象自定义**：支持更换桌宠的视觉形象，打造个性化的 AI 伙伴
-
-<p align="center">
-  <img src="image/桌宠效果.png" width="100%" alt="桌宠效果">
-</p>
-
-<p align="center">
-  <img src="image/桌宠形象支持自定义.png" width="100%" alt="桌宠形象支持自定义">
-</p>
-
-## Windows 安装体验优化
-
-Windows 安装包支持选择安装路径，不再只能使用默认安装位置。
-
-## 继承自早期 HanakoPro 的主要改动
-
-- 增加文件 Diff 展示。
-- 增加文件编辑打字机效果。
-- 增加内置终端流式更新日志。
-- 增加消息撤回支持。
-- 优化插话体验：流式回复中可自然追加新指令。
-- 优化打断体验：降低打断后会话不可用、上下文丢失的概率。
-- 优化前端消息展示细节：思考块、工具块、终端卡片、文件编辑卡片展示更稳定。
-- 优化辅助视觉元素：整体界面一致性提升。
-- 记忆系统前端重构：支持分条展示、快速跳转定位、简化管理。
-- 系统提示词全量开放：支持用户自定义。
-- 工具描述全量开放：支持用户自定义。
-- 新增桌宠：支持后台提问、形象自定义。
-- 修复部分流式消息块顺序和覆盖问题。
-- 修复 Windows 终端输出中部分换行丢失的问题。
-- 改进 CRLF / CR / ANSI 控制符处理。
-- Windows 安装包支持修改安装路径。
-
-## 下载
-
-请前往 Releases 查看可用安装包：
-
-```text
-https://github.com/JieKiYu/HanakoPro/releases
-```
-
-如果当前还没有适合你系统的固定发布包，可以从源码运行，或按下方命令自行打包。
-
-> Windows SmartScreen 可能会提示未知发布者。如果你信任该版本，可以点击"更多信息" → "仍要运行"。这是未购买代码签名证书时的常见现象。
-
-## 从源码运行
-
-### 环境要求
+## 环境要求
 
 - Node.js 22 LTS 或更高版本。
 - npm 10 或更高版本。
-- Windows 建议安装 Visual Studio Build Tools 2022，并勾选 C++ 桌面开发组件。
 - 首次运行需要配置可用的模型服务，例如 OpenAI 兼容接口、DeepSeek、Ollama 等。
 
-### 启动开发版
+## 启动开发版
 
 ```bash
 npm ci
 npm run start:dev
 ```
 
-### 常见问题
-
-如果启动时报 `better-sqlite3.node was compiled against a different Node.js version`，说明原生模块和当前 Node ABI 不匹配，执行：
+如果启动时报 `better-sqlite3.node was compiled against a different Node.js version`，说明原生模块和当前 Node ABI 不匹配，可以执行：
 
 ```bash
 npm rebuild better-sqlite3
@@ -333,34 +140,27 @@ npm rebuild better-sqlite3
 npm rebuild node-pty
 ```
 
-## 自行打包
+# 自行打包
 
-macOS 本地打包命令：
+macOS 本地打包：
 
 ```bash
 npm run mac:pack:local
 ```
 
-本地开发版会使用 `HanakoPro Local Code Signing` 进行自签名，适合个人测试和自用。公开分发仍需要 Apple Developer ID 签名和 notarization。
+本机开发包会优先使用 `HanakoPro Local Code Signing` 自签名。公开分发仍需要 Apple Developer ID 签名和 notarization。
 
-Windows 打包命令：
+Windows 打包：
 
 ```bash
 npm run dist:win
 ```
 
-需要注意：Windows 打包配置会引用 `vendor/git-portable`。该目录体积较大，源码仓库默认不包含它。如果你要自己打包 Windows 安装包，需要自行准备 `vendor/git-portable`，或修改 `package.json` 中的 `build.win.extraResources` 配置。
+Windows 打包配置会引用 `vendor/git-portable`。该目录体积较大，源码仓库默认不包含它；如需自行打包 Windows 安装包，需要自行准备或调整 `package.json` 中的 `build.win.extraResources` 配置。
 
-如果打包时遇到 Node.js heap out of memory，可以临时提高 Node 堆内存：
+# 与上游项目的关系
 
-```powershell
-$env:NODE_OPTIONS="--max-old-space-size=8192"
-npm run dist:win
-```
-
-## 与上游项目的关系
-
-本仓库是独立维护的 HanakoPro 项目，不是官方原版 Hanako，也不再是 GitHub fork 状态。代码历史和设计理念继承自 OpenHanako / Hanako v0.194.2 以及早期 HanakoPro 的二次开发。
+本仓库是 `JieKiYu/HanakoPro` 独立维护版本，不是官方原版 Hanako，也不再是 GitHub fork 状态。
 
 相关项目：
 
@@ -369,9 +169,7 @@ OpenHanako: https://github.com/liliMozi/openhanako
 当前仓库: https://github.com/JieKiYu/HanakoPro
 ```
 
-功能、问题和维护节奏以本仓库为准。
-
-## 许可证
+# 许可证
 
 本项目沿用上游项目许可证：
 

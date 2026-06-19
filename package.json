@@ -2,7 +2,7 @@
   "name": "hanakopro",
   "version": "2026.5.3001",
   "type": "module",
-  "description": "Independent HanakoPro desktop AI agent with goal verification, Codex CLI, visible terminals, and macOS builds",
+  "description": "HanakoPro desktop AI agent customized with Dao prompts, controllable memory, goal mode, visible terminals, and macOS runtime support",
   "license": "Apache-2.0",
   "workspaces": [
     "packages/*"
